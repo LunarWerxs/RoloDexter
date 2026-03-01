@@ -34,9 +34,11 @@ I18N_DIR = ROOT / "src" / "rolodexter" / "_data" / "i18n"
 
 # ── Alias helpers ──────────────────────────────────────────────────────
 
+
 def _try_unidecode(text: str) -> str | None:
     try:
         from unidecode import unidecode
+
         result = unidecode(text).strip()
         return result if result and result != text else None
     except ImportError:
@@ -69,9 +71,11 @@ def _to_alias_variants(text: str) -> set[str]:
 
 # ── Translation ────────────────────────────────────────────────────────
 
+
 def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
     try:
         from deep_translator import GoogleTranslator
+
         results = GoogleTranslator(source="en", target=lang_code).translate_batch(phrases)
         return [r.strip() if r else None for r in results]
     except Exception:
@@ -79,6 +83,7 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
         for phrase in phrases:
             try:
                 from deep_translator import GoogleTranslator
+
                 r = GoogleTranslator(source="en", target=lang_code).translate(phrase)
                 out.append(r.strip() if r else None)
                 time.sleep(0.05)
@@ -89,25 +94,32 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
 
 # ── Field derivation ───────────────────────────────────────────────────
 
+
 def derive_field_phrases(master: dict) -> dict[str, str]:
     """Canonical field name -> human phrase to translate.
 
     first_name -> "first name".  Derived entirely from patterns.json["fields"].
     """
     skip = {
-        "utm_parameters", "metadata", "score", "owner", "tags",
-        "lead_status", "lifecycle_stage", "email_opt_out",
-        "created_at", "updated_at", "last_contacted",
-        "currency", "source",
+        "utm_parameters",
+        "metadata",
+        "score",
+        "owner",
+        "tags",
+        "lead_status",
+        "lifecycle_stage",
+        "email_opt_out",
+        "created_at",
+        "updated_at",
+        "last_contacted",
+        "currency",
+        "source",
     }
-    return {
-        canonical: canonical.replace("_", " ")
-        for canonical in master.get("fields", {})
-        if canonical not in skip
-    }
+    return {canonical: canonical.replace("_", " ") for canonical in master.get("fields", {}) if canonical not in skip}
 
 
 # ── Existing file loading ──────────────────────────────────────────────
+
 
 def load_existing(path: Path) -> dict:
     if path.exists():
@@ -120,6 +132,7 @@ def load_existing(path: Path) -> dict:
 
 
 # ── Per-language generation (incremental) ─────────────────────────────
+
 
 def generate_language(
     lang_code: str,
@@ -150,17 +163,14 @@ def generate_language(
         if force:
             to_translate = set(all_canonicals)
         else:
-            to_translate = {
-                c for c in all_canonicals
-                if c not in existing_fields or c in force_fields
-            }
+            to_translate = {c for c in all_canonicals if c not in existing_fields or c in force_fields}
 
         new_translations: dict[str, list[str]] = {}
         if to_translate:
             canonicals = sorted(to_translate)
             phrases = [field_phrases[c] for c in canonicals]
             results = _translate_batch(phrases, lang_code)
-            for canonical, translated in zip(canonicals, results):
+            for canonical, translated in zip(canonicals, results, strict=False):
                 if not translated:
                     continue
                 variants = _to_alias_variants(translated)
@@ -170,9 +180,7 @@ def generate_language(
 
         # Merge: keep existing entries that are still valid, overlay new translations,
         # prune fields no longer in patterns.json
-        merged: dict[str, list[str]] = {
-            k: v for k, v in existing_fields.items() if k in all_canonicals
-        }
+        merged: dict[str, list[str]] = {k: v for k, v in existing_fields.items() if k in all_canonicals}
         merged.update(new_translations)
 
         n_translated = len(to_translate)
@@ -205,6 +213,7 @@ def write_language_file(lang_data: dict, output_dir: Path) -> Path:
 
 
 # ── CLI ────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -287,8 +296,13 @@ def main() -> None:
         existing_path = output_dir / f"{file_code}.json"
         existing = load_existing(existing_path) if not args.force else {}
         data, n_new, n_reused = generate_language(
-            translate_code, lang_name, field_phrases, english_aliases,
-            master_version, file_code, existing,
+            translate_code,
+            lang_name,
+            field_phrases,
+            english_aliases,
+            master_version,
+            file_code,
+            existing,
             translate=do_translate,
             force=args.force,
             force_fields=force_fields,
@@ -300,7 +314,7 @@ def main() -> None:
         total_new = 0
         total_reused = 0
         for future in as_completed(futures):
-            lang_code, data, n_new, n_reused = future.result()
+            data, n_new, n_reused = future.result()
             total_new += n_new
             total_reused += n_reused
             fc = data["language_code"]
@@ -320,7 +334,9 @@ def main() -> None:
                 print(f"  [{fc}] {data['language_name']}: {detail}  -> {path.name}")
 
     action = "would update" if args.dry_run else "updated"
-    print(f"\nDone — {action} {len(target_langs)} file(s).  API calls: {total_new} fields translated, {total_reused} reused from cache.")
+    print(
+        f"\nDone — {action} {len(target_langs)} file(s).  API calls: {total_new} fields translated, {total_reused} reused from cache."
+    )
 
 
 if __name__ == "__main__":
