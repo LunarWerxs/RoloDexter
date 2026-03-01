@@ -1,21 +1,27 @@
 {
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Rolodexter master field pattern registry — the universal contact data truth table.",
   "fields": {
     "first_name": [
       "first_name", "firstname", "fname", "given_name", "givenname",
       "first", "forename", "f_name", "first_nm", "prenom", "nombre",
-      "christian_name", "nombre_de_pila"
+      "christian_name", "nombre_de_pila",
+      "given-name", "your_first_name", "your_firstname",
+      "prenume", "vorname"
     ],
     "last_name": [
       "last_name", "lastname", "lname", "family_name", "familyname",
       "surname", "last", "sname", "l_name", "last_nm", "apellido",
-      "family"
+      "family",
+      "family-name", "your_last_name", "your_lastname",
+      "nume", "nom", "nachname"
     ],
     "full_name": [
       "full_name", "fullname", "display_name", "displayname",
       "contact_name", "contact", "person_name", "customer_name",
-      "subscriber_name", "member_name", "client_name"
+      "subscriber_name", "member_name", "client_name",
+      "name", "your_name", "your-name",
+      "nume_complet", "nom_complet", "custname"
     ],
     "middle_name": [
       "middle_name", "middlename", "mname", "middle",
@@ -37,7 +43,9 @@
       "email", "email_address", "emailaddress", "e_mail",
       "mail", "primary_email", "work_email", "personal_email",
       "contact_email", "email1", "email2", "email_id",
-      "electronic_mail", "correo", "email_primary"
+      "electronic_mail", "correo", "email_primary",
+      "your_email", "your-email", "emailaddr",
+      "courriel", "adresa_email", "custemail", "user_email"
     ],
     "phone": [
       "phone", "phone_number", "phonenumber", "telephone", "tel",
@@ -47,7 +55,9 @@
       "mobile", "cell", "cellular", "mobile_phone", "cell_phone",
       "mobile_number", "cellphone", "mob", "cell_number",
       "personal_phone", "sms", "text_number", "numero",
-      "telefono", "tel_number"
+      "telefono", "tel_number",
+      "tel-national", "tel-local", "your_phone",
+      "telefon", "custtel"
     ],
     "home_phone": [
       "home_phone", "home_tel", "home_telephone",
@@ -71,13 +81,16 @@
       "employer", "business", "business_name", "firm", "corporation",
       "workplace", "account_name", "organisation", "corp", "enterprise",
       "entity", "agency", "institution", "establishment", "empresa",
-      "org_name", "company_org"
+      "org_name", "company_org",
+      "your_company", "your-company", "organization-name",
+      "companie", "société", "firma"
     ],
     "job_title": [
       "title", "job_title", "jobtitle", "position", "role",
       "designation", "job_role", "occupation", "job", "job_position",
       "work_title", "professional_title", "function", "titulo",
-      "cargo", "job_function"
+      "cargo", "job_function",
+      "organization-title", "your_title", "your-title"
     ],
     "department": [
       "department", "dept", "division", "team", "group", "unit",
@@ -85,13 +98,14 @@
     ],
     "industry": [
       "industry", "sector", "vertical", "market", "field_of_work",
-      "trade", "industria"
+      "trade", "industria", "business_type", "business_industry"
     ],
     "address_line1": [
       "address", "address1", "address_1", "line1", "line_1", "street",
       "street1", "street_address", "address_line_1", "addr1",
       "mailing_address", "street_address_1", "primary_address",
-      "mailing_street", "street_line1", "direccion"
+      "mailing_street", "street_line1", "direccion",
+      "street-address", "address-line1"
     ],
     "address_line2": [
       "address2", "address_2", "line2", "line_2", "street2", "apt",
@@ -101,13 +115,15 @@
     ],
     "city": [
       "city", "locality", "town", "city_name", "municipality",
-      "mailing_city", "suburb", "ciudad", "ville"
+      "mailing_city", "suburb", "ciudad", "ville",
+      "address-level2"
     ],
     "state": [
       "state", "province", "region", "administrative_area",
       "state_code", "state_province_region", "state_province",
       "county", "territory", "state_name", "mailing_state",
-      "state_region", "estado", "prefecture"
+      "state_region", "estado", "prefecture",
+      "address-level1"
     ],
     "postal_code": [
       "postal_code", "postalcode", "zip", "zipcode", "zip_code",
@@ -118,7 +134,8 @@
     "country": [
       "country", "country_code", "countrycode", "nation",
       "country_name", "country_region", "mailing_country",
-      "pais", "pays"
+      "pais", "pays",
+      "country-name"
     ],
     "full_address": [
       "full_address", "complete_address", "mailing_address_full",
@@ -128,7 +145,8 @@
     "website": [
       "website", "url", "web", "homepage", "site", "web_url",
       "website_url", "www", "domain", "web_address", "webpage",
-      "home_page", "sitio_web", "link"
+      "home_page", "sitio_web", "link",
+      "your_website", "company_website", "company_url"
     ],
     "linkedin": [
       "linkedin", "linkedin_url", "linkedin_profile", "li_url",
@@ -169,7 +187,9 @@
     "email_opt_out": [
       "email_opt_out", "hs_email_optout", "unsubscribed", "opt_out",
       "opted_out", "email_optout", "do_not_email", "email_consent",
-      "gdpr_consent", "marketing_consent"
+      "gdpr_consent", "marketing_consent",
+      "optin", "opt_in", "consent", "terms_accepted",
+      "privacy_consent", "subscribe_consent"
     ],
     "tags": [
       "tags", "tag", "labels", "label", "categories", "category",
@@ -178,7 +198,8 @@
     "source": [
       "source", "lead_source", "acquisition_source",
       "referral_source", "channel", "origin", "how_did_you_hear",
-      "campaign_source", "traffic_source", "referrer"
+      "campaign_source", "traffic_source", "referrer",
+      "referral", "how_heard"
     ],
     "utm_parameters": [
       "utm_parameters", "utm", "utm_data", "tracking_params",
@@ -187,6 +208,9 @@
     "birthday": [
       "birthday", "birth_date", "birthdate", "dob",
       "date_of_birth", "bday", "born_on", "fecha_nacimiento"
+    ],
+    "age": [
+      "age", "years_old", "your_age"
     ],
     "created_at": [
       "created_at", "created", "create_date", "date_created",
@@ -206,6 +230,24 @@
       "notes", "note", "comments", "comment", "description",
       "remarks", "memo", "additional_info", "bio", "about",
       "observaciones"
+    ],
+    "message": [
+      "message", "msg", "body", "inquiry", "enquiry", "question",
+      "feedback", "your_message", "your-message", "contact_message",
+      "message_body", "comment_body", "form_message",
+      "mesaj"
+    ],
+    "subject": [
+      "subject", "subject_line", "email_subject", "topic",
+      "regarding", "re", "your_subject", "contact_subject",
+      "reason", "reason_for_contact",
+      "subiect", "sujet"
+    ],
+    "company_size": [
+      "company_size", "team_size", "employees", "employee_count",
+      "headcount", "num_employees", "number_of_employees",
+      "staff_count", "org_size", "organization_size",
+      "workforce", "size"
     ],
     "revenue": [
       "revenue", "annual_revenue", "income", "arr", "mrr",
@@ -613,6 +655,81 @@
       "owner_id": "owner",
       "created_at": "created_at",
       "updated_at": "updated_at"
+    },
+    "form_bot": {
+      "first_name": "first_name",
+      "last_name": "last_name",
+      "full_name": "full_name",
+      "email": "email",
+      "phone": "phone",
+      "company": "company",
+      "title": "job_title",
+      "job_title": "job_title",
+      "address": "address_line1",
+      "city": "city",
+      "state": "state",
+      "zip": "postal_code",
+      "country": "country",
+      "website": "website",
+      "message": "message",
+      "subject": "subject",
+      "industry": "industry",
+      "department": "department",
+      "revenue": "revenue",
+      "company_size": "company_size",
+      "source": "source",
+      "linkedin": "linkedin",
+      "twitter": "twitter",
+      "instagram": "instagram",
+      "note": "message",
+      "comment": "message",
+      "body": "message",
+      "enquiry": "message",
+      "feedback": "message",
+      "organisation": "company",
+      "organization": "company",
+      "firm": "company",
+      "employer": "company",
+      "business": "company",
+      "mobile": "phone",
+      "cell": "phone",
+      "tel": "phone",
+      "postal": "postal_code",
+      "postcode": "postal_code",
+      "province": "state",
+      "region": "state",
+      "url": "website",
+      "domain": "website",
+      "position": "job_title",
+      "role": "job_title",
+      "occupation": "job_title",
+      "function": "job_title",
+      "age": "age"
+    },
+    "w3c_autocomplete": {
+      "given-name": "first_name",
+      "additional-name": "middle_name",
+      "family-name": "last_name",
+      "name": "full_name",
+      "honorific-prefix": "prefix",
+      "honorific-suffix": "suffix",
+      "nickname": "nickname",
+      "email": "email",
+      "tel": "phone",
+      "tel-national": "phone",
+      "tel-local": "phone",
+      "organization": "company",
+      "organization-title": "job_title",
+      "street-address": "address_line1",
+      "address-line1": "address_line1",
+      "address-line2": "address_line2",
+      "address-level2": "city",
+      "address-level1": "state",
+      "postal-code": "postal_code",
+      "country-name": "country",
+      "country": "country",
+      "url": "website",
+      "bday": "birthday"
     }
   }
 }

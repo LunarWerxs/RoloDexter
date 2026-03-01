@@ -1,10 +1,11 @@
-"""Complete test suite for rolodexter — 169 tests in one file."""
+"""Complete test suite for rolodexter — tests in one file."""
 
 from __future__ import annotations
 
 import pytest
 
 from rolodexter import (
+    CanonicalField,
     ContactMapper,
     ExactMatchStrategy,
     FuzzyMatchStrategy,
@@ -74,7 +75,7 @@ class TestLoading:
         assert len(registry.available_services) >= 15
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "1.0.0"
+        assert registry.version == "1.2.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
@@ -377,7 +378,7 @@ class TestMapPayload:
         assert len(val) == 2
 
     def test_match_rate(self, mapper: ContactMapper) -> None:
-        result = mapper.map_payload({"fname": "Jane", "garbage_xyz": "???"})
+        result = mapper.map_payload({"fname": "Jane", "zzz_qqqq_xxxx_jjj": "???"})
         assert result.match_rate == pytest.approx(0.5)
         assert result.matched_count == 1
         assert result.unmatched_count == 1
@@ -720,3 +721,530 @@ class TestEdgeCases:
         result = mapper.map_payload({"fname": "José", "surname": "García", "company": "Café Corp"})
         assert result.normalized["first_name"] == "José"
         assert result.normalized["last_name"] == "García"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  FORM BOT INTEGRATION TESTS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestNewCanonicalFields:
+    """Verify the 3 new fields added for form bot compatibility."""
+
+    def test_message_alias(self, registry: PatternRegistry) -> None:
+        assert registry.exact_lookup("message") == "message"
+        assert registry.exact_lookup("inquiry") == "message"
+        assert registry.exact_lookup("feedback") == "message"
+        assert registry.exact_lookup("your_message") == "message"
+
+    def test_subject_alias(self, registry: PatternRegistry) -> None:
+        assert registry.exact_lookup("subject") == "subject"
+        assert registry.exact_lookup("subject_line") == "subject"
+        assert registry.exact_lookup("reason_for_contact") == "subject"
+
+    def test_company_size_alias(self, registry: PatternRegistry) -> None:
+        assert registry.exact_lookup("company_size") == "company_size"
+        assert registry.exact_lookup("team_size") == "company_size"
+        assert registry.exact_lookup("employees") == "company_size"
+        assert registry.exact_lookup("headcount") == "company_size"
+
+
+class TestW3CAutocompleteAliases:
+    """W3C autocomplete tokens must resolve as first-class aliases."""
+
+    @pytest.mark.parametrize(
+        "token, expected",
+        [
+            ("given-name", "first_name"),
+            ("family-name", "last_name"),
+            ("address-level1", "state"),
+            ("address-level2", "city"),
+            ("country-name", "country"),
+            ("street-address", "address_line1"),
+            ("address-line1", "address_line1"),
+            ("tel-national", "phone"),
+        ],
+    )
+    def test_w3c_token_exact_lookup(self, registry: PatternRegistry, token: str, expected: str) -> None:
+        assert registry.exact_lookup(token) == expected
+
+
+class TestW3CAutocompleteServiceProfile:
+    """The w3c_autocomplete service profile for direct autocomplete attr lookup."""
+
+    @pytest.mark.parametrize(
+        "attr, expected",
+        [
+            ("given-name", "first_name"),
+            ("family-name", "last_name"),
+            ("name", "full_name"),
+            ("email", "email"),
+            ("tel", "phone"),
+            ("tel-national", "phone"),
+            ("organization", "company"),
+            ("organization-title", "job_title"),
+            ("street-address", "address_line1"),
+            ("address-line1", "address_line1"),
+            ("address-line2", "address_line2"),
+            ("address-level2", "city"),
+            ("address-level1", "state"),
+            ("postal-code", "postal_code"),
+            ("country-name", "country"),
+            ("url", "website"),
+            ("bday", "birthday"),
+            ("honorific-prefix", "prefix"),
+            ("honorific-suffix", "suffix"),
+            ("additional-name", "middle_name"),
+            ("nickname", "nickname"),
+        ],
+    )
+    def test_w3c_service_lookup(self, registry: PatternRegistry, attr: str, expected: str) -> None:
+        assert registry.service_lookup(attr, "w3c_autocomplete") == expected
+
+
+class TestFormBotServiceProfile:
+    """form_bot identity key → canonical field mapping."""
+
+    @pytest.mark.parametrize(
+        "identity_key, expected",
+        [
+            ("first_name", "first_name"),
+            ("last_name", "last_name"),
+            ("email", "email"),
+            ("phone", "phone"),
+            ("company", "company"),
+            ("title", "job_title"),
+            ("job_title", "job_title"),
+            ("address", "address_line1"),
+            ("city", "city"),
+            ("state", "state"),
+            ("zip", "postal_code"),
+            ("country", "country"),
+            ("website", "website"),
+            ("message", "message"),
+            ("subject", "subject"),
+            ("industry", "industry"),
+            ("department", "department"),
+            ("revenue", "revenue"),
+            ("company_size", "company_size"),
+            ("source", "source"),
+            # Extended form_bot overrides
+            ("note", "message"),
+            ("comment", "message"),
+            ("body", "message"),
+            ("enquiry", "message"),
+            ("feedback", "message"),
+            ("organisation", "company"),
+            ("organization", "company"),
+            ("firm", "company"),
+            ("employer", "company"),
+            ("business", "company"),
+            ("mobile", "phone"),
+            ("cell", "phone"),
+            ("tel", "phone"),
+            ("postal", "postal_code"),
+            ("postcode", "postal_code"),
+            ("province", "state"),
+            ("region", "state"),
+            ("url", "website"),
+            ("domain", "website"),
+            ("position", "job_title"),
+            ("role", "job_title"),
+            ("occupation", "job_title"),
+            ("function", "job_title"),
+            ("age", "age"),
+        ],
+    )
+    def test_form_bot_identity_key(self, registry: PatternRegistry, identity_key: str, expected: str) -> None:
+        assert registry.service_lookup(identity_key, "form_bot") == expected
+
+
+class TestFormBotFormDetectionPatterns:
+    """Simulate form bot's detectPurpose() regex patterns via rolodexter."""
+
+    def test_form_field_first_name(self, mapper: ContactMapper) -> None:
+        # form bot regex: /\b(first.?name|fname|given.?name|forename)\b/
+        for header in ["first_name", "fname", "given_name", "forename", "firstname"]:
+            m = mapper.identify(header)
+            assert m.canonical == "first_name", f"Failed for {header}"
+
+    def test_form_field_last_name(self, mapper: ContactMapper) -> None:
+        # form bot regex: /\b(last.?name|lname|surname|family.?name)\b/
+        for header in ["last_name", "lname", "surname", "family_name", "lastname"]:
+            m = mapper.identify(header)
+            assert m.canonical == "last_name", f"Failed for {header}"
+
+    def test_form_field_company(self, mapper: ContactMapper) -> None:
+        # form bot regex: /\b(company|organisation|organization|firm|employer|business)\b/
+        for header in ["company", "organization", "organisation", "firm", "employer", "business"]:
+            m = mapper.identify(header)
+            assert m.canonical == "company", f"Failed for {header}"
+
+    def test_form_field_message(self, mapper: ContactMapper) -> None:
+        # form bot regex: /\b(message|comment|body|inquiry|enquiry|question|note|feedback)\b/
+        for header in ["message", "inquiry", "enquiry", "feedback"]:
+            m = mapper.identify(header)
+            assert m.canonical == "message", f"Failed for {header}"
+
+    def test_form_field_job_title(self, mapper: ContactMapper) -> None:
+        # form bot regex: /\b(job.?title|position|role|occupation|function)\b/
+        for header in ["job_title", "position", "designation"]:
+            m = mapper.identify(header)
+            assert m.canonical == "job_title", f"Failed for {header}"
+
+    def test_form_field_address(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("address").canonical == "address_line1"
+
+    def test_form_field_website(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("website").canonical == "website"
+
+    def test_form_field_subject(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("subject").canonical == "subject"
+
+    def test_form_field_industry(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("industry").canonical == "industry"
+
+    def test_form_field_department(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("department").canonical == "department"
+
+    def test_form_field_revenue(self, mapper: ContactMapper) -> None:
+        assert mapper.identify("revenue").canonical == "revenue"
+
+    def test_form_field_company_size(self, mapper: ContactMapper) -> None:
+        for header in ["company_size", "team_size", "employees", "headcount"]:
+            m = mapper.identify(header)
+            assert m.canonical == "company_size", f"Failed for {header}"
+
+
+class TestFormBotIdentityTranslation:
+    """Translate form_bot identity payloads to/from other services."""
+
+    def test_formbot_to_hubspot(self, mapper: ContactMapper) -> None:
+        identity = {
+            "first_name": "Amber",
+            "last_name": "Maccione",
+            "email": "amber@cognitutor.com",
+            "company": "CogniTutor",
+            "title": "Principal",
+            "phone": "321-460-8272",
+            "address": "2502 Lawler Ln",
+            "city": "Deltona",
+            "state": "FL",
+            "zip": "32738",
+        }
+        hs = mapper.translate(identity, from_service="form_bot", to_service="hubspot")
+        assert any(v == "Amber" for v in hs.values())
+        assert any(v == "Maccione" for v in hs.values())
+        assert any(v == "amber@cognitutor.com" for v in hs.values())
+
+    def test_formbot_to_mailchimp(self, mapper: ContactMapper) -> None:
+        identity = {
+            "first_name": "Loni",
+            "last_name": "Lebanoff",
+            "email": "loni@cognitutor.com",
+            "company": "CogniTutor",
+        }
+        mc = mapper.translate(identity, from_service="form_bot", to_service="mailchimp")
+        assert any(v == "Loni" for v in mc.values())
+        assert any(v == "loni@cognitutor.com" for v in mc.values())
+
+    def test_formbot_full_identity_mapping(self, mapper: ContactMapper) -> None:
+        """Full identity with form_bot service should map all fields."""
+        identity = {
+            "first_name": "Amber",
+            "last_name": "Maccione",
+            "email": "amber@cognitutor.com",
+            "company": "CogniTutor",
+            "title": "Principal",
+            "phone": "321-460-8272",
+            "address": "2502 Lawler Ln",
+            "city": "Deltona",
+            "state": "FL",
+            "zip": "32738",
+            "message": "Please add me to your mailing list.",
+        }
+        result = mapper.map_payload(identity, service="form_bot")
+        assert result.normalized["first_name"] == "Amber"
+        assert result.normalized["last_name"] == "Maccione"
+        assert result.normalized["email"] == "amber@cognitutor.com"
+        assert result.normalized["company"] == "CogniTutor"
+        assert result.normalized["job_title"] == "Principal"
+        assert result.normalized["phone"] == "3214608272"
+        assert result.normalized["address_line1"] == "2502 Lawler Ln"
+        assert result.normalized["city"] == "Deltona"
+        assert result.normalized["state"] == "FL"
+        assert result.normalized["postal_code"] == "32738"
+        assert result.normalized["message"] == "Please add me to your mailing list."
+        assert result.unmatched_count == 0
+
+
+class TestFormBotAutocompleteWorkflow:
+    """Simulate how form bot would use rolodexter for autocomplete attributes."""
+
+    def test_autocomplete_attr_to_identity_key(self) -> None:
+        """Given an HTML autocomplete attr, resolve to form_bot identity key."""
+        mapper = ContactMapper()
+        reg = mapper.registry
+
+        # Simulate: form has autocomplete="given-name", map to canonical, then to form_bot key
+        canonical = reg.service_lookup("given-name", "w3c_autocomplete")
+        assert canonical == "first_name"
+
+        # Now get the form_bot identity key for this canonical
+        bot_reverse = reg.get_reverse_mapping("form_bot")
+        identity_key = bot_reverse.get(canonical)
+        assert identity_key == "first_name"
+
+    def test_full_autocomplete_chain(self) -> None:
+        """Full chain: autocomplete attr → canonical → form_bot identity key."""
+        mapper = ContactMapper()
+        reg = mapper.registry
+        bot_reverse = reg.get_reverse_mapping("form_bot")
+
+        test_cases = {
+            "given-name": "first_name",
+            "family-name": "last_name",
+            "email": "email",
+            "tel": "phone",
+            "organization": "company",
+            "organization-title": "title",
+            "street-address": "address",
+            "address-level2": "city",
+            "address-level1": "state",
+            "postal-code": "zip",
+            "country-name": "country",
+            "url": "website",
+        }
+        for attr, expected_identity_key in test_cases.items():
+            canonical = reg.service_lookup(attr, "w3c_autocomplete")
+            assert canonical is not None, f"No canonical for autocomplete={attr}"
+            identity_key = bot_reverse.get(canonical)
+            assert identity_key == expected_identity_key, (
+                f"autocomplete={attr} → canonical={canonical} → "
+                f"identity_key={identity_key}, expected {expected_identity_key}"
+            )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  V1.2 — EXHAUSTIVE AUDIT TESTS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestAgeField:
+    """Verify the new AGE canonical field."""
+
+    def test_age_enum_exists(self) -> None:
+        assert CanonicalField.AGE == "age"
+
+    def test_age_alias_lookup(self, registry: PatternRegistry) -> None:
+        assert registry.exact_lookup("age") == "age"
+        assert registry.exact_lookup("years_old") == "age"
+        assert registry.exact_lookup("your_age") == "age"
+
+    def test_age_in_canonical_fields(self, registry: PatternRegistry) -> None:
+        assert "age" in registry.canonical_fields
+
+    def test_age_service_lookup_form_bot(self, registry: PatternRegistry) -> None:
+        assert registry.service_lookup("age", "form_bot") == "age"
+
+
+class TestI18nAliases:
+    """Verify internationalized aliases from smus_bark definitions.json."""
+
+    @pytest.mark.parametrize(
+        "alias, expected",
+        [
+            # Romanian
+            ("prenume", "first_name"),
+            ("nume", "last_name"),
+            ("nume_complet", "full_name"),
+            ("adresa_email", "email"),
+            ("mesaj", "message"),
+            ("subiect", "subject"),
+            # German
+            ("vorname", "first_name"),
+            ("nachname", "last_name"),
+            # French
+            ("nom", "last_name"),
+            ("nom_complet", "full_name"),
+            ("courriel", "email"),
+            ("sujet", "subject"),
+            ("société", "company"),
+            # Other
+            ("companie", "company"),
+            ("firma", "company"),
+            ("telefon", "phone"),
+            ("custtel", "phone"),
+            ("custemail", "email"),
+            ("user_email", "email"),
+            ("custname", "full_name"),
+        ],
+    )
+    def test_i18n_alias_resolves(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+        assert registry.exact_lookup(alias) == expected
+
+
+class TestExtendedSourceAliases:
+    """Verify extended source/referral aliases."""
+
+    @pytest.mark.parametrize(
+        "alias, expected",
+        [
+            ("referral", "source"),
+            ("how_heard", "source"),
+            ("referrer", "source"),
+            ("traffic_source", "source"),
+            ("campaign_source", "source"),
+            ("how_did_you_hear", "source"),
+        ],
+    )
+    def test_source_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+        assert registry.exact_lookup(alias) == expected
+
+
+class TestExtendedOptOutAliases:
+    """Verify extended email opt-out / consent aliases."""
+
+    @pytest.mark.parametrize(
+        "alias, expected",
+        [
+            ("optin", "email_opt_out"),
+            ("opt_in", "email_opt_out"),
+            ("consent", "email_opt_out"),
+            ("terms_accepted", "email_opt_out"),
+            ("privacy_consent", "email_opt_out"),
+            ("subscribe_consent", "email_opt_out"),
+            ("gdpr_consent", "email_opt_out"),
+            ("marketing_consent", "email_opt_out"),
+        ],
+    )
+    def test_optout_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+        assert registry.exact_lookup(alias) == expected
+
+
+class TestFormBotServiceOverrides:
+    """form_bot profile overrides generic aliases for form-specific semantics."""
+
+    def test_note_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
+        """'note' generically maps to 'notes', but form_bot maps it to 'message'."""
+        # Generic (no service): note → notes
+        generic = mapper.identify("note")
+        assert generic.canonical == "notes"
+
+        # With form_bot service: note → message
+        service = mapper.identify("note", service="form_bot")
+        assert service.canonical == "message"
+
+    def test_comment_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
+        """'comment' generically maps to 'notes', but form_bot maps it to 'message'."""
+        generic = mapper.identify("comment")
+        assert generic.canonical == "notes"
+
+        service = mapper.identify("comment", service="form_bot")
+        assert service.canonical == "message"
+
+    def test_body_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
+        service = mapper.identify("body", service="form_bot")
+        assert service.canonical == "message"
+
+    def test_form_bot_payload_with_overrides(self, mapper: ContactMapper) -> None:
+        """Full payload using form_bot service with override fields."""
+        payload = {
+            "first_name": "Test",
+            "email": "test@example.com",
+            "note": "Please contact me.",
+            "organisation": "Acme Corp",
+            "mobile": "555-0199",
+            "postal": "78701",
+            "province": "ON",
+        }
+        result = mapper.map_payload(payload, service="form_bot")
+        assert result.normalized["message"] == "Please contact me."
+        assert result.normalized["company"] == "Acme Corp"
+        assert result.normalized["phone"] == "5550199"
+        assert result.normalized["postal_code"] == "78701"
+        assert result.normalized["state"] == "ON"
+        assert result.unmatched_count == 0
+
+
+class TestIndustryExtendedAliases:
+    """Verify extended industry aliases from audit."""
+
+    @pytest.mark.parametrize(
+        "alias",
+        ["industry", "sector", "vertical", "market", "business_type", "business_industry"],
+    )
+    def test_industry_alias(self, registry: PatternRegistry, alias: str) -> None:
+        assert registry.exact_lookup(alias) == "industry"
+
+
+class TestFormBotDetectPurposeCompleteness:
+    """Verify ALL 21 purpose strings from detectPurpose() resolve correctly."""
+
+    @pytest.mark.parametrize(
+        "field_name, expected_canonical",
+        [
+            ("email", "email"),
+            ("phone", "phone"),
+            ("first_name", "first_name"),
+            ("last_name", "last_name"),
+            ("full_name", "full_name"),
+            ("company", "company"),
+            ("message", "message"),
+            ("job_title", "job_title"),
+            ("zip", "postal_code"),
+            ("city", "city"),
+            ("state", "state"),
+            ("country", "country"),
+            ("address", "address_line1"),
+            ("website", "website"),
+            ("subject", "subject"),
+            ("industry", "industry"),
+            ("department", "department"),
+            ("revenue", "revenue"),
+            ("company_size", "company_size"),
+        ],
+    )
+    def test_all_detect_purposes(self, mapper: ContactMapper, field_name: str, expected_canonical: str) -> None:
+        m = mapper.identify(field_name)
+        assert m.canonical == expected_canonical, f"{field_name} → {m.canonical}, expected {expected_canonical}"
+
+
+class TestFormBotGuessRequiredValueKeywords:
+    """Verify all keywords from guessRequiredValue() resolve to correct canonicals."""
+
+    @pytest.mark.parametrize(
+        "keyword, expected",
+        [
+            ("name", "full_name"),
+            ("company", "company"),
+            ("organisation", "company"),
+            ("organization", "company"),
+            ("city", "city"),
+            ("state", "state"),
+            ("province", "state"),
+            ("country", "country"),
+            ("zip", "postal_code"),
+            ("postal", "postal_code"),
+            ("url", "website"),
+            ("website", "website"),
+            ("domain", "website"),
+            ("linkedin", "linkedin"),
+            ("twitter", "twitter"),
+            ("instagram", "instagram"),
+            ("phone", "phone"),
+            ("mobile", "phone"),
+            ("tel", "phone"),
+            ("age", "age"),
+        ],
+    )
+    def test_guess_keyword_resolves(self, mapper: ContactMapper, keyword: str, expected: str) -> None:
+        m = mapper.identify(keyword)
+        assert m.canonical == expected, f"{keyword} → {m.canonical}, expected {expected}"
+
+
+class TestPatternVersionBump:
+    """Verify patterns.json version was bumped for this release."""
+
+    def test_version_is_1_2_0(self, registry: PatternRegistry) -> None:
+        assert registry.version == "1.2.0"

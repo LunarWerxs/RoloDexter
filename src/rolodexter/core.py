@@ -101,12 +101,17 @@ class CanonicalField(str, Enum):
     OWNER = "owner"
     # Dates
     BIRTHDAY = "birthday"
+    AGE = "age"
     CREATED_AT = "created_at"
     UPDATED_AT = "updated_at"
     LAST_CONTACTED = "last_contacted"
     # Financial
     REVENUE = "revenue"
     CURRENCY = "currency"
+    # Form / Communication
+    MESSAGE = "message"
+    SUBJECT = "subject"
+    COMPANY_SIZE = "company_size"
     # Meta
     NOTES = "notes"
     METADATA = "metadata"
@@ -291,6 +296,11 @@ _FIELD_NORMALIZERS: dict[str, type] = {
     "address_line2": AddressNormalizer,
     "city": AddressNormalizer,
     "full_address": AddressNormalizer,
+    "state": StringNormalizer,
+    "country": StringNormalizer,
+    "message": StringNormalizer,
+    "subject": StringNormalizer,
+    "company_size": StringNormalizer,
 }
 
 
