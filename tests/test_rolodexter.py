@@ -1,4 +1,4 @@
-"""Complete test suite for rolodexter — tests in one file."""
+"""Complete test suite for rolodexter v2.0 — tests in one file."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from rolodexter import (
     FuzzyMatchStrategy,
     HeuristicMatchStrategy,
     MappingResult,
+    NormalizedMatchStrategy,
     PatternRegistry,
-    ServiceMatchStrategy,
 )
 from rolodexter.core import (
     AddressNormalizer,
@@ -20,7 +20,6 @@ from rolodexter.core import (
     NameNormalizer,
     PatternLoadError,
     PhoneNormalizer,
-    ServiceNotFoundError,
     StringNormalizer,
     normalize_value,
 )
@@ -46,11 +45,6 @@ def mapper_no_norm() -> ContactMapper:
 
 
 @pytest.fixture
-def mapper_mailchimp() -> ContactMapper:
-    return ContactMapper(default_service="mailchimp")
-
-
-@pytest.fixture
 def sample_payload() -> dict:
     return {
         "fname": "jane",
@@ -72,15 +66,13 @@ class TestLoading:
     def test_default_load(self, registry: PatternRegistry) -> None:
         assert len(registry.all_aliases) > 200
         assert len(registry.canonical_fields) >= 30
-        assert len(registry.available_services) >= 15
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "1.5.0"
+        assert registry.version == "2.0.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
             "fields": {"first_name": ["fname", "given"]},
-            "services": {},
         }
         reg = PatternRegistry(patterns=custom)
         assert reg.exact_lookup("fname") == "first_name"
@@ -163,53 +155,6 @@ class TestExactLookup:
         assert registry.exact_lookup("xyzzy_garbage") is None
 
 
-class TestServiceLookup:
-    @pytest.mark.parametrize(
-        "service, svc_field, expected",
-        [
-            ("hubspot", "firstname", "first_name"),
-            ("hubspot", "mobilephone", "phone"),
-            ("hubspot", "hs_lead_status", "lead_status"),
-            ("mailchimp", "FNAME", "first_name"),
-            ("mailchimp", "LNAME", "last_name"),
-            ("salesforce", "MobilePhone", "phone"),
-            ("salesforce", "MailingStreet", "address_line1"),
-            ("sendgrid", "state_province_region", "state"),
-            ("stripe", "line1", "address_line1"),
-            ("beehiiv", "firstName", "first_name"),
-            ("omnisend", "postalCode", "postal_code"),
-            ("pipedrive", "org_name", "company"),
-            ("notion", "Full Name", "full_name"),
-            ("zoho", "Mailing_Zip", "postal_code"),
-            ("activecampaign", "orgname", "company"),
-            ("brevo", "SMS", "phone"),
-            ("google_contacts", "E-mail 1 - Value", "email"),
-            ("outlook", "Business Phone", "work_phone"),
-            ("linkedin_export", "Position", "job_title"),
-            ("freshsales", "work_number", "work_phone"),
-        ],
-    )
-    def test_service_field(self, registry: PatternRegistry, service: str, svc_field: str, expected: str) -> None:
-        assert registry.service_lookup(svc_field, service) == expected
-
-    def test_unknown_service(self, registry: PatternRegistry) -> None:
-        assert registry.service_lookup("fname", "nonexistent") is None
-
-    def test_get_service_mapping(self, registry: PatternRegistry) -> None:
-        mapping = registry.get_service_mapping("hubspot")
-        assert isinstance(mapping, dict)
-        assert mapping["firstname"] == "first_name"
-
-    def test_get_reverse_mapping(self, registry: PatternRegistry) -> None:
-        rev = registry.get_reverse_mapping("hubspot")
-        assert rev["first_name"] == "firstname"
-        assert rev["last_name"] == "lastname"
-
-    def test_service_not_found_raises(self, registry: PatternRegistry) -> None:
-        with pytest.raises(ServiceNotFoundError):
-            registry.get_service_mapping("totally_fake_service")
-
-
 # ═══════════════════════════════════════════════════════════════
 #  STRATEGY TESTS
 # ═══════════════════════════════════════════════════════════════
@@ -229,22 +174,309 @@ class TestExactMatch:
         assert strat.match("zzz_garbage") is None
 
 
-class TestServiceMatch:
-    def test_with_service(self, registry: PatternRegistry) -> None:
-        strat = ServiceMatchStrategy(registry)
-        m = strat.match("FNAME", service="mailchimp")
-        assert m is not None
-        assert m.canonical == "first_name"
-        assert m.service == "mailchimp"
-        assert m.confidence == 0.95
+class TestNormalizedMatchStrategy:
+    """NormalizedMatchStrategy: smart header normalization → exact lookup."""
 
-    def test_without_service(self, registry: PatternRegistry) -> None:
-        strat = ServiceMatchStrategy(registry)
-        assert strat.match("FNAME") is None
+    # CamelCase tests
+    def test_camel_first_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("FirstName")
+        assert m is not None and m.canonical == "first_name" and m.confidence == 0.95 and m.strategy == "normalized"
 
-    def test_wrong_service(self, registry: PatternRegistry) -> None:
-        strat = ServiceMatchStrategy(registry)
-        assert strat.match("FNAME", service="hubspot") is None
+    def test_camel_last_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("LastName")
+        assert m is not None and m.canonical == "last_name"
+
+    def test_camel_mobile_phone(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("MobilePhone")
+        assert m is not None and m.canonical == "phone"
+
+    def test_camel_mailing_street(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("MailingStreet")
+        assert m is not None and m.canonical == "address_line1"
+
+    def test_camel_mailing_postal_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("MailingPostalCode")
+        assert m is not None and m.canonical == "postal_code"
+
+    def test_camel_annual_revenue(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("AnnualRevenue")
+        assert m is not None and m.canonical == "revenue"
+
+    def test_camel_created_date(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("CreatedDate")
+        assert m is not None and m.canonical == "created_at"
+
+    def test_camel_last_modified_date(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("LastModifiedDate")
+        assert m is not None and m.canonical == "updated_at"
+
+    def test_camel_lead_source(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("LeadSource")
+        assert m is not None and m.canonical == "source"
+
+    def test_camel_home_phone(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("HomePhone")
+        assert m is not None and m.canonical == "home_phone"
+
+    def test_camel_country_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("countryCode")
+        assert m is not None and m.canonical == "country"
+
+    def test_camel_postal_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("postalCode")
+        assert m is not None and m.canonical == "postal_code"
+
+    def test_camel_created_at(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("createdAt")
+        assert m is not None and m.canonical == "created_at"
+
+    def test_camel_modified_at(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("modifiedAt")
+        assert m is not None and m.canonical == "updated_at"
+
+    # Space → underscore tests
+    def test_space_first_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("First Name")
+        assert m is not None and m.canonical == "first_name"
+
+    def test_space_last_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Last Name")
+        assert m is not None and m.canonical == "last_name"
+
+    def test_space_middle_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Middle Name")
+        assert m is not None and m.canonical == "middle_name"
+
+    def test_space_full_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Full Name")
+        assert m is not None and m.canonical == "full_name"
+
+    def test_space_job_title(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Job Title")
+        assert m is not None and m.canonical == "job_title"
+
+    def test_space_email_address(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Email Address")
+        assert m is not None and m.canonical == "email"
+
+    def test_space_last_modified(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Last Modified")
+        assert m is not None and m.canonical == "updated_at"
+
+    # Dot-path tests
+    def test_dot_fields_last_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("fields.last_name")
+        assert m is not None and m.canonical == "last_name"
+
+    def test_dot_fields_company(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("fields.company")
+        assert m is not None and m.canonical == "company"
+
+    def test_dot_fields_phone(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("fields.phone")
+        assert m is not None and m.canonical == "phone"
+
+    def test_dot_account_name(self, registry: PatternRegistry) -> None:
+        """Account.Name → company (context-aware dot-path)."""
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Account.Name")
+        assert m is not None and m.canonical == "company"
+
+    def test_dot_companies_name(self, registry: PatternRegistry) -> None:
+        """companies.name → company (context-aware dot-path)."""
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("companies.name")
+        assert m is not None and m.canonical == "company"
+
+    def test_dot_company_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("company.name")
+        assert m is not None and m.canonical == "company"
+
+    # Indexed pattern tests (Google Contacts style)
+    def test_indexed_email(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("E-mail 1 - Value")
+        assert m is not None and m.canonical == "email"
+
+    def test_indexed_phone(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Phone 1 - Value")
+        assert m is not None and m.canonical == "phone"
+
+    def test_indexed_organization_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Organization 1 - Name")
+        assert m is not None and m.canonical == "company"
+
+    def test_indexed_organization_title(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Organization 1 - Title")
+        assert m is not None and m.canonical == "job_title"
+
+    def test_indexed_organization_department(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Organization 1 - Department")
+        assert m is not None and m.canonical == "department"
+
+    def test_indexed_address_street(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Address 1 - Street")
+        assert m is not None and m.canonical == "address_line1"
+
+    def test_indexed_address_city(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Address 1 - City")
+        assert m is not None and m.canonical == "city"
+
+    def test_indexed_address_region(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Address 1 - Region")
+        assert m is not None and m.canonical == "state"
+
+    def test_indexed_address_postal_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Address 1 - Postal Code")
+        assert m is not None and m.canonical == "postal_code"
+
+    def test_indexed_address_country(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Address 1 - Country")
+        assert m is not None and m.canonical == "country"
+
+    def test_indexed_website(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Website 1 - Value")
+        assert m is not None and m.canonical == "website"
+
+    # Vendor prefix stripping
+    def test_vendor_hs_lead_status(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("hs_lead_status")
+        assert m is not None and m.canonical == "lead_status"
+
+    def test_vendor_hubspot_owner_id(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("hubspot_owner_id")
+        assert m is not None and m.canonical == "owner"
+
+    # Address prefix stripping
+    def test_address_prefix_business_city(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Business City")
+        assert m is not None and m.canonical == "city"
+
+    def test_address_prefix_business_state(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Business State")
+        assert m is not None and m.canonical == "state"
+
+    def test_address_prefix_business_postal_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Business Postal Code")
+        assert m is not None and m.canonical == "postal_code"
+
+    def test_address_prefix_business_street(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Business Street")
+        assert m is not None and m.canonical == "address_line1"
+
+    def test_address_prefix_business_country_region(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("Business Country/Region")
+        assert m is not None and m.canonical == "country"
+
+    # _id suffix stripping
+    def test_owner_id(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("OwnerId")
+        assert m is not None and m.canonical == "owner"
+
+    def test_owner_id_lowercase(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("owner_id")
+        assert m is not None and m.canonical == "owner"
+
+    # Number stripping
+    def test_number_strip_email_2_address(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("E-mail 2 Address")
+        assert m is not None and m.canonical == "email"
+
+    def test_number_strip_email_3_address(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("E-mail 3 Address")
+        assert m is not None and m.canonical == "email"
+
+    # Hyphen → underscore (W3C tokens)
+    def test_hyphen_given_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("given-name")
+        assert m is not None and m.canonical == "first_name"
+
+    def test_hyphen_family_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("family-name")
+        assert m is not None and m.canonical == "last_name"
+
+    def test_hyphen_additional_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("additional-name")
+        assert m is not None and m.canonical == "middle_name"
+
+    def test_hyphen_honorific_prefix(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("honorific-prefix")
+        assert m is not None and m.canonical == "prefix"
+
+    def test_hyphen_honorific_suffix(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("honorific-suffix")
+        assert m is not None and m.canonical == "suffix"
+
+    def test_hyphen_postal_code(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("postal-code")
+        assert m is not None and m.canonical == "postal_code"
+
+    def test_hyphen_country_name(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("country-name")
+        assert m is not None and m.canonical == "country"
+
+    def test_no_match_garbage(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        assert strat.match("xyzzy_garbage_nonsense") is None
+
+    # DOUBLE_OPT-IN (Brevo) — hyphen mid-word
+    def test_double_opt_in(self, registry: PatternRegistry) -> None:
+        strat = NormalizedMatchStrategy(registry)
+        m = strat.match("DOUBLE_OPT-IN")
+        assert m is not None and m.canonical == "email_opt_out"
 
 
 class TestFuzzyMatch:
@@ -321,11 +553,6 @@ class TestIdentify:
         assert m.confidence == 1.0
         assert m.strategy == "exact"
 
-    def test_service_override(self, mapper: ContactMapper) -> None:
-        m = mapper.identify("FNAME", service="mailchimp")
-        assert m.canonical == "first_name"
-        assert m.strategy == "service"
-
     def test_heuristic_fallback(self, mapper: ContactMapper) -> None:
         m = mapper.identify("Column X", value="jane@test.com")
         assert m.canonical == "email"
@@ -345,12 +572,6 @@ class TestMapPayload:
         assert result.normalized["first_name"] == "Jane"
         assert result.normalized["last_name"] == "Doe"
         assert "phone" in result.normalized
-
-    def test_with_service(self) -> None:
-        m = ContactMapper()
-        result = m.map_payload({"FNAME": "Jane", "LNAME": "Doe"}, service="mailchimp")
-        assert result.normalized.get("first_name") == "Jane"
-        assert result.normalized.get("last_name") == "Doe"
 
     def test_unmapped_fields(self, mapper: ContactMapper) -> None:
         result = mapper.map_payload({"zzz_nonsense": "hello"})
@@ -402,18 +623,6 @@ class TestBatch:
 
     def test_batch_empty(self, mapper: ContactMapper) -> None:
         assert mapper.map_batch([]) == []
-
-
-class TestTranslate:
-    def test_hubspot_to_mailchimp(self, mapper: ContactMapper) -> None:
-        payload = {"firstname": "Jane", "lastname": "Doe", "phone": "555"}
-        translated = mapper.translate(payload, from_service="hubspot", to_service="mailchimp")
-        assert "first_name" in translated or any(v == "Jane" for v in translated.values())
-
-    def test_stripe_to_sendgrid(self, mapper: ContactMapper) -> None:
-        payload = {"name": "Jane Doe", "phone": "555", "city": "New York"}
-        translated = mapper.translate(payload, from_service="stripe", to_service="sendgrid")
-        assert any(v == "New York" for v in translated.values())
 
 
 class TestMappingResultSerialization:
@@ -539,60 +748,61 @@ class TestNormalizeValue:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  NEW ALIASES (v2.0 — promoted from service profiles to fields)
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestNewAliases:
+    """Verify aliases that were previously only in service profiles are now in fields."""
+
+    @pytest.mark.parametrize(
+        "alias, expected",
+        [
+            ("custemail", "email"),
+            ("user_email", "email"),
+            ("e_mail_address", "email"),
+            ("mobilephone", "phone"),
+            ("custtel", "phone"),
+            ("custname", "full_name"),
+            ("additional_name", "middle_name"),
+            ("honorific_prefix", "prefix"),
+            ("honorific_suffix", "suffix"),
+            ("orgname", "company"),
+            ("organization_name", "company"),
+            ("organization_title", "job_title"),
+            ("organization_department", "department"),
+            ("web_page", "website"),
+            ("other_street", "address_line2"),
+            ("street_2", "address_line2"),
+            ("status", "lead_status"),
+            ("createdate", "created_at"),
+            ("add_time", "created_at"),
+            ("connected_on", "created_at"),
+            ("cdate", "created_at"),
+            ("lastmodifieddate", "updated_at"),
+            ("last_modified_date", "updated_at"),
+            ("update_time", "updated_at"),
+            ("modified_at", "updated_at"),
+            ("udate", "updated_at"),
+            ("notes_last_contacted", "last_contacted"),
+            ("unsubscribed_from_emails", "email_opt_out"),
+            ("double_opt_in", "email_opt_out"),
+            ("work_number", "work_phone"),
+            ("annualrevenue", "revenue"),
+        ],
+    )
+    def test_new_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+        assert registry.exact_lookup(alias) == expected
+
+
+# ═══════════════════════════════════════════════════════════════
 #  INTEGRATION TESTS
 # ═══════════════════════════════════════════════════════════════
 
 
-class TestHubSpotIngestion:
-    def test_full_contact(self, mapper: ContactMapper) -> None:
-        payload = {
-            "firstname": "Maria",
-            "lastname": "Garcia",
-            "email": "  Maria.GARCIA@corp.com  ",
-            "phone": "+1-555-234-5678",
-            "mobilephone": "+1-555-999-0000",
-            "company": "Acme Inc",
-            "jobtitle": "VP of Sales",
-            "address": "123 Main St",
-            "city": "Austin",
-            "state": "TX",
-            "zip": "78701",
-            "country": "US",
-            "website": "https://acme.com",
-            "lifecyclestage": "customer",
-            "hs_lead_status": "Open",
-        }
-        result = mapper.map_payload(payload, service="hubspot")
-        assert result.normalized["first_name"] == "Maria"
-        assert result.normalized["last_name"] == "Garcia"
-        assert result.normalized["email"] == "maria.garcia@corp.com"
-        assert result.normalized["company"] == "Acme Inc"
-        assert result.normalized["job_title"] == "VP of Sales"
-        assert result.normalized["city"] == "Austin"
-        assert result.normalized["postal_code"] == "78701"
-        assert result.normalized["lifecycle_stage"] == "customer"
-        assert result.unmatched_count == 0
-
-
-class TestMailchimpIngestion:
-    def test_subscriber(self, mapper: ContactMapper) -> None:
-        payload = {
-            "EMAIL": "bob@example.com",
-            "FNAME": "bob",
-            "LNAME": "smith",
-            "PHONE": "(555) 321-0000",
-            "COMPANY": "Widgets LLC",
-            "BIRTHDAY": "05/15",
-        }
-        result = mapper.map_payload(payload, service="mailchimp")
-        assert result.normalized["email"] == "bob@example.com"
-        assert result.normalized["first_name"] == "Bob"
-        assert result.normalized["last_name"] == "Smith"
-        assert result.normalized["company"] == "Widgets LLC"
-        assert result.match_rate >= 0.8
-
-
 class TestSalesforceIngestion:
+    """Salesforce CamelCase headers resolve via normalizer (no service param)."""
+
     def test_lead(self, mapper: ContactMapper) -> None:
         payload = {
             "FirstName": "Akiko",
@@ -606,7 +816,7 @@ class TestSalesforceIngestion:
             "LeadSource": "Website",
             "Industry": "Technology",
         }
-        result = mapper.map_payload(payload, service="salesforce")
+        result = mapper.map_payload(payload)
         assert result.normalized["first_name"] == "Akiko"
         assert result.normalized["last_name"] == "Tanaka"
         assert result.normalized["email"] == "akiko@example.jp"
@@ -627,7 +837,7 @@ class TestGoogleContactsCSV:
             "Address 1 - City": "mexico city",
             "Birthday": "1985-03-22",
         }
-        result = mapper.map_payload(payload, service="google_contacts")
+        result = mapper.map_payload(payload)
         assert result.normalized["first_name"] == "Carlos"
         assert result.normalized["last_name"] == "Rivera"
         assert result.normalized["email"] == "carlos@mail.com"
@@ -649,11 +859,60 @@ class TestOutlookCSV:
             "Business Postal Code": "SW1A 1AA",
             "Birthday": "12/25/1990",
         }
-        result = mapper.map_payload(payload, service="outlook")
+        result = mapper.map_payload(payload)
         assert result.normalized["first_name"] == "Emma"
         assert result.normalized["work_phone"] == "+442079460958"
         assert result.normalized["city"] == "London"
         assert result.normalized["postal_code"] == "SW1A 1AA"
+
+
+class TestHubSpotIngestion:
+    def test_full_contact(self, mapper: ContactMapper) -> None:
+        payload = {
+            "firstname": "Maria",
+            "lastname": "Garcia",
+            "email": "  Maria.GARCIA@corp.com  ",
+            "phone": "+1-555-234-5678",
+            "mobilephone": "+1-555-999-0000",
+            "company": "Acme Inc",
+            "jobtitle": "VP of Sales",
+            "address": "123 Main St",
+            "city": "Austin",
+            "state": "TX",
+            "zip": "78701",
+            "country": "US",
+            "website": "https://acme.com",
+            "lifecyclestage": "customer",
+            "hs_lead_status": "Open",
+        }
+        result = mapper.map_payload(payload)
+        assert result.normalized["first_name"] == "Maria"
+        assert result.normalized["last_name"] == "Garcia"
+        assert result.normalized["email"] == "maria.garcia@corp.com"
+        assert result.normalized["company"] == "Acme Inc"
+        assert result.normalized["job_title"] == "VP of Sales"
+        assert result.normalized["city"] == "Austin"
+        assert result.normalized["postal_code"] == "78701"
+        assert result.normalized["lifecycle_stage"] == "customer"
+        assert result.unmatched_count == 0
+
+
+class TestMailchimpIngestion:
+    def test_subscriber(self, mapper: ContactMapper) -> None:
+        payload = {
+            "EMAIL": "bob@example.com",
+            "FNAME": "bob",
+            "LNAME": "smith",
+            "PHONE": "(555) 321-0000",
+            "COMPANY": "Widgets LLC",
+            "BIRTHDAY": "05/15",
+        }
+        result = mapper.map_payload(payload)
+        assert result.normalized["email"] == "bob@example.com"
+        assert result.normalized["first_name"] == "Bob"
+        assert result.normalized["last_name"] == "Smith"
+        assert result.normalized["company"] == "Widgets LLC"
+        assert result.match_rate >= 0.8
 
 
 class TestMessyCSVWithHeuristics:
@@ -671,34 +930,21 @@ class TestMessyCSVWithHeuristics:
         assert result.unmatched_count >= 2
 
 
-class TestCrossServiceTranslation:
-    def test_hubspot_to_salesforce(self, mapper: ContactMapper) -> None:
-        hubspot_data = {
-            "firstname": "Aisha",
-            "lastname": "Patel",
-            "email": "aisha@corp.com",
-            "phone": "+1-555-000-1234",
-            "company": "Global Co",
-            "jobtitle": "Engineer",
-        }
-        sf = mapper.translate(hubspot_data, from_service="hubspot", to_service="salesforce")
-        assert any(v == "Aisha" for v in sf.values())
-        assert any(v == "Patel" for v in sf.values())
-        assert any(v == "aisha@corp.com" for v in sf.values())
+class TestServiceParamBackwardCompat:
+    """service= parameter is accepted but silently ignored."""
 
+    def test_service_param_accepted(self, mapper: ContactMapper) -> None:
+        result = mapper.map_payload({"email": "a@b.com"}, service="mailchimp")
+        assert result.normalized["email"] == "a@b.com"
 
-class TestDefaultServiceConfig:
-    def test_default_service(self) -> None:
+    def test_identify_service_param_accepted(self, mapper: ContactMapper) -> None:
+        m = mapper.identify("fname", service="mailchimp")
+        assert m.canonical == "first_name"
+
+    def test_default_service_accepted(self) -> None:
         m = ContactMapper(default_service="mailchimp")
-        match = m.identify("FNAME")
+        match = m.identify("fname")
         assert match.canonical == "first_name"
-        assert match.strategy == "service"
-
-    def test_per_call_overrides_default(self) -> None:
-        m = ContactMapper(default_service="mailchimp")
-        match = m.identify("firstname", service="hubspot")
-        assert match.canonical == "first_name"
-        assert match.service == "hubspot"
 
 
 class TestEdgeCases:
@@ -769,125 +1015,30 @@ class TestW3CAutocompleteAliases:
         assert registry.exact_lookup(token) == expected
 
 
-class TestW3CAutocompleteServiceProfile:
-    """The w3c_autocomplete service profile for direct autocomplete attr lookup."""
-
-    @pytest.mark.parametrize(
-        "attr, expected",
-        [
-            ("given-name", "first_name"),
-            ("family-name", "last_name"),
-            ("name", "full_name"),
-            ("email", "email"),
-            ("tel", "phone"),
-            ("tel-national", "phone"),
-            ("organization", "company"),
-            ("organization-title", "job_title"),
-            ("street-address", "address_line1"),
-            ("address-line1", "address_line1"),
-            ("address-line2", "address_line2"),
-            ("address-level2", "city"),
-            ("address-level1", "state"),
-            ("postal-code", "postal_code"),
-            ("country-name", "country"),
-            ("url", "website"),
-            ("bday", "birthday"),
-            ("honorific-prefix", "prefix"),
-            ("honorific-suffix", "suffix"),
-            ("additional-name", "middle_name"),
-            ("nickname", "nickname"),
-        ],
-    )
-    def test_w3c_service_lookup(self, registry: PatternRegistry, attr: str, expected: str) -> None:
-        assert registry.service_lookup(attr, "w3c_autocomplete") == expected
-
-
-class TestFormBotServiceProfile:
-    """form_bot identity key → canonical field mapping."""
-
-    @pytest.mark.parametrize(
-        "identity_key, expected",
-        [
-            ("first_name", "first_name"),
-            ("last_name", "last_name"),
-            ("email", "email"),
-            ("phone", "phone"),
-            ("company", "company"),
-            ("title", "job_title"),
-            ("job_title", "job_title"),
-            ("address", "address_line1"),
-            ("city", "city"),
-            ("state", "state"),
-            ("zip", "postal_code"),
-            ("country", "country"),
-            ("website", "website"),
-            ("message", "message"),
-            ("subject", "subject"),
-            ("industry", "industry"),
-            ("department", "department"),
-            ("revenue", "revenue"),
-            ("company_size", "company_size"),
-            ("source", "source"),
-            # Extended form_bot overrides
-            ("note", "message"),
-            ("comment", "message"),
-            ("body", "message"),
-            ("enquiry", "message"),
-            ("feedback", "message"),
-            ("organisation", "company"),
-            ("organization", "company"),
-            ("firm", "company"),
-            ("employer", "company"),
-            ("business", "company"),
-            ("mobile", "phone"),
-            ("cell", "phone"),
-            ("tel", "phone"),
-            ("postal", "postal_code"),
-            ("postcode", "postal_code"),
-            ("province", "state"),
-            ("region", "state"),
-            ("url", "website"),
-            ("domain", "website"),
-            ("position", "job_title"),
-            ("role", "job_title"),
-            ("occupation", "job_title"),
-            ("function", "job_title"),
-            ("age", "age"),
-        ],
-    )
-    def test_form_bot_identity_key(self, registry: PatternRegistry, identity_key: str, expected: str) -> None:
-        assert registry.service_lookup(identity_key, "form_bot") == expected
-
-
 class TestFormBotFormDetectionPatterns:
     """Simulate form bot's detectPurpose() regex patterns via rolodexter."""
 
     def test_form_field_first_name(self, mapper: ContactMapper) -> None:
-        # form bot regex: /\b(first.?name|fname|given.?name|forename)\b/
         for header in ["first_name", "fname", "given_name", "forename", "firstname"]:
             m = mapper.identify(header)
             assert m.canonical == "first_name", f"Failed for {header}"
 
     def test_form_field_last_name(self, mapper: ContactMapper) -> None:
-        # form bot regex: /\b(last.?name|lname|surname|family.?name)\b/
         for header in ["last_name", "lname", "surname", "family_name", "lastname"]:
             m = mapper.identify(header)
             assert m.canonical == "last_name", f"Failed for {header}"
 
     def test_form_field_company(self, mapper: ContactMapper) -> None:
-        # form bot regex: /\b(company|organisation|organization|firm|employer|business)\b/
         for header in ["company", "organization", "organisation", "firm", "employer", "business"]:
             m = mapper.identify(header)
             assert m.canonical == "company", f"Failed for {header}"
 
     def test_form_field_message(self, mapper: ContactMapper) -> None:
-        # form bot regex: /\b(message|comment|body|inquiry|enquiry|question|note|feedback)\b/
         for header in ["message", "inquiry", "enquiry", "feedback"]:
             m = mapper.identify(header)
             assert m.canonical == "message", f"Failed for {header}"
 
     def test_form_field_job_title(self, mapper: ContactMapper) -> None:
-        # form bot regex: /\b(job.?title|position|role|occupation|function)\b/
         for header in ["job_title", "position", "designation"]:
             m = mapper.identify(header)
             assert m.canonical == "job_title", f"Failed for {header}"
@@ -916,115 +1067,6 @@ class TestFormBotFormDetectionPatterns:
             assert m.canonical == "company_size", f"Failed for {header}"
 
 
-class TestFormBotIdentityTranslation:
-    """Translate form_bot identity payloads to/from other services."""
-
-    def test_formbot_to_hubspot(self, mapper: ContactMapper) -> None:
-        identity = {
-            "first_name": "Amber",
-            "last_name": "Maccione",
-            "email": "amber@cognitutor.com",
-            "company": "CogniTutor",
-            "title": "Principal",
-            "phone": "321-460-8272",
-            "address": "2502 Lawler Ln",
-            "city": "Deltona",
-            "state": "FL",
-            "zip": "32738",
-        }
-        hs = mapper.translate(identity, from_service="form_bot", to_service="hubspot")
-        assert any(v == "Amber" for v in hs.values())
-        assert any(v == "Maccione" for v in hs.values())
-        assert any(v == "amber@cognitutor.com" for v in hs.values())
-
-    def test_formbot_to_mailchimp(self, mapper: ContactMapper) -> None:
-        identity = {
-            "first_name": "Loni",
-            "last_name": "Lebanoff",
-            "email": "loni@cognitutor.com",
-            "company": "CogniTutor",
-        }
-        mc = mapper.translate(identity, from_service="form_bot", to_service="mailchimp")
-        assert any(v == "Loni" for v in mc.values())
-        assert any(v == "loni@cognitutor.com" for v in mc.values())
-
-    def test_formbot_full_identity_mapping(self, mapper: ContactMapper) -> None:
-        """Full identity with form_bot service should map all fields."""
-        identity = {
-            "first_name": "Amber",
-            "last_name": "Maccione",
-            "email": "amber@cognitutor.com",
-            "company": "CogniTutor",
-            "title": "Principal",
-            "phone": "321-460-8272",
-            "address": "2502 Lawler Ln",
-            "city": "Deltona",
-            "state": "FL",
-            "zip": "32738",
-            "message": "Please add me to your mailing list.",
-        }
-        result = mapper.map_payload(identity, service="form_bot")
-        assert result.normalized["first_name"] == "Amber"
-        assert result.normalized["last_name"] == "Maccione"
-        assert result.normalized["email"] == "amber@cognitutor.com"
-        assert result.normalized["company"] == "CogniTutor"
-        assert result.normalized["job_title"] == "Principal"
-        assert result.normalized["phone"] == "3214608272"
-        assert result.normalized["address_line1"] == "2502 Lawler Ln"
-        assert result.normalized["city"] == "Deltona"
-        assert result.normalized["state"] == "FL"
-        assert result.normalized["postal_code"] == "32738"
-        assert result.normalized["message"] == "Please add me to your mailing list."
-        assert result.unmatched_count == 0
-
-
-class TestFormBotAutocompleteWorkflow:
-    """Simulate how form bot would use rolodexter for autocomplete attributes."""
-
-    def test_autocomplete_attr_to_identity_key(self) -> None:
-        """Given an HTML autocomplete attr, resolve to form_bot identity key."""
-        mapper = ContactMapper()
-        reg = mapper.registry
-
-        # Simulate: form has autocomplete="given-name", map to canonical, then to form_bot key
-        canonical = reg.service_lookup("given-name", "w3c_autocomplete")
-        assert canonical == "first_name"
-
-        # Now get the form_bot identity key for this canonical
-        bot_reverse = reg.get_reverse_mapping("form_bot")
-        identity_key = bot_reverse.get(canonical)
-        assert identity_key == "first_name"
-
-    def test_full_autocomplete_chain(self) -> None:
-        """Full chain: autocomplete attr → canonical → form_bot identity key."""
-        mapper = ContactMapper()
-        reg = mapper.registry
-        bot_reverse = reg.get_reverse_mapping("form_bot")
-
-        test_cases = {
-            "given-name": "first_name",
-            "family-name": "last_name",
-            "email": "email",
-            "tel": "phone",
-            "organization": "company",
-            "organization-title": "title",
-            "street-address": "address",
-            "address-level2": "city",
-            "address-level1": "state",
-            "postal-code": "zip",
-            "country-name": "country",
-            "url": "website",
-        }
-        for attr, expected_identity_key in test_cases.items():
-            canonical = reg.service_lookup(attr, "w3c_autocomplete")
-            assert canonical is not None, f"No canonical for autocomplete={attr}"
-            identity_key = bot_reverse.get(canonical)
-            assert identity_key == expected_identity_key, (
-                f"autocomplete={attr} → canonical={canonical} → "
-                f"identity_key={identity_key}, expected {expected_identity_key}"
-            )
-
-
 # ═══════════════════════════════════════════════════════════════
 #  V1.2 — EXHAUSTIVE AUDIT TESTS
 # ═══════════════════════════════════════════════════════════════
@@ -1043,9 +1085,6 @@ class TestAgeField:
 
     def test_age_in_canonical_fields(self, registry: PatternRegistry) -> None:
         assert "age" in registry.canonical_fields
-
-    def test_age_service_lookup_form_bot(self, registry: PatternRegistry) -> None:
-        assert registry.service_lookup("age", "form_bot") == "age"
 
 
 class TestI18nAliases:
@@ -1106,13 +1145,6 @@ class TestI18nAliases:
     def test_i18n_alias_resolves(self, registry: PatternRegistry, alias: str, expected: str) -> None:
         assert registry.exact_lookup(alias) == expected
 
-    def test_bot_specific_aliases_via_service(self, registry: PatternRegistry) -> None:
-        """Bot-convention aliases (custname, custemail, etc.) are in form_bot service, not i18n."""
-        assert registry.service_lookup("custtel", "form_bot") == "phone"
-        assert registry.service_lookup("custemail", "form_bot") == "email"
-        assert registry.service_lookup("user_email", "form_bot") == "email"
-        assert registry.service_lookup("custname", "form_bot") == "full_name"
-
 
 class TestExtendedSourceAliases:
     """Verify extended source/referral aliases."""
@@ -1150,51 +1182,6 @@ class TestExtendedOptOutAliases:
     )
     def test_optout_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
         assert registry.exact_lookup(alias) == expected
-
-
-class TestFormBotServiceOverrides:
-    """form_bot profile overrides generic aliases for form-specific semantics."""
-
-    def test_note_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
-        """'note' generically maps to 'notes', but form_bot maps it to 'message'."""
-        # Generic (no service): note → notes
-        generic = mapper.identify("note")
-        assert generic.canonical == "notes"
-
-        # With form_bot service: note → message
-        service = mapper.identify("note", service="form_bot")
-        assert service.canonical == "message"
-
-    def test_comment_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
-        """'comment' generically maps to 'notes', but form_bot maps it to 'message'."""
-        generic = mapper.identify("comment")
-        assert generic.canonical == "notes"
-
-        service = mapper.identify("comment", service="form_bot")
-        assert service.canonical == "message"
-
-    def test_body_maps_to_message_via_service(self, mapper: ContactMapper) -> None:
-        service = mapper.identify("body", service="form_bot")
-        assert service.canonical == "message"
-
-    def test_form_bot_payload_with_overrides(self, mapper: ContactMapper) -> None:
-        """Full payload using form_bot service with override fields."""
-        payload = {
-            "first_name": "Test",
-            "email": "test@example.com",
-            "note": "Please contact me.",
-            "organisation": "Acme Corp",
-            "mobile": "555-0199",
-            "postal": "78701",
-            "province": "ON",
-        }
-        result = mapper.map_payload(payload, service="form_bot")
-        assert result.normalized["message"] == "Please contact me."
-        assert result.normalized["company"] == "Acme Corp"
-        assert result.normalized["phone"] == "5550199"
-        assert result.normalized["postal_code"] == "78701"
-        assert result.normalized["state"] == "ON"
-        assert result.unmatched_count == 0
 
 
 class TestIndustryExtendedAliases:
@@ -1276,8 +1263,8 @@ class TestFormBotGuessRequiredValueKeywords:
 class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
-    def test_version_is_1_5_0(self, registry: PatternRegistry) -> None:
-        assert registry.version == "1.5.0"
+    def test_version_is_2_0_0(self, registry: PatternRegistry) -> None:
+        assert registry.version == "2.0.0"
 
 
 # ═══════════════════════════════════════════════════════════════

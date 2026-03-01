@@ -1,8 +1,8 @@
 """Rolodexter — The universal contact field mapper.
 
 Map messy, inconsistent contact data from any source to a clean,
-canonical schema.  Supports 20+ services, fuzzy matching, regex
-heuristics, and value normalization out of the box.
+canonical schema.  Supports fuzzy matching, smart normalisation,
+regex heuristics, and value normalization out of the box.
 
 Quick start::
 
@@ -34,6 +34,7 @@ from .core import (
     MatchStrategy,
     NameNormalizer,
     NormalizationError,
+    NormalizedMatchStrategy,
     PatternLoadError,
     PatternRegistry,
     PhoneNormalizer,
@@ -45,7 +46,7 @@ from .core import (
     normalize_value,
 )
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 __all__ = [
     "AddressNormalizer",
@@ -63,6 +64,7 @@ __all__ = [
     "MatchStrategy",
     "NameNormalizer",
     "NormalizationError",
+    "NormalizedMatchStrategy",
     "PatternLoadError",
     "PatternRegistry",
     # Normalizers

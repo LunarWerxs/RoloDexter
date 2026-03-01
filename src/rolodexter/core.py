@@ -37,7 +37,12 @@ class NormalizationError(RolodexterError):
 
 
 class ServiceNotFoundError(RolodexterError):
-    """Raised when a requested service profile does not exist in the registry."""
+    """Raised when a requested service profile does not exist in the registry.
+
+    .. deprecated:: 2.0.0
+        Service profiles have been removed.  This exception is kept only
+        for backward compatibility and is never raised by the library.
+    """
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -120,7 +125,7 @@ class CanonicalField(str, Enum):
 
 # Confidence thresholds
 EXACT_MATCH_CONFIDENCE: float = 1.0
-SERVICE_MATCH_CONFIDENCE: float = 0.95
+NORMALIZED_MATCH_CONFIDENCE: float = 0.95
 FUZZY_MATCH_THRESHOLD: int = 80
 FUZZY_HIGH_CONFIDENCE: float = 0.85
 FUZZY_LOW_CONFIDENCE: float = 0.70
@@ -336,7 +341,6 @@ class PatternRegistry:
         "_languages",
         "_loaded_languages",
         "_reverse_index",
-        "_service_indexes",
     )
 
     def __init__(
@@ -354,7 +358,6 @@ class PatternRegistry:
 
         self._languages = languages
         self._reverse_index: dict[str, str] = {}
-        self._service_indexes: dict[str, dict[str, str]] = {}
         self._all_aliases: list[str] = []
         self._canonical_fields: list[str] = []
         self._loaded_languages: list[str] = []
@@ -435,21 +438,8 @@ class PatternRegistry:
                         self._reverse_index[key] = canonical
                     self._all_aliases.append(key)
 
-        services: dict[str, dict[str, str]] = self._data.get("services", {})
-        for svc_name, mapping in services.items():
-            idx: dict[str, str] = {}
-            for svc_field, canonical in mapping.items():
-                idx[svc_field.lower().strip()] = canonical
-            self._service_indexes[svc_name.lower()] = idx
-
     def exact_lookup(self, header: str) -> str | None:
         return self._reverse_index.get(header.lower().strip())
-
-    def service_lookup(self, header: str, service: str) -> str | None:
-        svc_idx = self._service_indexes.get(service.lower())
-        if svc_idx is None:
-            return None
-        return svc_idx.get(header.lower().strip())
 
     @property
     def all_aliases(self) -> list[str]:
@@ -458,10 +448,6 @@ class PatternRegistry:
     @property
     def canonical_fields(self) -> list[str]:
         return list(self._canonical_fields)
-
-    @property
-    def available_services(self) -> list[str]:
-        return list(self._service_indexes)
 
     @property
     def loaded_languages(self) -> list[str]:
@@ -473,19 +459,6 @@ class PatternRegistry:
         """All language codes with i18n files available (loaded or not)."""
         return sorted(self._i18n_files.keys())
 
-    def get_service_mapping(self, service: str) -> dict[str, str]:
-        key = service.lower()
-        if key not in self._service_indexes:
-            raise ServiceNotFoundError(f"Service '{service}' not found. Available: {self.available_services}")
-        return dict(self._service_indexes[key])
-
-    def get_reverse_mapping(self, service: str) -> dict[str, str]:
-        forward = self.get_service_mapping(service)
-        reverse: dict[str, str] = {}
-        for svc_field, canonical in forward.items():
-            reverse.setdefault(canonical, svc_field)
-        return reverse
-
     @property
     def version(self) -> str:
         return self._data.get("version", "0.0.0")
@@ -493,7 +466,6 @@ class PatternRegistry:
     def __repr__(self) -> str:
         return (
             f"PatternRegistry(aliases={len(self._reverse_index)}, "
-            f"services={len(self._service_indexes)}, "
             f"languages={self._loaded_languages}, "
             f"version={self.version!r})"
         )
@@ -535,6 +507,12 @@ class ExactMatchStrategy(MatchStrategy):
 
 
 class ServiceMatchStrategy(MatchStrategy):
+    """Deprecated stub — service profiles were removed in v2.0.
+
+    Kept so that code referencing the class does not crash on import.
+    ``match()`` always returns ``None``.
+    """
+
     __slots__ = ("_registry",)
 
     def __init__(self, registry: PatternRegistry) -> None:
@@ -545,18 +523,144 @@ class ServiceMatchStrategy(MatchStrategy):
         return "service"
 
     def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
-        service = kwargs.get("service")
-        if not service:
-            return None
-        canonical = self._registry.service_lookup(header, str(service))
-        if canonical is not None:
-            return FieldMatch(
-                original=header,
-                canonical=canonical,
-                confidence=SERVICE_MATCH_CONFIDENCE,
-                strategy=self.name,
-                service=str(service),
-            )
+        return None
+
+
+class NormalizedMatchStrategy(MatchStrategy):
+    """Smart header normalisation → exact alias lookup (confidence 0.95).
+
+    Handles CamelCase, dot-paths, space/hyphen→underscore, indexed
+    patterns (``E-mail 1 - Value``), vendor prefix stripping, address
+    prefix stripping, ``_id`` suffix stripping, and number stripping —
+    all with **zero** hardcoded service profiles.
+    """
+
+    __slots__ = ("_registry",)
+
+    # Prefixes whose dotted object.name → company
+    _COMPANY_PREFIXES = frozenset({
+        "account", "accounts", "org", "organization", "organisations",
+        "organizations", "organisation", "company", "companies",
+        "firm", "business", "enterprise",
+    })
+
+    # Vendor-specific prefixes to strip
+    _VENDOR_PREFIXES = ("hs_", "hubspot_", "sf_", "salesforce_")
+
+    # Address-context prefixes (the suffix IS the field)
+    _ADDRESS_PREFIXES = (
+        "business_", "mailing_", "home_", "other_", "personal_",
+        "shipping_", "billing_", "primary_", "secondary_",
+    )
+
+    _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+    _INDEXED_RE = re.compile(r"^(.+?)\s+\d+\s*(?:[-–—]\s*)?(.+)$")
+
+    def __init__(self, registry: PatternRegistry) -> None:
+        self._registry = registry
+
+    @property
+    def name(self) -> str:
+        return "normalized"
+
+    # ------------------------------------------------------------------
+    def _lookup(self, candidate: str) -> str | None:
+        return self._registry.exact_lookup(candidate)
+
+    def _candidates(self, header: str) -> list[str]:
+        out: list[str] = []
+        h = header.strip()
+        if not h:
+            return out
+
+        # 1. Space / hyphen → underscore  +  strip non-word chars
+        uscore = re.sub(r"[\s\-]+", "_", h).lower()
+        uscore = re.sub(r"[^\w]", "_", uscore)
+        uscore = re.sub(r"_+", "_", uscore).strip("_")
+        if uscore:
+            out.append(uscore)
+
+        # 2. CamelCase / PascalCase split
+        if any(c.isupper() for c in h[1:]):
+            snake = self._CAMEL_RE.sub("_", h).lower()
+            snake = re.sub(r"_+", "_", snake).strip("_")
+            if snake and snake != uscore:
+                out.append(snake)
+
+        # 3. Dot-path resolution  (e.g. Account.Name, fields.last_name)
+        if "." in h:
+            parts = h.rsplit(".", 1)
+            prefix_raw = parts[0].lower().strip()
+            suffix_raw = parts[1].strip()
+            suffix_lower = re.sub(r"[\s\-]+", "_", suffix_raw).lower()
+            # Context-aware: company-like prefix + 'name' → company
+            last_prefix = prefix_raw.rsplit(".", 1)[-1]
+            if last_prefix in self._COMPANY_PREFIXES and suffix_lower in ("name", "nombre"):
+                out.insert(0, "company")
+            # Last segment (underscore-normalised)
+            out.append(suffix_lower)
+            # CamelCase split of last segment
+            if any(c.isupper() for c in suffix_raw[1:]):
+                snake_sfx = self._CAMEL_RE.sub("_", suffix_raw).lower()
+                snake_sfx = re.sub(r"_+", "_", snake_sfx).strip("_")
+                if snake_sfx != suffix_lower:
+                    out.append(snake_sfx)
+
+        # 4. Indexed pattern:  "E-mail 1 - Value", "Organization 1 - Title"
+        m = self._INDEXED_RE.match(h)
+        if m:
+            grp = re.sub(r"[\s\-]+", "_", m.group(1).strip()).lower()
+            prop = re.sub(r"[\s\-]+", "_", m.group(2).strip()).lower()
+            out.append(f"{grp}_{prop}")  # organization_name
+            out.append(prop)              # name
+            out.append(grp)               # organization
+
+        # 5. Number stripping  ("E-mail 2 Address" → e_mail_address)
+        num_stripped = re.sub(r"_\d+", "", uscore)
+        num_stripped = re.sub(r"_+", "_", num_stripped).strip("_")
+        if num_stripped and num_stripped != uscore:
+            out.append(num_stripped)
+
+        # 6. Vendor prefix stripping  (hs_lead_status → lead_status)
+        for pfx in self._VENDOR_PREFIXES:
+            if uscore.startswith(pfx):
+                stripped = uscore[len(pfx):]
+                if stripped:
+                    out.append(stripped)
+
+        # 7. Address prefix stripping  (business_city → city)
+        for pfx in self._ADDRESS_PREFIXES:
+            if uscore.startswith(pfx):
+                stripped = uscore[len(pfx):]
+                if stripped:
+                    out.append(stripped)
+
+        # 8.  _id suffix stripping  (owner_id → owner)
+        id_candidates = [c for c in out if c.endswith("_id")]
+        for candidate in id_candidates:
+            base = candidate[:-3]
+            if base and base not in out:
+                out.append(base)
+                # Also strip vendor prefix off the base
+                for pfx in self._VENDOR_PREFIXES:
+                    if base.startswith(pfx):
+                        inner = base[len(pfx):]
+                        if inner and inner not in out:
+                            out.append(inner)
+
+        return out
+
+    # ------------------------------------------------------------------
+    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
+        for candidate in self._candidates(header):
+            canonical = self._lookup(candidate)
+            if canonical is not None:
+                return FieldMatch(
+                    original=header,
+                    canonical=canonical,
+                    confidence=NORMALIZED_MATCH_CONFIDENCE,
+                    strategy=self.name,
+                )
         return None
 
 
@@ -648,13 +752,17 @@ class ContactMapper:
     Routes messy, inconsistent contact data to canonical field names
     using a multi-layer strategy pipeline:
 
-    1. Service-specific exact match (highest priority)
-    2. Generic exact match against the alias index
+    1. Generic exact match against the alias index
+    2. Normalised match (CamelCase / dot-path / space → underscore / …)
     3. Fuzzy match for typos and variations (rapidfuzz)
     4. Heuristic match using data-shape regex patterns
+
+    .. versionchanged:: 2.0.0
+        Per-service profiles removed.  The ``default_service`` and
+        ``service`` parameters are accepted but ignored.
     """
 
-    __slots__ = ("_default_service", "_normalize", "_registry", "_strategies")
+    __slots__ = ("_normalize", "_registry", "_strategies")
 
     def __init__(
         self,
@@ -670,36 +778,42 @@ class ContactMapper:
             patterns=patterns, patterns_path=patterns_path, languages=languages
         )
         self._normalize = normalize
-        self._default_service = default_service
 
         if strategies is not None:
             self._strategies = list(strategies)
         else:
             self._strategies: list[MatchStrategy] = [
-                ServiceMatchStrategy(self._registry),
                 ExactMatchStrategy(self._registry),
+                NormalizedMatchStrategy(self._registry),
                 FuzzyMatchStrategy(self._registry),
                 HeuristicMatchStrategy(),
             ]
 
     def identify(self, header: str, *, value: str | None = None, service: str | None = None) -> FieldMatch:
-        """Resolve a single header to its canonical field."""
-        svc = service or self._default_service
+        """Resolve a single header to its canonical field.
+
+        The *service* parameter is accepted for backward compatibility
+        but is ignored since v2.0.
+        """
         for strategy in self._strategies:
-            result = strategy.match(header, value=value, service=svc)
+            result = strategy.match(header, value=value)
             if result is not None:
                 return result
         return FieldMatch(original=header, canonical=CanonicalField.UNKNOWN.value, confidence=0.0, strategy="none")
 
     def map_payload(self, payload: dict[str, Any], *, service: str | None = None) -> MappingResult:
-        """Normalize an entire contact data dictionary."""
+        """Normalize an entire contact data dictionary.
+
+        The *service* parameter is accepted for backward compatibility
+        but is ignored since v2.0.
+        """
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
         matches: list[FieldMatch] = []
 
         for key, value in payload.items():
             str_val = str(value) if value is not None else None
-            match = self.identify(key, value=str_val, service=service)
+            match = self.identify(key, value=str_val)
             matches.append(match)
 
             if match.is_matched:
@@ -712,17 +826,7 @@ class ContactMapper:
 
     def map_batch(self, payloads: Sequence[dict[str, Any]], *, service: str | None = None) -> list[MappingResult]:
         """Process multiple payloads."""
-        return [self.map_payload(p, service=service) for p in payloads]
-
-    def translate(self, payload: dict[str, Any], *, from_service: str, to_service: str) -> dict[str, Any]:
-        """Translate a payload from one service schema to another."""
-        result = self.map_payload(payload, service=from_service)
-        reverse = self._registry.get_reverse_mapping(to_service)
-        translated: dict[str, Any] = {}
-        for canonical_key, value in result.normalized.items():
-            target_key = reverse.get(canonical_key, canonical_key)
-            translated[target_key] = value
-        return translated
+        return [self.map_payload(p) for p in payloads]
 
     @property
     def registry(self) -> PatternRegistry:
@@ -731,8 +835,7 @@ class ContactMapper:
     def __repr__(self) -> str:
         return (
             f"ContactMapper(strategies={[s.name for s in self._strategies]}, "
-            f"normalize={self._normalize}, "
-            f"default_service={self._default_service!r})"
+            f"normalize={self._normalize})"
         )
 
 
