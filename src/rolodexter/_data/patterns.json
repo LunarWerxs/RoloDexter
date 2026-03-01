@@ -1,6 +1,6 @@
 {
-  "version": "2.0.0",
-  "description": "Rolodexter master field pattern registry — the universal contact data truth table.  v2.0 removes per-service profiles in favour of smart normalisation.",
+  "version": "2.1.0",
+  "description": "Rolodexter master field pattern registry — the universal contact data truth table.  v2.0 removes per-service profiles in favour of smart normalisation. v2.1 adds source_id, source_service, subscribed, verified fields; phonenumbers E.164 support; nested payload depth.",
   "fields": {
     "first_name": [
       "first_name",
@@ -507,7 +507,8 @@
       "dob",
       "date_of_birth",
       "bday",
-      "born_on"
+      "born_on",
+      "day_of_birth"
     ],
     "age": [
       "age",
@@ -529,7 +530,8 @@
       "createdate",
       "add_time",
       "connected_on",
-      "cdate"
+      "cdate",
+      "created_on"
     ],
     "updated_at": [
       "updated_at",
@@ -650,7 +652,48 @@
       "additional_data",
       "properties",
       "attributes",
-      "custom_data"
+      "custom_data",
+      "ip_address"
+    ],
+    "source_id": [
+      "source_id",
+      "external_id",
+      "orig_id",
+      "original_id",
+      "remote_id",
+      "foreign_id",
+      "system_id",
+      "customer_id",
+      "stripe_id",
+      "crm_id"
+    ],
+    "source_service": [
+      "source_service",
+      "source_system",
+      "provider",
+      "data_source",
+      "imported_from",
+      "integration",
+      "platform"
+    ],
+    "subscribed": [
+      "subscribed",
+      "is_subscribed",
+      "subscription_status",
+      "opted_in",
+      "opt_in",
+      "email_subscribed",
+      "newsletter",
+      "mailing_list"
+    ],
+    "verified": [
+      "verified",
+      "is_verified",
+      "email_verified",
+      "confirmed",
+      "is_confirmed",
+      "email_confirmed",
+      "validated"
     ]
   },
   "i18n_config": {

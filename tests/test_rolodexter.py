@@ -1,4 +1,4 @@
-"""Complete test suite for rolodexter v2.0 — tests in one file."""
+"""Complete test suite for rolodexter v2.1 — tests in one file."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class TestLoading:
         assert len(registry.canonical_fields) >= 30
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.0.0"
+        assert registry.version == "2.1.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
@@ -1263,8 +1263,8 @@ class TestFormBotGuessRequiredValueKeywords:
 class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
-    def test_version_is_2_0_0(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.0.0"
+    def test_version_is_2_1_0(self, registry: PatternRegistry) -> None:
+        assert registry.version == "2.1.0"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1407,3 +1407,393 @@ class TestI18nContactMapper:
         assert result.normalized["first_name"] == "Juan"
         assert result.normalized["last_name"] == "García"
         assert result.normalized["company"] == "Acme"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.1 — PHONE NORMALIZER E.164 UPGRADE
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPhoneNormalizerE164:
+    """Test the upgraded PhoneNormalizer with optional phonenumbers lib."""
+
+    def test_regex_fallback_basic(self) -> None:
+        """Regex fallback still works for US-like numbers."""
+        result = PhoneNormalizer.normalize("555-123-4567")
+        assert result == "5551234567"
+
+    def test_regex_fallback_international(self) -> None:
+        result = PhoneNormalizer.normalize("+44 20 7946 0958")
+        assert "44" in result and "7946" in result
+
+    def test_regex_fallback_long_number_prepends_plus(self) -> None:
+        result = PhoneNormalizer.normalize("44207946095812")
+        assert result.startswith("+")
+
+    def test_empty_returns_as_is(self) -> None:
+        assert PhoneNormalizer.normalize("") == ""
+
+    def test_none_returns_none(self) -> None:
+        assert PhoneNormalizer.normalize(None) is None  # type: ignore[arg-type]
+
+    def test_non_string_returns_as_is(self) -> None:
+        assert PhoneNormalizer.normalize(12345) == 12345  # type: ignore[arg-type]
+
+    def test_garbage_returns_original(self) -> None:
+        # No digits at all → returns original
+        assert PhoneNormalizer.normalize("no phone here") == "no phone here"
+
+    def test_too_short_returns_original(self) -> None:
+        assert PhoneNormalizer.normalize("123") == "123"
+
+    def test_whitespace_only_returns_original(self) -> None:
+        assert PhoneNormalizer.normalize("   ") == "   "
+
+    def test_e164_output_when_phonenumbers_available(self) -> None:
+        """If phonenumbers is installed, E.164 formatting should be used."""
+        try:
+            import phonenumbers  # noqa: F401
+
+            result = PhoneNormalizer.normalize("+1 (555) 123-4567")
+            assert result == "+15551234567"
+        except ImportError:
+            pytest.skip("phonenumbers not installed")
+
+    def test_e164_international_uk(self) -> None:
+        try:
+            import phonenumbers  # noqa: F401
+
+            result = PhoneNormalizer.normalize("+44 20 7946 0958")
+            assert result == "+442079460958"
+        except ImportError:
+            pytest.skip("phonenumbers not installed")
+
+    def test_e164_international_japan(self) -> None:
+        try:
+            import phonenumbers  # noqa: F401
+
+            result = PhoneNormalizer.normalize("+81 3-1234-5678")
+            assert result == "+81312345678"
+        except ImportError:
+            pytest.skip("phonenumbers not installed")
+
+    def test_e164_invalid_number_falls_back(self) -> None:
+        """Invalid phone numbers fall back to regex strip."""
+        result = PhoneNormalizer.normalize("+99 000 000 0000")
+        # Should return something (regex fallback), not crash
+        assert isinstance(result, str)
+
+    def test_default_region_parameter(self) -> None:
+        """The default_region kwarg is accepted for phonenumbers parsing."""
+        try:
+            import phonenumbers  # noqa: F401
+
+            result = PhoneNormalizer.normalize("(02) 1234 5678", default_region="AU")
+            assert result.startswith("+61")
+        except ImportError:
+            pytest.skip("phonenumbers not installed")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.1 — RECURSIVE / NESTED PAYLOAD SUPPORT
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestNestedPayloadDepth:
+    """Test map_payload() with depth parameter for nested dicts."""
+
+    def test_depth_1_flat_only(self) -> None:
+        """depth=1 (default) only processes top-level keys."""
+        mapper = ContactMapper()
+        payload = {
+            "email": "test@example.com",
+            "address": {"line1": "123 Main St", "city": "Springfield"},
+        }
+        result = mapper.map_payload(payload, depth=1)
+        assert result.normalized["email"] == "test@example.com"
+        # nested dict preserved in unmapped or normalized as-is
+        assert "address" not in result.unmapped or isinstance(result.unmapped.get("address"), dict)
+
+    def test_depth_2_flattens_one_level(self) -> None:
+        """depth=2 flattens nested dicts one level."""
+        mapper = ContactMapper()
+        payload = {
+            "email": "test@example.com",
+            "address": {"line1": "123 Main St", "city": "Springfield"},
+        }
+        result = mapper.map_payload(payload, depth=2)
+        assert result.normalized["email"] == "test@example.com"
+        # address_city should resolve to city via normalizer
+        assert "city" in result.normalized
+
+    def test_stripe_style_nested(self) -> None:
+        """Stripe-style nested address payload."""
+        mapper = ContactMapper()
+        payload = {
+            "email": "jane@stripe.com",
+            "name": "Jane Doe",
+            "address": {
+                "line1": "123 Main St",
+                "city": "San Francisco",
+                "state": "CA",
+                "postal_code": "94105",
+                "country": "US",
+            },
+        }
+        result = mapper.map_payload(payload, depth=2)
+        assert result.normalized["email"] == "jane@stripe.com"
+        assert result.normalized["full_name"] == "Jane Doe"
+        # Flattened address fields should resolve
+        assert "city" in result.normalized
+        assert "state" in result.normalized
+        assert "postal_code" in result.normalized
+        assert "country" in result.normalized
+
+    def test_hubspot_style_properties_wrapper(self) -> None:
+        """HubSpot-style properties wrapper."""
+        mapper = ContactMapper()
+        payload = {
+            "properties": {
+                "email": "lead@company.com",
+                "firstname": "Alice",
+                "lastname": "Smith",
+                "company": "Acme Corp",
+            }
+        }
+        result = mapper.map_payload(payload, depth=2)
+        assert result.normalized["email"] == "lead@company.com"
+        assert result.normalized["first_name"] == "Alice"
+        assert result.normalized["last_name"] == "Smith"
+        assert result.normalized["company"] == "Acme Corp"
+
+    def test_mailchimp_merge_fields(self) -> None:
+        """Mailchimp merge_fields wrapper."""
+        mapper = ContactMapper()
+        payload = {
+            "email_address": "bob@mc.com",
+            "merge_fields": {
+                "FNAME": "Bob",
+                "LNAME": "Jones",
+                "PHONE": "555-0100",
+            },
+        }
+        result = mapper.map_payload(payload, depth=2)
+        assert result.normalized["email"] == "bob@mc.com"
+        assert result.normalized["first_name"] == "Bob"
+
+    def test_depth_clamped_maximum_5(self) -> None:
+        """depth > 5 is clamped to 5."""
+        mapper = ContactMapper()
+        payload = {"email": "a@b.com"}
+        result = mapper.map_payload(payload, depth=100)
+        assert result.normalized["email"] == "a@b.com"
+
+    def test_depth_clamped_minimum_1(self) -> None:
+        """depth < 1 is clamped to 1."""
+        mapper = ContactMapper()
+        payload = {"email": "a@b.com"}
+        result = mapper.map_payload(payload, depth=0)
+        assert result.normalized["email"] == "a@b.com"
+
+    def test_deeply_nested_depth_3(self) -> None:
+        """depth=3 flattens two levels of nesting."""
+        mapper = ContactMapper()
+        payload = {
+            "contact": {
+                "info": {
+                    "email": "deep@test.com",
+                    "first_name": "Deep",
+                }
+            }
+        }
+        result = mapper.map_payload(payload, depth=3)
+        assert result.normalized["email"] == "deep@test.com"
+        assert result.normalized["first_name"] == "Deep"
+
+    def test_non_dict_values_preserved(self) -> None:
+        """Non-dict values are not recursed into."""
+        mapper = ContactMapper()
+        payload = {
+            "email": "test@test.com",
+            "tags": ["a", "b", "c"],
+            "score": 42,
+        }
+        result = mapper.map_payload(payload, depth=2)
+        assert result.normalized["email"] == "test@test.com"
+        assert result.normalized["tags"] == ["a", "b", "c"]
+        assert result.normalized["score"] == 42
+
+    def test_map_batch_with_depth(self) -> None:
+        """map_batch passes depth through."""
+        mapper = ContactMapper()
+        payloads = [
+            {"properties": {"email": "a@a.com", "firstname": "A"}},
+            {"properties": {"email": "b@b.com", "firstname": "B"}},
+        ]
+        results = mapper.map_batch(payloads, depth=2)
+        assert len(results) == 2
+        assert results[0].normalized["email"] == "a@a.com"
+        assert results[1].normalized["first_name"] == "B"
+
+    def test_flatten_static_method(self) -> None:
+        """Test _flatten directly."""
+        flat = ContactMapper._flatten(
+            {"a": {"b": "val", "c": "val2"}, "d": "top"},
+            depth=2,
+        )
+        assert flat == {"a.b": "val", "a.c": "val2", "d": "top"}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.1 — NEW CANONICAL FIELDS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestNewCanonicalFields:
+    """Test the 4 new fields added in v2.1."""
+
+    def test_source_id_in_enum(self) -> None:
+        assert CanonicalField.SOURCE_ID == "source_id"
+
+    def test_source_service_in_enum(self) -> None:
+        assert CanonicalField.SOURCE_SERVICE == "source_service"
+
+    def test_subscribed_in_enum(self) -> None:
+        assert CanonicalField.SUBSCRIBED == "subscribed"
+
+    def test_verified_in_enum(self) -> None:
+        assert CanonicalField.VERIFIED == "verified"
+
+    @pytest.mark.parametrize(
+        "header,expected",
+        [
+            ("source_id", "source_id"),
+            ("external_id", "source_id"),
+            ("remote_id", "source_id"),
+            ("customer_id", "source_id"),
+            ("stripe_id", "source_id"),
+            ("crm_id", "source_id"),
+            ("source_service", "source_service"),
+            ("source_system", "source_service"),
+            ("provider", "source_service"),
+            ("data_source", "source_service"),
+            ("imported_from", "source_service"),
+            ("integration", "source_service"),
+            ("platform", "source_service"),
+            ("subscribed", "subscribed"),
+            ("is_subscribed", "subscribed"),
+            ("subscription_status", "subscribed"),
+            ("opted_in", "subscribed"),
+            ("newsletter", "subscribed"),
+            ("verified", "verified"),
+            ("is_verified", "verified"),
+            ("email_verified", "verified"),
+            ("confirmed", "verified"),
+            ("email_confirmed", "verified"),
+            ("validated", "verified"),
+        ],
+    )
+    def test_new_field_aliases(self, header: str, expected: str) -> None:
+        mapper = ContactMapper()
+        m = mapper.identify(header)
+        assert m.canonical == expected, f"{header!r} → {m.canonical!r}, expected {expected!r}"
+
+    def test_payload_with_new_fields(self) -> None:
+        mapper = ContactMapper()
+        result = mapper.map_payload(
+            {
+                "email": "test@example.com",
+                "source_id": "cus_abc123",
+                "source_service": "stripe",
+                "subscribed": True,
+                "verified": True,
+            }
+        )
+        assert result.normalized["email"] == "test@example.com"
+        assert result.normalized["source_id"] == "cus_abc123"
+        assert result.normalized["source_service"] == "stripe"
+        assert result.normalized["subscribed"] is True
+        assert result.normalized["verified"] is True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.1 — DYNAMIC SERVICE RESOLUTION (verifying #3 deprecated)
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestWishlistServicesDynamic:
+    """Verify the 8 'missing' services from the wishlist resolve
+    dynamically without any service profiles.
+    """
+
+    @pytest.mark.parametrize(
+        "header,expected",
+        [
+            # mailgun
+            ("address", "address_line1"),
+            ("name", "full_name"),
+            ("subscribed", "subscribed"),
+            ("created_at", "created_at"),
+            # mailersend
+            ("email", "email"),
+            ("first_name", "first_name"),
+            ("last_name", "last_name"),
+            # postmark
+            ("Email", "email"),
+            ("Name", "full_name"),
+            ("Description", "notes"),
+            # moosend
+            ("FirstName", "first_name"),
+            ("LastName", "last_name"),
+            ("Phone", "phone"),
+            ("MobilePhone", "phone"),
+            ("Company", "company"),
+            ("Country", "country"),
+            ("City", "city"),
+            ("Zip", "postal_code"),
+            ("CreatedOn", "created_at"),
+            # getresponse
+            ("dayOfBirth", "birthday"),
+            ("tags", "tags"),
+            ("ipAddress", "metadata"),
+            # campaignmonitor
+            ("EmailAddress", "email"),
+            ("State", "state"),
+            ("CustomFields", "metadata"),
+            # elasticemail
+            ("firstName", "first_name"),
+            ("lastName", "last_name"),
+            ("phone", "phone"),
+            ("status", "lead_status"),
+            ("dateAdded", "created_at"),
+            # smtp2go
+            ("subject", "subject"),
+        ],
+    )
+    def test_service_field_resolves(self, header: str, expected: str) -> None:
+        mapper = ContactMapper()
+        m = mapper.identify(header)
+        assert m.is_matched, f"{header!r} → {m.canonical!r} (unmatched, strategy={m.strategy})"
+        assert m.canonical == expected, f"{header!r} → {m.canonical!r}, expected {expected!r}"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.1 — ALIAS GAP FIXES
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestAliasGapFixes:
+    """Aliases added to close gaps found during service verification."""
+
+    @pytest.mark.parametrize(
+        "header,expected",
+        [
+            ("created_on", "created_at"),
+            ("day_of_birth", "birthday"),
+            ("ip_address", "metadata"),
+        ],
+    )
+    def test_gap_alias(self, header: str, expected: str) -> None:
+        mapper = ContactMapper()
+        m = mapper.identify(header)
+        assert m.canonical == expected

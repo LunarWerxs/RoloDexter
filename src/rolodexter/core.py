@@ -120,6 +120,11 @@ class CanonicalField(str, Enum):
     # Meta
     NOTES = "notes"
     METADATA = "metadata"
+    # Provenance / Integration
+    SOURCE_ID = "source_id"
+    SOURCE_SERVICE = "source_service"
+    SUBSCRIBED = "subscribed"
+    VERIFIED = "verified"
     UNKNOWN = "unknown"
 
 
@@ -206,19 +211,60 @@ class MappingResult:
 _PHONE_STRIP = re.compile(r"[^\d+]")
 
 
+def _phonenumbers_available() -> bool:
+    """Return True if the ``phonenumbers`` package is importable."""
+    try:
+        import phonenumbers as _pn  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 class PhoneNormalizer:
+    """Normalize phone values to E.164 when possible.
+
+    If the optional ``phonenumbers`` package is installed
+    (``pip install rolodexter[phone]``), numbers are parsed via
+    Google's libphonenumber and formatted as E.164.  When the
+    library is unavailable or parsing fails, a lightweight regex
+    fallback strips non-digit characters.
+    """
+
     _STRIP = _PHONE_STRIP
 
     @classmethod
-    def normalize(cls, value: str) -> str:
+    def normalize(cls, value: str, *, default_region: str | None = None) -> str:
         if not value or not isinstance(value, str):
             return value  # type: ignore[return-value]
-        digits = cls._STRIP.sub("", value.strip())
-        if not digits:
+
+        raw = value.strip()
+        if not raw:
             return value
-        if len(digits) > 10 and not digits.startswith("+"):
-            digits = "+" + digits
-        return digits
+
+        # ── E.164 via phonenumbers (optional) ───────────────────────
+        if _phonenumbers_available():
+            import phonenumbers
+            from phonenumbers import NumberParseException
+
+            try:
+                parsed = phonenumbers.parse(raw, default_region)
+                if phonenumbers.is_valid_number(parsed):
+                    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+            except NumberParseException:
+                pass
+
+        # ── Regex fallback ──────────────────────────────────────────
+        cleaned = cls._STRIP.sub("", raw)
+        if not cleaned:
+            return value
+        if len(cleaned) > 10 and not cleaned.startswith("+"):
+            cleaned = "+" + cleaned
+        # Reject implausible lengths
+        digit_count = sum(c.isdigit() for c in cleaned)
+        if digit_count < 7 or digit_count > 15:
+            return value
+        return cleaned
 
 
 class EmailNormalizer:
@@ -389,7 +435,7 @@ class PatternRegistry:
             pkg = resources.files("rolodexter._data")
             i18n_dir = pkg / "i18n"
             for item in i18n_dir.iterdir():
-                if hasattr(item, 'name') and item.name.endswith(".json"):
+                if hasattr(item, "name") and item.name.endswith(".json"):
                     lang_code = item.name[:-5]  # strip .json
                     files[lang_code] = item
         except Exception:
@@ -538,19 +584,37 @@ class NormalizedMatchStrategy(MatchStrategy):
     __slots__ = ("_registry",)
 
     # Prefixes whose dotted object.name → company
-    _COMPANY_PREFIXES = frozenset({
-        "account", "accounts", "org", "organization", "organisations",
-        "organizations", "organisation", "company", "companies",
-        "firm", "business", "enterprise",
-    })
+    _COMPANY_PREFIXES = frozenset(
+        {
+            "account",
+            "accounts",
+            "org",
+            "organization",
+            "organisations",
+            "organizations",
+            "organisation",
+            "company",
+            "companies",
+            "firm",
+            "business",
+            "enterprise",
+        }
+    )
 
     # Vendor-specific prefixes to strip
     _VENDOR_PREFIXES = ("hs_", "hubspot_", "sf_", "salesforce_")
 
     # Address-context prefixes (the suffix IS the field)
     _ADDRESS_PREFIXES = (
-        "business_", "mailing_", "home_", "other_", "personal_",
-        "shipping_", "billing_", "primary_", "secondary_",
+        "business_",
+        "mailing_",
+        "home_",
+        "other_",
+        "personal_",
+        "shipping_",
+        "billing_",
+        "primary_",
+        "secondary_",
     )
 
     _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -612,8 +676,8 @@ class NormalizedMatchStrategy(MatchStrategy):
             grp = re.sub(r"[\s\-]+", "_", m.group(1).strip()).lower()
             prop = re.sub(r"[\s\-]+", "_", m.group(2).strip()).lower()
             out.append(f"{grp}_{prop}")  # organization_name
-            out.append(prop)              # name
-            out.append(grp)               # organization
+            out.append(prop)  # name
+            out.append(grp)  # organization
 
         # 5. Number stripping  ("E-mail 2 Address" → e_mail_address)
         num_stripped = re.sub(r"_\d+", "", uscore)
@@ -624,14 +688,14 @@ class NormalizedMatchStrategy(MatchStrategy):
         # 6. Vendor prefix stripping  (hs_lead_status → lead_status)
         for pfx in self._VENDOR_PREFIXES:
             if uscore.startswith(pfx):
-                stripped = uscore[len(pfx):]
+                stripped = uscore[len(pfx) :]
                 if stripped:
                     out.append(stripped)
 
         # 7. Address prefix stripping  (business_city → city)
         for pfx in self._ADDRESS_PREFIXES:
             if uscore.startswith(pfx):
-                stripped = uscore[len(pfx):]
+                stripped = uscore[len(pfx) :]
                 if stripped:
                     out.append(stripped)
 
@@ -644,7 +708,7 @@ class NormalizedMatchStrategy(MatchStrategy):
                 # Also strip vendor prefix off the base
                 for pfx in self._VENDOR_PREFIXES:
                     if base.startswith(pfx):
-                        inner = base[len(pfx):]
+                        inner = base[len(pfx) :]
                         if inner and inner not in out:
                             out.append(inner)
 
@@ -774,9 +838,7 @@ class ContactMapper:
         strategies: Sequence[MatchStrategy] | None = None,
         languages: str | Sequence[str] | None = "all",
     ) -> None:
-        self._registry = PatternRegistry(
-            patterns=patterns, patterns_path=patterns_path, languages=languages
-        )
+        self._registry = PatternRegistry(patterns=patterns, patterns_path=patterns_path, languages=languages)
         self._normalize = normalize
 
         if strategies is not None:
@@ -801,17 +863,38 @@ class ContactMapper:
                 return result
         return FieldMatch(original=header, canonical=CanonicalField.UNKNOWN.value, confidence=0.0, strategy="none")
 
-    def map_payload(self, payload: dict[str, Any], *, service: str | None = None) -> MappingResult:
+    def map_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        service: str | None = None,
+        depth: int = 1,
+    ) -> MappingResult:
         """Normalize an entire contact data dictionary.
 
-        The *service* parameter is accepted for backward compatibility
-        but is ignored since v2.0.
+        Parameters
+        ----------
+        payload : dict
+            Raw contact data to normalize.
+        service : str, optional
+            Accepted for backward compatibility; ignored since v2.0.
+        depth : int, default 1
+            Recursion depth for nested payloads.  ``1`` (default) processes
+            only the top-level keys.  ``2`` also recurses one level into
+            nested dicts.  Maximum supported value is ``5``.
+
+        Returns
+        -------
+        MappingResult
         """
+        depth = max(1, min(depth, 5))
+        flat = self._flatten(payload, depth) if depth > 1 else payload
+
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
         matches: list[FieldMatch] = []
 
-        for key, value in payload.items():
+        for key, value in flat.items():
             str_val = str(value) if value is not None else None
             match = self.identify(key, value=str_val)
             matches.append(match)
@@ -824,19 +907,39 @@ class ContactMapper:
 
         return MappingResult(normalized=normalized, unmapped=unmapped, field_matches=tuple(matches))
 
-    def map_batch(self, payloads: Sequence[dict[str, Any]], *, service: str | None = None) -> list[MappingResult]:
+    @staticmethod
+    def _flatten(
+        payload: dict[str, Any],
+        depth: int,
+        _prefix: str = "",
+        _current: int = 1,
+    ) -> dict[str, Any]:
+        """Recursively flatten nested dicts up to *depth* levels.
+
+        Nested keys are joined with ``_``.  Non-dict values and dicts
+        beyond the depth limit are preserved as-is.
+        """
+        result: dict[str, Any] = {}
+        for key, value in payload.items():
+            full_key = f"{_prefix}{key}" if _prefix else key
+            if isinstance(value, dict) and _current < depth:
+                result.update(ContactMapper._flatten(value, depth, f"{full_key}.", _current + 1))
+            else:
+                result[full_key] = value
+        return result
+
+    def map_batch(
+        self, payloads: Sequence[dict[str, Any]], *, service: str | None = None, depth: int = 1
+    ) -> list[MappingResult]:
         """Process multiple payloads."""
-        return [self.map_payload(p) for p in payloads]
+        return [self.map_payload(p, depth=depth) for p in payloads]
 
     @property
     def registry(self) -> PatternRegistry:
         return self._registry
 
     def __repr__(self) -> str:
-        return (
-            f"ContactMapper(strategies={[s.name for s in self._strategies]}, "
-            f"normalize={self._normalize})"
-        )
+        return f"ContactMapper(strategies={[s.name for s in self._strategies]}, " f"normalize={self._normalize})"
 
 
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:
