@@ -21,6 +21,20 @@ Quick start::
 
 from __future__ import annotations
 
+from ._phone import (
+    MatchType,
+    NumberType,
+    PhoneNumber,
+    PhoneNumberMatch,
+    PhoneNumberMatcher,
+    format_e164,
+    format_international,
+    format_national,
+    is_number_match,
+    is_valid,
+    number_type,
+    parse,
+)
 from .core import (
     AddressNormalizer,
     CanonicalField,
@@ -45,9 +59,8 @@ from .core import (
     StringNormalizer,
     normalize_value,
 )
-from ._phone import PhoneNumber, format_e164, is_valid, parse
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 __all__ = [
     "AddressNormalizer",
@@ -72,6 +85,10 @@ __all__ = [
     "PhoneNormalizer",
     # Phone module
     "PhoneNumber",
+    "PhoneNumberMatch",
+    "PhoneNumberMatcher",
+    "MatchType",
+    "NumberType",
     # Exceptions
     "RolodexterError",
     "ServiceMatchStrategy",
@@ -79,7 +96,11 @@ __all__ = [
     "StrategyError",
     "StringNormalizer",
     "format_e164",
+    "format_international",
+    "format_national",
+    "is_number_match",
     "is_valid",
     "normalize_value",
+    "number_type",
     "parse",
 ]
