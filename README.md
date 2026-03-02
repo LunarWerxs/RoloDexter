@@ -6,7 +6,7 @@
 
 Route messy, inconsistent contact data from *any* source to a clean, canonical schema.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/LunarWerx/rolodexter/ci.yml?label=CI)](https://github.com/LunarWerx/rolodexter/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/lunawerx/rolodexter/ci.yml?label=CI)](https://github.com/lunawerx/rolodexter/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/rolodexter)](https://pypi.org/project/rolodexter/)
 [![Python](https://img.shields.io/pypi/pyversions/rolodexter)](https://pypi.org/project/rolodexter/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -294,7 +294,7 @@ rolodexter/
 ## Contributing
 
 ```bash
-git clone https://github.com/LunarWerx/rolodexter.git
+git clone https://github.com/lunawerx/rolodexter.git
 cd rolodexter
 pip install -e ".[dev]"
 pytest

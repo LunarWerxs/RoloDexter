@@ -50,3 +50,6 @@ dmypy.json
 .audit_tmp/
 .env
 logo/
+# SayDeploy Credentials
+/.saydeploy/
+/.saydeploy/credentials.toml
