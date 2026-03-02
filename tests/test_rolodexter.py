@@ -1643,8 +1643,9 @@ class TestI18nModule:
     # --- cache dirs ---
 
     def test_get_cache_dir_returns_path(self) -> None:
-        from rolodexter.i18n import get_cache_dir
         from pathlib import Path
+
+        from rolodexter.i18n import get_cache_dir
 
         d = get_cache_dir()
         assert isinstance(d, Path)
@@ -1753,8 +1754,9 @@ class TestI18nModule:
 
     def test_write_and_load_cache(self, tmp_path: Path) -> None:
         """Write a cache file via _write_cache, read it back with load_cached."""
-        from rolodexter.i18n import _write_cache, load_cached
         import json
+
+        from rolodexter.i18n import _write_cache, load_cached
 
         lang_data = {
             "language_code": "zz_test",
@@ -1852,8 +1854,9 @@ class TestI18nModule:
 
     def test_generate_language_uses_cache(self, tmp_path: Path) -> None:
         """generate_language returns cached data without translating."""
-        import rolodexter.i18n as i18n_mod
         import json
+
+        import rolodexter.i18n as i18n_mod
 
         cached = {
             "language_code": "de",
@@ -3068,7 +3071,7 @@ class TestExpansionEngine:
     """Verify programmatic alias expansion from patterns.json rules."""
 
     def test_form_prefix_generates_aliases(self, registry: PatternRegistry) -> None:
-        """Every form_prefix × form_field combo should resolve."""
+        """Every form_prefix x form_field combo should resolve."""
         # These are NOT in the seed aliases — purely expansion-generated
         for prefix in ("billing_", "shipping_", "your_", "your-", "contact_", "customer_", "applicant_"):
             for suffix, expected in (("email", "email"), ("phone", "phone"), ("city", "city")):
@@ -3077,7 +3080,7 @@ class TestExpansionEngine:
                 assert result == expected, f"{alias} → {result}, expected {expected}"
 
     def test_social_suffix_generates_aliases(self, registry: PatternRegistry) -> None:
-        """Every social_field × social_suffix combo should resolve."""
+        """Every social_field x social_suffix combo should resolve."""
         for platform in ("twitter", "instagram", "facebook", "github", "discord", "telegram"):
             for suffix in ("_url", "_handle", "_profile", "_username", "_link", "_id"):
                 alias = f"{platform}{suffix}"
@@ -3722,10 +3725,10 @@ class TestI18nGenerateLanguageCached:
 
     def test_force_bypasses_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With force=True and no deep-translator, ImportError is raised."""
-        from rolodexter.i18n import generate_language
-
         # Remove deep-translator from available imports
         import builtins
+
+        from rolodexter.i18n import generate_language
 
         original_import = builtins.__import__
 
@@ -3765,7 +3768,7 @@ class TestI18nLoadMasterFallback:
     def test_fallback_when_resources_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from rolodexter import i18n
 
-        def broken_files(pkg_name):
+        def broken_files(_pkg_name):
             raise Exception("mocked resources failure")
 
         monkeypatch.setattr("rolodexter.i18n.resources.files", broken_files)
@@ -3779,9 +3782,7 @@ class TestPatternRegistryLanguages:
 
     def test_languages_list_with_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Loading a language that has cached data."""
-        from rolodexter.i18n import _write_cache
-
-        from rolodexter.i18n import get_cache_dir
+        from rolodexter.i18n import _write_cache, get_cache_dir
 
         cache_dir = get_cache_dir()
         lang_data = {
@@ -3809,7 +3810,7 @@ class TestPatternRegistryLanguages:
         def _no_cache(code: str):
             return None
 
-        def _no_translator(*a, **kw):
+        def _no_translator(*_a, **_kw):
             raise ImportError("deep-translator not installed (mocked)")
 
         monkeypatch.setattr(_i18n_mod, "load_cached", _no_cache)
@@ -3937,7 +3938,7 @@ class TestI18nTranslateBatchFallback:
         call_count = {"batch": 0, "single": 0}
 
         class MockTranslator:
-            def __init__(self, source, target):
+            def __init__(self, **_kwargs):
                 pass
 
             def translate_batch(self, phrases):
@@ -3965,7 +3966,7 @@ class TestI18nTranslateBatchFallback:
         from rolodexter import i18n
 
         class FailTranslator:
-            def __init__(self, source, target):
+            def __init__(self, **_kwargs):
                 pass
 
             def translate_batch(self, phrases):

@@ -3,6 +3,8 @@
 This single module contains the complete implementation:
 exceptions, enums, models, normalizers, registry, strategies, and mapper.
 """
+# pylint: disable=import-outside-toplevel  # optional-dep lazy imports are intentional
+# pylint: disable=too-many-lines           # single-module library design
 
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, unique
 from importlib import resources
-from typing import Any
+from typing import Any, cast
 
 # ═══════════════════════════════════════════════════════════════════════
 #  EXCEPTIONS
@@ -158,7 +160,9 @@ class MappingResult:
     @property
     def match_rate(self) -> float:
         total = len(self.field_matches)
-        return sum(1 for m in self.field_matches if m.is_matched) / total if total else 0.0
+        return (
+            sum(1 for m in self.field_matches if m.is_matched) / total if total else 0.0
+        )
 
     @property
     def matched_count(self) -> int:
@@ -240,7 +244,7 @@ class PhoneNormalizer:
     @classmethod
     def normalize(cls, value: str, *, default_region: str | None = None) -> str:
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
 
         raw = value.strip()
         if not raw:
@@ -259,7 +263,7 @@ class EmailNormalizer:
     @staticmethod
     def normalize(value: str) -> str:
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         return value.strip().lower()
 
 
@@ -302,7 +306,7 @@ class NameNormalizer:
     def normalize(cls, value: str) -> str:
         """Capitalize a name string with culturally-aware rules."""
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         text = value.strip()
         if not text:
             return value
@@ -324,7 +328,7 @@ class NameNormalizer:
         .. versionadded:: 2.5.0
         """
         cls._ensure_prefixes()
-        from nameparser import HumanName  # type: ignore[import-untyped]
+        from nameparser import HumanName
 
         hn = HumanName(value.strip())
         return {
@@ -341,7 +345,7 @@ class AddressNormalizer:
     @staticmethod
     def normalize(value: str) -> str:
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         return " ".join(value.strip().split()).title()
 
 
@@ -349,7 +353,7 @@ class StringNormalizer:
     @staticmethod
     def normalize(value: str) -> str:
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         return value.strip()
 
 
@@ -361,7 +365,7 @@ class PostalCodeNormalizer:
     @classmethod
     def normalize(cls, value: str) -> str:
         if not value or not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         cleaned = value.strip().upper()
         m = cls._CA_RE.match(cleaned)
         if m:
@@ -372,13 +376,17 @@ class PostalCodeNormalizer:
 class BooleanNormalizer:
     """Normalize boolean-like strings to Python bools."""
 
-    _TRUE = frozenset({"true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"})
-    _FALSE = frozenset({"false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"})
+    _TRUE = frozenset(
+        {"true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"}
+    )
+    _FALSE = frozenset(
+        {"false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"}
+    )
 
     @classmethod
     def normalize(cls, value: str) -> bool | str:
         if not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         lower = value.strip().lower()
         if lower in cls._TRUE:
             return True
@@ -399,7 +407,7 @@ class ListNormalizer:
     """
 
     @staticmethod
-    def normalize(value: Any) -> list[str] | Any:
+    def normalize(value: Any) -> list[str] | Any:  # pylint: disable=too-many-return-statements
         if isinstance(value, list):
             return [str(v).strip() for v in value if str(v).strip()]
         if not isinstance(value, str):
@@ -431,19 +439,42 @@ class ListNormalizer:
 
 # Category sets — each canonical field belongs to exactly one normalizer group.
 # Adding a new CanonicalField? Just add it to the right set below.
-_PHONE_FIELDS: frozenset[str] = frozenset({"phone", "home_phone", "work_phone", "fax", "whatsapp"})
-_NAME_FIELDS: frozenset[str] = frozenset(
-    {"first_name", "last_name", "full_name", "middle_name", "nickname", "prefix", "suffix"}
+_PHONE_FIELDS: frozenset[str] = frozenset(
+    {"phone", "home_phone", "work_phone", "fax", "whatsapp"}
 )
-_ADDRESS_FIELDS: frozenset[str] = frozenset({"address_line1", "address_line2", "city", "full_address"})
+_NAME_FIELDS: frozenset[str] = frozenset(
+    {
+        "first_name",
+        "last_name",
+        "full_name",
+        "middle_name",
+        "nickname",
+        "prefix",
+        "suffix",
+    }
+)
+_ADDRESS_FIELDS: frozenset[str] = frozenset(
+    {"address_line1", "address_line2", "city", "full_address"}
+)
 _BOOLEAN_FIELDS: frozenset[str] = frozenset({"email_opt_out", "subscribed", "verified"})
 _LIST_FIELDS: frozenset[str] = frozenset({"tags"})
 _SOCIAL_FIELDS: frozenset[str] = frozenset(
-    {"website", "linkedin", "twitter", "facebook", "instagram", "github", "youtube", "tiktok", "discord", "telegram"}
+    {
+        "website",
+        "linkedin",
+        "twitter",
+        "facebook",
+        "instagram",
+        "github",
+        "youtube",
+        "tiktok",
+        "discord",
+        "telegram",
+    }
 )
 
 # Build the lookup dict programmatically from the category sets.
-_FIELD_NORMALIZERS: dict[str, type] = {
+_FIELD_NORMALIZERS: dict[str, Any] = {  # maps canonical field → normalizer class
     **{f: PhoneNormalizer for f in _PHONE_FIELDS},
     **{f: NameNormalizer for f in _NAME_FIELDS},
     **{f: AddressNormalizer for f in _ADDRESS_FIELDS},
@@ -521,20 +552,22 @@ class PatternRegistry:
     def _load_from_path(path: str) -> dict[str, Any]:
         try:
             with open(path, encoding="utf-8") as fh:
-                return json.load(fh)
+                return cast(dict[str, Any], json.load(fh))
         except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-            raise PatternLoadError(f"Failed to load patterns from {path}: {exc}") from exc
+            raise PatternLoadError(
+                f"Failed to load patterns from {path}: {exc}"
+            ) from exc
 
     @staticmethod
     def _load_default() -> dict[str, Any]:
         try:
             pkg = resources.files("rolodexter")
             text = pkg.joinpath("patterns.json").read_text(encoding="utf-8")
-            return json.loads(text)
+            return cast(dict[str, Any], json.loads(text))
         except Exception as exc:
             raise PatternLoadError(f"Failed to load bundled patterns: {exc}") from exc
 
-    def _build_indexes(self) -> None:
+    def _build_indexes(self) -> None:  # pylint: disable=too-many-branches
         fields: dict[str, list[str]] = self._data.get("fields", {})
         for canonical, aliases in fields.items():
             self._canonical_fields.append(canonical)
@@ -548,12 +581,16 @@ class PatternRegistry:
         self._apply_expansion_rules()
 
         # ── i18n layer (on-demand) ──────────────────────────────────
-        from .i18n import SUPPORTED_LANGUAGES, discover_cached, load_cached
+        from .i18n import SUPPORTED_LANGUAGES, load_cached
 
         if self._languages == "all":
             lang_codes = sorted(SUPPORTED_LANGUAGES.keys())
         elif self._languages:
-            lang_codes = list(self._languages) if not isinstance(self._languages, str) else [self._languages]
+            lang_codes = (
+                list(self._languages)
+                if not isinstance(self._languages, str)
+                else [self._languages]
+            )
         else:
             lang_codes = []
 
@@ -669,7 +706,7 @@ class PatternRegistry:
 
     @property
     def version(self) -> str:
-        return self._data.get("version", "0.0.0")
+        return str(self._data.get("version", "0.0.0"))
 
     def __repr__(self) -> str:
         return (
@@ -692,7 +729,9 @@ class MatchStrategy(ABC):
     def name(self) -> str: ...
 
     @abstractmethod
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None: ...
+    def match(
+        self, header: str, value: str | None = None, **kwargs: object
+    ) -> FieldMatch | None: ...
 
 
 class ExactMatchStrategy(MatchStrategy):
@@ -705,11 +744,16 @@ class ExactMatchStrategy(MatchStrategy):
     def name(self) -> str:
         return "exact"
 
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
+    def match(
+        self, header: str, value: str | None = None, **kwargs: object
+    ) -> FieldMatch | None:
         canonical = self._registry.exact_lookup(header)
         if canonical is not None:
             return FieldMatch(
-                original=header, canonical=canonical, confidence=EXACT_MATCH_CONFIDENCE, strategy=self.name
+                original=header,
+                canonical=canonical,
+                confidence=EXACT_MATCH_CONFIDENCE,
+                strategy=self.name,
             )
         return None
 
@@ -772,7 +816,7 @@ class NormalizedMatchStrategy(MatchStrategy):
     )
 
     _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-    _INDEXED_RE = re.compile(r"^(.+?)\s+\d+\s*(?:[-–—]\s*)?(.+)$")
+    _INDEXED_RE = re.compile(r"^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$")
 
     def __init__(self, registry: PatternRegistry) -> None:
         self._registry = registry
@@ -785,7 +829,7 @@ class NormalizedMatchStrategy(MatchStrategy):
     def _lookup(self, candidate: str) -> str | None:
         return self._registry.exact_lookup(candidate)
 
-    def _candidates(self, header: str) -> list[str]:
+    def _candidates(self, header: str) -> list[str]:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         out: list[str] = []
         h = header.strip()
         if not h:
@@ -813,7 +857,10 @@ class NormalizedMatchStrategy(MatchStrategy):
             suffix_lower = re.sub(r"[\s\-]+", "_", suffix_raw).lower()
             # Context-aware: company-like prefix + 'name' → company
             last_prefix = prefix_raw.rsplit(".", 1)[-1]
-            if last_prefix in self._COMPANY_PREFIXES and suffix_lower in ("name", "nombre"):
+            if last_prefix in self._COMPANY_PREFIXES and suffix_lower in (
+                "name",
+                "nombre",
+            ):
                 out.insert(0, "company")
             # Last segment (underscore-normalised)
             out.append(suffix_lower)
@@ -869,7 +916,9 @@ class NormalizedMatchStrategy(MatchStrategy):
         return out
 
     # ------------------------------------------------------------------
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
+    def match(
+        self, header: str, value: str | None = None, **kwargs: object
+    ) -> FieldMatch | None:
         for candidate in self._candidates(header):
             canonical = self._lookup(candidate)
             if canonical is not None:
@@ -888,7 +937,7 @@ class FuzzyMatchStrategy(MatchStrategy):
     def __init__(self, registry: PatternRegistry) -> None:
         self._registry = registry
         try:
-            import rapidfuzz  # noqa: F401
+            import rapidfuzz  # noqa: F401  # pylint: disable=unused-import
 
             self._available = True
         except ImportError:
@@ -898,7 +947,9 @@ class FuzzyMatchStrategy(MatchStrategy):
     def name(self) -> str:
         return "fuzzy"
 
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
+    def match(
+        self, header: str, value: str | None = None, **kwargs: object
+    ) -> FieldMatch | None:
         if not self._available:
             return None
         from rapidfuzz import fuzz, process
@@ -917,7 +968,9 @@ class FuzzyMatchStrategy(MatchStrategy):
         if not filtered:
             return None
 
-        result = process.extractOne(clean, filtered, scorer=fuzz.WRatio, score_cutoff=FUZZY_MATCH_THRESHOLD)
+        result = process.extractOne(
+            clean, filtered, scorer=fuzz.WRatio, score_cutoff=FUZZY_MATCH_THRESHOLD
+        )
         if result is None:
             return None
 
@@ -927,7 +980,12 @@ class FuzzyMatchStrategy(MatchStrategy):
             return None
 
         confidence = FUZZY_HIGH_CONFIDENCE if score >= 90 else FUZZY_LOW_CONFIDENCE
-        return FieldMatch(original=header, canonical=canonical, confidence=confidence, strategy=self.name)
+        return FieldMatch(
+            original=header,
+            canonical=canonical,
+            confidence=confidence,
+            strategy=self.name,
+        )
 
 
 # ── Social URL data table ──
@@ -952,7 +1010,12 @@ def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
             domain_re = "|".join(re.escape(d) for d in domains)
         else:
             domain_re = re.escape(domains)
-        result.append((field, re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE)))
+        result.append(
+            (
+                field,
+                re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE),
+            )
+        )
     return tuple(result)
 
 
@@ -975,7 +1038,10 @@ class HeuristicMatchStrategy(MatchStrategy):
         # Postal codes
         ("postal_code", re.compile(r"^\d{5}(-\d{4})?$")),
         ("postal_code", re.compile(r"^[A-Z]\d[A-Z]\s?\d[A-Z]\d$", re.IGNORECASE)),
-        ("postal_code", re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$", re.IGNORECASE)),
+        (
+            "postal_code",
+            re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$", re.IGNORECASE),
+        ),
         # Dates
         ("birthday", re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")),
         ("birthday", re.compile(r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$")),
@@ -986,7 +1052,9 @@ class HeuristicMatchStrategy(MatchStrategy):
     def name(self) -> str:
         return "heuristic"
 
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
+    def match(
+        self, header: str, value: str | None = None, **kwargs: object
+    ) -> FieldMatch | None:
         if not value or not isinstance(value, str):
             return None
         cleaned = value.strip()
@@ -995,7 +1063,10 @@ class HeuristicMatchStrategy(MatchStrategy):
         for canonical, pattern in self._PATTERNS:
             if pattern.match(cleaned):
                 return FieldMatch(
-                    original=header, canonical=canonical, confidence=HEURISTIC_CONFIDENCE, strategy=self.name
+                    original=header,
+                    canonical=canonical,
+                    confidence=HEURISTIC_CONFIDENCE,
+                    strategy=self.name,
                 )
         return None
 
@@ -1025,9 +1096,9 @@ class ContactMapper:
         (e.g. vendor-specific merge fields).
     """
 
-    __slots__ = ("_normalize", "_registry", "_strategies")
+    __slots__ = ("_default_service", "_normalize", "_registry", "_strategies")
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         *,
         patterns: dict[str, Any] | None = None,
@@ -1045,18 +1116,21 @@ class ContactMapper:
             overrides=overrides,
         )
         self._normalize = normalize
+        self._default_service = default_service  # accepted for backward compat; not used since v2.0
 
         if strategies is not None:
             self._strategies = list(strategies)
         else:
-            self._strategies: list[MatchStrategy] = [
+            self._strategies = [
                 ExactMatchStrategy(self._registry),
                 NormalizedMatchStrategy(self._registry),
                 FuzzyMatchStrategy(self._registry),
                 HeuristicMatchStrategy(),
             ]
 
-    def identify(self, header: str, *, value: str | None = None, service: str | None = None) -> FieldMatch:
+    def identify(  # pylint: disable=unused-argument
+        self, header: str, *, value: str | None = None, service: str | None = None
+    ) -> FieldMatch:
         """Resolve a single header to its canonical field.
 
         The *service* parameter is accepted for backward compatibility
@@ -1066,9 +1140,14 @@ class ContactMapper:
             result = strategy.match(header, value=value)
             if result is not None:
                 return result
-        return FieldMatch(original=header, canonical=CanonicalField.UNKNOWN.value, confidence=0.0, strategy="none")
+        return FieldMatch(
+            original=header,
+            canonical=CanonicalField.UNKNOWN.value,
+            confidence=0.0,
+            strategy="none",
+        )
 
-    def map_payload(
+    def map_payload(  # pylint: disable=unused-argument
         self,
         payload: dict[str, Any],
         *,
@@ -1113,7 +1192,11 @@ class ContactMapper:
             matches.append(match)
 
             if match.is_matched:
-                final = normalize_value(match.canonical, value) if self._normalize else value
+                final = (
+                    normalize_value(match.canonical, value)
+                    if self._normalize
+                    else value
+                )
                 _merge(normalized, match.canonical, final)
             else:
                 unmapped[key] = value
@@ -1122,7 +1205,9 @@ class ContactMapper:
         if extract_embedded_phones:
             self._extract_embedded_phones(normalized, unmapped, matches)
 
-        return MappingResult(normalized=normalized, unmapped=unmapped, field_matches=tuple(matches))
+        return MappingResult(
+            normalized=normalized, unmapped=unmapped, field_matches=tuple(matches)
+        )
 
     @staticmethod
     def _extract_embedded_phones(
@@ -1179,13 +1264,19 @@ class ContactMapper:
         for key, value in payload.items():
             full_key = f"{_prefix}{key}" if _prefix else key
             if isinstance(value, dict) and _current < depth:
-                result.update(ContactMapper._flatten(value, depth, f"{full_key}.", _current + 1))
+                result.update(
+                    ContactMapper._flatten(value, depth, f"{full_key}.", _current + 1)
+                )
             else:
                 result[full_key] = value
         return result
 
-    def map_batch(
-        self, payloads: Sequence[dict[str, Any]], *, service: str | None = None, depth: int = 1
+    def map_batch(  # pylint: disable=unused-argument
+        self,
+        payloads: Sequence[dict[str, Any]],
+        *,
+        service: str | None = None,
+        depth: int = 1,
     ) -> list[MappingResult]:
         """Process multiple payloads."""
         return [self.map_payload(p, depth=depth) for p in payloads]
@@ -1195,7 +1286,10 @@ class ContactMapper:
         return self._registry
 
     def __repr__(self) -> str:
-        return f"ContactMapper(strategies={[s.name for s in self._strategies]}, " f"normalize={self._normalize})"
+        return (
+            f"ContactMapper(strategies={[s.name for s in self._strategies]}, "
+            f"normalize={self._normalize})"
+        )
 
 
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:

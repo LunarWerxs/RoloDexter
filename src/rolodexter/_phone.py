@@ -20,12 +20,15 @@ Design goals
 
 from __future__ import annotations
 
+# Helper functions in this module are "friend" operations on PhoneNumber
+# and legitimately access its private _pn_obj field.
+# pylint: disable=protected-access
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import phonenumbers as _pn
 from phonenumbers import PhoneNumberFormat as _Fmt
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DATA CLASS
@@ -40,8 +43,10 @@ class PhoneNumber:
     national_number: str
     raw: str
     extension: str | None = None
-    _pn_obj: _pn.PhoneNumber | None = field(  # type: ignore[name-defined]
-        default=None, repr=False, compare=False,
+    _pn_obj: _pn.PhoneNumber | None = field(
+        default=None,
+        repr=False,
+        compare=False,
     )
 
     @property
@@ -85,28 +90,28 @@ class PhoneNumber:
 class MatchType:
     """Result constants for :func:`is_number_match`."""
 
-    NOT_A_NUMBER = _pn.MatchType.NOT_A_NUMBER        # 0
-    NO_MATCH = _pn.MatchType.NO_MATCH                # 1
+    NOT_A_NUMBER = _pn.MatchType.NOT_A_NUMBER  # 0
+    NO_MATCH = _pn.MatchType.NO_MATCH  # 1
     SHORT_NSN_MATCH = _pn.MatchType.SHORT_NSN_MATCH  # 2
-    NSN_MATCH = _pn.MatchType.NSN_MATCH              # 3
-    EXACT_MATCH = _pn.MatchType.EXACT_MATCH          # 4
+    NSN_MATCH = _pn.MatchType.NSN_MATCH  # 3
+    EXACT_MATCH = _pn.MatchType.EXACT_MATCH  # 4
 
 
 class NumberType:
     """Phone number type constants."""
 
-    FIXED_LINE = _pn.PhoneNumberType.FIXED_LINE                      # 0
-    MOBILE = _pn.PhoneNumberType.MOBILE                              # 1
+    FIXED_LINE = _pn.PhoneNumberType.FIXED_LINE  # 0
+    MOBILE = _pn.PhoneNumberType.MOBILE  # 1
     FIXED_LINE_OR_MOBILE = _pn.PhoneNumberType.FIXED_LINE_OR_MOBILE  # 2
-    TOLL_FREE = _pn.PhoneNumberType.TOLL_FREE                        # 3
-    PREMIUM_RATE = _pn.PhoneNumberType.PREMIUM_RATE                  # 4
-    SHARED_COST = _pn.PhoneNumberType.SHARED_COST                    # 5
-    VOIP = _pn.PhoneNumberType.VOIP                                  # 6
-    PERSONAL_NUMBER = _pn.PhoneNumberType.PERSONAL_NUMBER            # 7
-    PAGER = _pn.PhoneNumberType.PAGER                                # 8
-    UAN = _pn.PhoneNumberType.UAN                                    # 9
-    VOICEMAIL = _pn.PhoneNumberType.VOICEMAIL                        # 10
-    UNKNOWN = _pn.PhoneNumberType.UNKNOWN                            # 99
+    TOLL_FREE = _pn.PhoneNumberType.TOLL_FREE  # 3
+    PREMIUM_RATE = _pn.PhoneNumberType.PREMIUM_RATE  # 4
+    SHARED_COST = _pn.PhoneNumberType.SHARED_COST  # 5
+    VOIP = _pn.PhoneNumberType.VOIP  # 6
+    PERSONAL_NUMBER = _pn.PhoneNumberType.PERSONAL_NUMBER  # 7
+    PAGER = _pn.PhoneNumberType.PAGER  # 8
+    UAN = _pn.PhoneNumberType.UAN  # 9
+    VOICEMAIL = _pn.PhoneNumberType.VOICEMAIL  # 10
+    UNKNOWN = _pn.PhoneNumberType.UNKNOWN  # 99
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -123,14 +128,14 @@ _TEL_EXT_RE = re.compile(r";ext=(\d+)", re.IGNORECASE)
 _TEL_PARAMS_RE = re.compile(r";[a-z\-]+=.*$", re.IGNORECASE)
 
 
-def _wrap(pn_obj: _pn.PhoneNumber, raw: str) -> PhoneNumber:  # type: ignore[name-defined]
+def _wrap(pn_obj: _pn.PhoneNumber, raw: str) -> PhoneNumber:
     """Wrap a ``phonenumbers.PhoneNumber`` into our ``PhoneNumber``."""
     e164 = _pn.format_number(pn_obj, _Fmt.E164)
     cc = pn_obj.country_code
     national = e164[1 + len(str(cc)) :]
     ext: str | None = pn_obj.extension if pn_obj.extension else None
     return PhoneNumber(
-        calling_code=cc,
+        calling_code=cc or 0,
         national_number=national,
         raw=raw,
         extension=ext,
@@ -263,16 +268,22 @@ def is_number_match(
     - ``NO_MATCH``: different numbers
     - ``NOT_A_NUMBER``: one or both couldn't be parsed
     """
-    def _resolve(x: str | PhoneNumber) -> _pn.PhoneNumber | str:  # type: ignore[name-defined]
+
+    def _resolve(x: str | PhoneNumber) -> _pn.PhoneNumber | str:
         if isinstance(x, PhoneNumber):
             if x._pn_obj is not None:
                 return x._pn_obj
             return x.e164
+        if default_region is not None:
+            try:
+                return _pn.parse(x, default_region)
+            except _pn.NumberParseException:
+                pass
         return x
 
     try:
-        return _pn.is_number_match(_resolve(a), _resolve(b))  # type: ignore[arg-type]
-    except Exception:
+        return _pn.is_number_match(_resolve(a), _resolve(b))
+    except Exception:  # pylint: disable=broad-exception-caught
         return MatchType.NOT_A_NUMBER
 
 
@@ -345,12 +356,12 @@ class PhoneNumberMatcher:
             )
         return results
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[PhoneNumberMatch]:
         if self._matches is None:
             self._matches = self._find_all()
         return iter(self._matches)
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self._matches is None:
             self._matches = self._find_all()
         return len(self._matches)

@@ -33,6 +33,7 @@ CLI
     python -m rolodexter.i18n --force                # re-translate everything
     python -m rolodexter.i18n --dry-run              # preview only
 """
+# pylint: disable=import-outside-toplevel  # optional-dep lazy imports are intentional
 
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # ═══════════════════════════════════════════════════════════════════════
 #  SUPPORTED LANGUAGES
@@ -114,7 +115,7 @@ def _package_i18n_dir() -> Path | None:
         probe.write_text("ok")
         probe.unlink()
         return d
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         return None
 
 
@@ -202,18 +203,22 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
     try:
         from deep_translator import GoogleTranslator
 
-        results = GoogleTranslator(source="en", target=lang_code).translate_batch(phrases)
+        results = GoogleTranslator(source="en", target=lang_code).translate_batch(
+            phrases
+        )
         return [r.strip() if r else None for r in results]
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         out: list[str | None] = []
         for phrase in phrases:
             try:
-                from deep_translator import GoogleTranslator
+                from deep_translator import (
+                    GoogleTranslator,  # type: ignore[import-untyped]
+                )
 
                 r = GoogleTranslator(source="en", target=lang_code).translate(phrase)
                 out.append(r.strip() if r else None)
                 time.sleep(0.05)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 out.append(None)
         return out
 
@@ -234,9 +239,18 @@ _TIMESTAMP_SKIP: frozenset[str] = frozenset(
 # CRM / pipeline internals — English-only technical concepts
 _CRM_SKIP: frozenset[str] = frozenset(
     {
-        "utm_parameters", "metadata", "score", "owner", "tags",
-        "lead_status", "lifecycle_stage", "email_opt_out",
-        "currency", "source", "referrer_url", "timezone",
+        "utm_parameters",
+        "metadata",
+        "score",
+        "owner",
+        "tags",
+        "lead_status",
+        "lifecycle_stage",
+        "email_opt_out",
+        "currency",
+        "source",
+        "referrer_url",
+        "timezone",
     }
 )
 
@@ -275,12 +289,12 @@ def _load_master() -> dict[str, Any]:
     try:
         pkg = resources.files("rolodexter")
         text = pkg.joinpath("patterns.json").read_text(encoding="utf-8")
-        return json.loads(text)
-    except Exception:
+        return cast(dict[str, Any], json.loads(text))
+    except Exception:  # pylint: disable=broad-exception-caught
         # Fallback: try filesystem path relative to this file
         p = Path(__file__).resolve().parent / "patterns.json"
         with open(p, encoding="utf-8") as fh:
-            return json.load(fh)
+            return cast(dict[str, Any], json.load(fh))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -298,8 +312,8 @@ def load_cached(lang_code: str) -> dict[str, Any] | None:
         if path.exists():
             try:
                 with open(path, encoding="utf-8") as fh:
-                    return json.load(fh)
-            except Exception:
+                    return cast(dict[str, Any], json.load(fh))
+            except Exception:  # pylint: disable=broad-exception-caught
                 continue
     return None
 
@@ -319,7 +333,7 @@ def _write_cache(lang_data: dict[str, Any]) -> Path:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def generate_language(
+def generate_language(  # pylint: disable=too-many-locals
     lang_code: str,
     *,
     force: bool = False,
@@ -352,7 +366,10 @@ def generate_language(
         If ``deep-translator`` is not installed.
     """
     if lang_code not in SUPPORTED_LANGUAGES:
-        raise ValueError(f"Unsupported language: {lang_code!r}. " f"Supported: {sorted(SUPPORTED_LANGUAGES)}")
+        raise ValueError(
+            f"Unsupported language: {lang_code!r}. "
+            f"Supported: {sorted(SUPPORTED_LANGUAGES)}"
+        )
 
     # Check cache first
     if not force and not force_fields:
@@ -362,10 +379,13 @@ def generate_language(
 
     # Need to translate — ensure deep-translator is available
     try:
-        from deep_translator import GoogleTranslator  # noqa: F401
+        from deep_translator import (  # pylint: disable=unused-import
+            GoogleTranslator,  # noqa: F401
+        )
     except ImportError:
         raise ImportError(
-            "deep-translator is required for i18n generation. " "Install it with: pip install deep-translator"
+            "deep-translator is required for i18n generation. "
+            "Install it with: pip install deep-translator"
         ) from None
 
     translate_code, lang_name = SUPPORTED_LANGUAGES[lang_code]
@@ -384,7 +404,9 @@ def generate_language(
     if force:
         to_translate = set(all_canonicals)
     else:
-        to_translate = {c for c in all_canonicals if c not in existing_fields or c in force_fields}
+        to_translate = {
+            c for c in all_canonicals if c not in existing_fields or c in force_fields
+        }
 
     new_translations: dict[str, list[str]] = {}
     if to_translate:
@@ -395,12 +417,16 @@ def generate_language(
             if not translated:
                 continue
             variants = _to_alias_variants(translated)
-            filtered = sorted(v for v in variants if v not in english_aliases and len(v) > 1)
+            filtered = sorted(
+                v for v in variants if v not in english_aliases and len(v) > 1
+            )
             if filtered:
                 new_translations[canonical] = filtered
 
     # Merge: keep existing, overlay new, prune obsolete fields
-    merged: dict[str, list[str]] = {k: v for k, v in existing_fields.items() if k in all_canonicals}
+    merged: dict[str, list[str]] = {
+        k: v for k, v in existing_fields.items() if k in all_canonicals
+    }
     merged.update(new_translations)
 
     lang_data: dict[str, Any] = {
@@ -433,7 +459,7 @@ def discover_cached() -> dict[str, Path]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def main() -> None:
+def main() -> None:  # pylint: disable=too-many-locals
     """Command-line entry point for i18n generation."""
     parser = argparse.ArgumentParser(
         description="Generate i18n language files for rolodexter (on-demand, cached).",
@@ -497,9 +523,13 @@ def main() -> None:
 
     # Verify deep-translator
     try:
-        from deep_translator import GoogleTranslator  # noqa: F401
+        from deep_translator import (  # pylint: disable=unused-import
+            GoogleTranslator,  # noqa: F401
+        )
     except ImportError:
-        print("ERROR: deep-translator is required. Install with: pip install deep-translator")
+        print(
+            "ERROR: deep-translator is required. Install with: pip install deep-translator"
+        )
         sys.exit(1)
 
     print(f"\nGenerating {len(target_codes)} language(s)...")
@@ -526,7 +556,9 @@ def main() -> None:
                 code, data = future.result()
                 n_fields = len(data.get("fields", {}))
                 n_aliases = sum(len(v) for v in data.get("fields", {}).values())
-                print(f"  [{code}] {data['language_name']}: {n_fields} fields, {n_aliases} aliases")
+                print(
+                    f"  [{code}] {data['language_name']}: {n_fields} fields, {n_aliases} aliases"
+                )
 
     print("\nDone.")
 
