@@ -1116,7 +1116,9 @@ class ContactMapper:
             overrides=overrides,
         )
         self._normalize = normalize
-        self._default_service = default_service  # accepted for backward compat; not used since v2.0
+        self._default_service = (
+            default_service  # accepted for backward compat; not used since v2.0
+        )
 
         if strategies is not None:
             self._strategies = list(strategies)

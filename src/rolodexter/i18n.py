@@ -211,8 +211,8 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
         out: list[str | None] = []
         for phrase in phrases:
             try:
-                from deep_translator import (
-                    GoogleTranslator,  # type: ignore[import-untyped]
+                from deep_translator import (  # type: ignore[import-untyped]
+                    GoogleTranslator,
                 )
 
                 r = GoogleTranslator(source="en", target=lang_code).translate(phrase)

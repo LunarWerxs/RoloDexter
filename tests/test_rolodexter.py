@@ -143,7 +143,9 @@ class TestExactLookup:
             ("custom_fields", "metadata"),
         ],
     )
-    def test_alias_resolves(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_alias_resolves(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
     def test_case_insensitive(self, registry: PatternRegistry) -> None:
@@ -183,7 +185,12 @@ class TestNormalizedMatchStrategy:
     def test_camel_first_name(self, registry: PatternRegistry) -> None:
         strat = NormalizedMatchStrategy(registry)
         m = strat.match("FirstName")
-        assert m is not None and m.canonical == "first_name" and m.confidence == 0.95 and m.strategy == "normalized"
+        assert (
+            m is not None
+            and m.canonical == "first_name"
+            and m.confidence == 0.95
+            and m.strategy == "normalized"
+        )
 
     def test_camel_last_name(self, registry: PatternRegistry) -> None:
         strat = NormalizedMatchStrategy(registry)
@@ -397,7 +404,9 @@ class TestNormalizedMatchStrategy:
         m = strat.match("Business State")
         assert m is not None and m.canonical == "state"
 
-    def test_address_prefix_business_postal_code(self, registry: PatternRegistry) -> None:
+    def test_address_prefix_business_postal_code(
+        self, registry: PatternRegistry
+    ) -> None:
         strat = NormalizedMatchStrategy(registry)
         m = strat.match("Business Postal Code")
         assert m is not None and m.canonical == "postal_code"
@@ -407,7 +416,9 @@ class TestNormalizedMatchStrategy:
         m = strat.match("Business Street")
         assert m is not None and m.canonical == "address_line1"
 
-    def test_address_prefix_business_country_region(self, registry: PatternRegistry) -> None:
+    def test_address_prefix_business_country_region(
+        self, registry: PatternRegistry
+    ) -> None:
         strat = NormalizedMatchStrategy(registry)
         m = strat.match("Business Country/Region")
         assert m is not None and m.canonical == "country"
@@ -569,7 +580,9 @@ class TestIdentify:
 
 class TestMapPayload:
     def test_basic(self, mapper: ContactMapper) -> None:
-        result = mapper.map_payload({"fname": "Jane", "surname": "Doe", "mobile": "555-0199"})
+        result = mapper.map_payload(
+            {"fname": "Jane", "surname": "Doe", "mobile": "555-0199"}
+        )
         assert isinstance(result, MappingResult)
         assert result.normalized["first_name"] == "Jane"
         assert result.normalized["last_name"] == "Doe"
@@ -801,7 +814,9 @@ class TestNewAliases:
             ("annualrevenue", "revenue"),
         ],
     )
-    def test_new_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_new_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
 
@@ -974,7 +989,9 @@ class TestEdgeCases:
         assert len(result.field_matches) == 101
 
     def test_unicode_values(self, mapper: ContactMapper) -> None:
-        result = mapper.map_payload({"fname": "José", "surname": "García", "company": "Café Corp"})
+        result = mapper.map_payload(
+            {"fname": "José", "surname": "García", "company": "Café Corp"}
+        )
         assert result.normalized["first_name"] == "José"
         assert result.normalized["last_name"] == "García"
 
@@ -1021,7 +1038,9 @@ class TestW3CAutocompleteAliases:
             ("tel-national", "phone"),
         ],
     )
-    def test_w3c_token_exact_lookup(self, registry: PatternRegistry, token: str, expected: str) -> None:
+    def test_w3c_token_exact_lookup(
+        self, registry: PatternRegistry, token: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(token) == expected
 
 
@@ -1039,7 +1058,14 @@ class TestFormBotFormDetectionPatterns:
             assert m.canonical == "last_name", f"Failed for {header}"
 
     def test_form_field_company(self, mapper: ContactMapper) -> None:
-        for header in ["company", "organization", "organisation", "firm", "employer", "business"]:
+        for header in [
+            "company",
+            "organization",
+            "organisation",
+            "firm",
+            "employer",
+            "business",
+        ]:
             m = mapper.identify(header)
             assert m.canonical == "company", f"Failed for {header}"
 
@@ -1104,23 +1130,39 @@ class TestI18nAliases:
     """
 
     # Fake i18n data matching what the generator would produce
-    _MOCK_ES = {
+    _MOCK_ES = {  # noqa: RUF012
         "language_code": "es",
         "language_name": "Spanish",
         "generated_at": "2026-01-01T00:00:00+00:00",
         "source_version": "2.1.0",
         "fields": {
-            "first_name": ["nombre de pila", "nombre_de_pila", "nombredepila", "nombre-de-pila"],
+            "first_name": [
+                "nombre de pila",
+                "nombre_de_pila",
+                "nombredepila",
+                "nombre-de-pila",
+            ],
             "last_name": ["apellido"],
-            "full_name": ["nombre completo", "nombre_completo", "nombrecompleto", "nombre-completo"],
-            "email": ["correo electronico", "correo_electronico", "correoelectronico", "correo-electronico", "correo"],
+            "full_name": [
+                "nombre completo",
+                "nombre_completo",
+                "nombrecompleto",
+                "nombre-completo",
+            ],
+            "email": [
+                "correo electronico",
+                "correo_electronico",
+                "correoelectronico",
+                "correo-electronico",
+                "correo",
+            ],
             "company": ["empresa"],
             "city": ["ciudad"],
             "message": ["mensaje"],
             "subject": ["asunto"],
         },
     }
-    _MOCK_DE = {
+    _MOCK_DE = {  # noqa: RUF012
         "language_code": "de",
         "language_name": "German",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1134,7 +1176,7 @@ class TestI18nAliases:
             "subject": ["thema"],
         },
     }
-    _MOCK_FR = {
+    _MOCK_FR = {  # noqa: RUF012
         "language_code": "fr",
         "language_name": "French",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1148,7 +1190,7 @@ class TestI18nAliases:
             "subject": ["sujet"],
         },
     }
-    _MOCK_RO = {
+    _MOCK_RO = {  # noqa: RUF012
         "language_code": "ro",
         "language_name": "Romanian",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1163,7 +1205,7 @@ class TestI18nAliases:
             "subject": ["subiect"],
         },
     }
-    _MOCK_PT = {
+    _MOCK_PT = {  # noqa: RUF012
         "language_code": "pt",
         "language_name": "Portuguese",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1173,7 +1215,7 @@ class TestI18nAliases:
             "postal_code": ["codigo postal", "codigo_postal"],
         },
     }
-    _MOCK_IT = {
+    _MOCK_IT = {  # noqa: RUF012
         "language_code": "it",
         "language_name": "Italian",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1184,7 +1226,7 @@ class TestI18nAliases:
             "message": ["messaggio"],
         },
     }
-    _MOCK_NL = {
+    _MOCK_NL = {  # noqa: RUF012
         "language_code": "nl",
         "language_name": "Dutch",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1196,7 +1238,7 @@ class TestI18nAliases:
             "message": ["bericht"],
         },
     }
-    _MOCK_PL = {
+    _MOCK_PL = {  # noqa: RUF012
         "language_code": "pl",
         "language_name": "Polish",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1207,7 +1249,7 @@ class TestI18nAliases:
             "message": ["wiadomosc"],
         },
     }
-    _MOCK_TR = {
+    _MOCK_TR = {  # noqa: RUF012
         "language_code": "tr",
         "language_name": "Turkish",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -1219,7 +1261,7 @@ class TestI18nAliases:
         },
     }
 
-    _ALL_MOCKS = {
+    _ALL_MOCKS = {  # noqa: RUF012
         "es": _MOCK_ES,
         "de": _MOCK_DE,
         "fr": _MOCK_FR,
@@ -1290,7 +1332,9 @@ class TestI18nAliases:
         from unittest.mock import patch
 
         with patch("rolodexter.i18n.load_cached", side_effect=self._mock_load_cached):
-            reg = PatternRegistry(languages=["es", "de", "fr", "ro", "pt", "it", "nl", "pl", "tr"])
+            reg = PatternRegistry(
+                languages=["es", "de", "fr", "ro", "pt", "it", "nl", "pl", "tr"]
+            )
         assert reg.exact_lookup(alias) == expected
 
 
@@ -1308,7 +1352,9 @@ class TestExtendedSourceAliases:
             ("how_did_you_hear", "source"),
         ],
     )
-    def test_source_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_source_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
 
@@ -1330,7 +1376,9 @@ class TestExtendedOptOutAliases:
             ("subscribe_consent", "subscribed"),
         ],
     )
-    def test_optout_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_optout_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
 
@@ -1339,7 +1387,14 @@ class TestIndustryExtendedAliases:
 
     @pytest.mark.parametrize(
         "alias",
-        ["industry", "sector", "vertical", "market", "business_type", "business_industry"],
+        [
+            "industry",
+            "sector",
+            "vertical",
+            "market",
+            "business_type",
+            "business_industry",
+        ],
     )
     def test_industry_alias(self, registry: PatternRegistry, alias: str) -> None:
         assert registry.exact_lookup(alias) == "industry"
@@ -1372,9 +1427,13 @@ class TestFormBotDetectPurposeCompleteness:
             ("company_size", "company_size"),
         ],
     )
-    def test_all_detect_purposes(self, mapper: ContactMapper, field_name: str, expected_canonical: str) -> None:
+    def test_all_detect_purposes(
+        self, mapper: ContactMapper, field_name: str, expected_canonical: str
+    ) -> None:
         m = mapper.identify(field_name)
-        assert m.canonical == expected_canonical, f"{field_name} → {m.canonical}, expected {expected_canonical}"
+        assert m.canonical == expected_canonical, (
+            f"{field_name} → {m.canonical}, expected {expected_canonical}"
+        )
 
 
 class TestFormBotGuessRequiredValueKeywords:
@@ -1405,9 +1464,13 @@ class TestFormBotGuessRequiredValueKeywords:
             ("age", "age"),
         ],
     )
-    def test_guess_keyword_resolves(self, mapper: ContactMapper, keyword: str, expected: str) -> None:
+    def test_guess_keyword_resolves(
+        self, mapper: ContactMapper, keyword: str, expected: str
+    ) -> None:
         m = mapper.identify(keyword)
-        assert m.canonical == expected, f"{keyword} → {m.canonical}, expected {expected}"
+        assert m.canonical == expected, (
+            f"{keyword} → {m.canonical}, expected {expected}"
+        )
 
 
 class TestPatternVersionBump:
@@ -1421,7 +1484,7 @@ class TestPatternVersionBump:
 #  I18N SYSTEM TESTS (on-demand generation model)
 # ═══════════════════════════════════════════════════════════════
 
-from unittest.mock import patch as _mock_patch
+from unittest.mock import patch as _mock_patch  # noqa: E402
 
 # Shared mock data for i18n tests
 _MOCK_I18N = {
@@ -1592,7 +1655,10 @@ class TestI18nContactMapper:
                 "e-mail": "duplicate@example.com",
             }
         )
-        assert result.normalized["email"] == ["juan@example.com", "duplicate@example.com"]
+        assert result.normalized["email"] == [
+            "juan@example.com",
+            "duplicate@example.com",
+        ]
         assert result.normalized["first_name"] == "Juan"
         assert result.normalized["last_name"] == "García"
         assert result.normalized["company"] == "Acme"
@@ -1803,8 +1869,6 @@ class TestI18nModule:
 
     def test_translate_batch_mocked(self) -> None:
         """Verify _translate_batch calls deep-translator correctly."""
-        from rolodexter.i18n import _translate_batch
-
         mock_translator = type(
             "MockTranslator",
             (),
@@ -1812,7 +1876,11 @@ class TestI18nModule:
                 "translate_batch": lambda self, phrases: [p.upper() for p in phrases],
             },
         )()
-        with _mock_patch("rolodexter.i18n.GoogleTranslator", return_value=mock_translator, create=True):
+        with _mock_patch(
+            "rolodexter.i18n.GoogleTranslator",
+            return_value=mock_translator,
+            create=True,
+        ):
             # We need to mock the actual import inside the function
             import rolodexter.i18n as i18n_mod
 
@@ -1838,7 +1906,9 @@ class TestI18nModule:
             return [f"translated_{p}" for p in phrases]
 
         with (
-            _mock_patch.object(i18n_mod, "_translate_batch", side_effect=fake_translate),
+            _mock_patch.object(
+                i18n_mod, "_translate_batch", side_effect=fake_translate
+            ),
             _mock_patch.object(i18n_mod, "get_cache_dir", return_value=tmp_path),
             _mock_patch.object(i18n_mod, "get_all_cache_dirs", return_value=[tmp_path]),
             _mock_patch("rolodexter.i18n.GoogleTranslator", create=True),
@@ -1866,7 +1936,9 @@ class TestI18nModule:
             "fields": {"first_name": ["vorname"]},
         }
         (tmp_path / "de.json").write_text(json.dumps(cached), encoding="utf-8")
-        with _mock_patch.object(i18n_mod, "get_all_cache_dirs", return_value=[tmp_path]):
+        with _mock_patch.object(
+            i18n_mod, "get_all_cache_dirs", return_value=[tmp_path]
+        ):
             data = i18n_mod.generate_language("de")
         assert data == cached
 
@@ -2166,7 +2238,7 @@ class TestPhoneNormalizerE164:
 #  v2.2 — PHONE MODULE: EXTENSIONS, RFC3966, FORMATTING, ETC.
 # ═══════════════════════════════════════════════════════════════
 
-from rolodexter._phone import (
+from rolodexter._phone import (  # noqa: E402
     MatchType,
     NumberType,
     PhoneNumberMatcher,
@@ -2328,13 +2400,21 @@ class TestPhoneNumberMatch:
     """Test is_number_match()."""
 
     def test_exact_match(self) -> None:
-        assert is_number_match("+15551234567", "+1 555 123 4567") == MatchType.EXACT_MATCH
+        assert (
+            is_number_match("+15551234567", "+1 555 123 4567") == MatchType.EXACT_MATCH
+        )
 
     def test_exact_match_with_extension(self) -> None:
-        assert is_number_match("+15551234567 ext 42", "+1 555 123 4567 ext 42") == MatchType.EXACT_MATCH
+        assert (
+            is_number_match("+15551234567 ext 42", "+1 555 123 4567 ext 42")
+            == MatchType.EXACT_MATCH
+        )
 
     def test_nsn_match_extension_differs(self) -> None:
-        assert is_number_match("+12025551234 ext 42", "+12025551234") == MatchType.SHORT_NSN_MATCH
+        assert (
+            is_number_match("+12025551234 ext 42", "+12025551234")
+            == MatchType.SHORT_NSN_MATCH
+        )
 
     def test_no_match(self) -> None:
         assert is_number_match("+15551234567", "+15559876543") == MatchType.NO_MATCH
@@ -2448,7 +2528,9 @@ class TestPhoneNumberMatcher:
         matches = list(PhoneNumberMatcher(text))
         assert len(matches) >= 1
         m = matches[0]
-        assert text[m.start : m.end].strip().replace(" ", "").replace("+", "+") is not None
+        assert (
+            text[m.start : m.end].strip().replace(" ", "").replace("+", "+") is not None
+        )
 
     def test_has_next(self) -> None:
         matcher = PhoneNumberMatcher("Call +12025551234")
@@ -2477,7 +2559,9 @@ class TestNestedPayloadDepth:
         result = mapper.map_payload(payload, depth=1)
         assert result.normalized["email"] == "test@example.com"
         # nested dict preserved in unmapped or normalized as-is
-        assert "address" not in result.unmapped or isinstance(result.unmapped.get("address"), dict)
+        assert "address" not in result.unmapped or isinstance(
+            result.unmapped.get("address"), dict
+        )
 
     def test_depth_2_flattens_one_level(self) -> None:
         """depth=2 flattens nested dicts one level."""
@@ -2614,7 +2698,7 @@ class TestNestedPayloadDepth:
 # ═══════════════════════════════════════════════════════════════
 
 
-class TestNewCanonicalFields:
+class TestV21CanonicalFields:
     """Test the 4 new fields added in v2.1."""
 
     def test_source_id_in_enum(self) -> None:
@@ -2661,7 +2745,9 @@ class TestNewCanonicalFields:
     def test_new_field_aliases(self, header: str, expected: str) -> None:
         mapper = ContactMapper()
         m = mapper.identify(header)
-        assert m.canonical == expected, f"{header!r} → {m.canonical!r}, expected {expected!r}"
+        assert m.canonical == expected, (
+            f"{header!r} → {m.canonical!r}, expected {expected!r}"
+        )
 
     def test_payload_with_new_fields(self) -> None:
         mapper = ContactMapper()
@@ -2738,8 +2824,12 @@ class TestWishlistServicesDynamic:
     def test_service_field_resolves(self, header: str, expected: str) -> None:
         mapper = ContactMapper()
         m = mapper.identify(header)
-        assert m.is_matched, f"{header!r} → {m.canonical!r} (unmatched, strategy={m.strategy})"
-        assert m.canonical == expected, f"{header!r} → {m.canonical!r}, expected {expected!r}"
+        assert m.is_matched, (
+            f"{header!r} → {m.canonical!r} (unmatched, strategy={m.strategy})"
+        )
+        assert m.canonical == expected, (
+            f"{header!r} → {m.canonical!r}, expected {expected!r}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2795,14 +2885,23 @@ class TestV23NewCanonicalFields:
             ("referring_url", "referrer_url"),
         ],
     )
-    def test_new_field_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_new_field_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
     def test_canonical_enum_members(self) -> None:
         """New fields exist in CanonicalField enum."""
         from rolodexter import CanonicalField
 
-        for name in ("DISCORD", "TELEGRAM", "GENDER", "TIMEZONE", "LANGUAGE_PREFERENCE", "REFERRER_URL"):
+        for name in (
+            "DISCORD",
+            "TELEGRAM",
+            "GENDER",
+            "TIMEZONE",
+            "LANGUAGE_PREFERENCE",
+            "REFERRER_URL",
+        ):
             assert hasattr(CanonicalField, name), f"CanonicalField.{name} missing"
 
 
@@ -2821,7 +2920,9 @@ class TestV23ShortAliases:
             ("subj", "subject"),
         ],
     )
-    def test_short_alias_exact(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_short_alias_exact(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
     def test_short_aliases_dont_pollute_fuzzy(self) -> None:
@@ -2830,7 +2931,9 @@ class TestV23ShortAliases:
 
         mapper = ContactMapper()
         m = mapper.identify("Column X", value="jane@test.com")
-        assert m.canonical == "email", f"Expected heuristic → email, got {m.canonical} via {m.strategy}"
+        assert m.canonical == "email", (
+            f"Expected heuristic → email, got {m.canonical} via {m.strategy}"
+        )
 
 
 class TestV23WooCommerceAliases:
@@ -2860,7 +2963,9 @@ class TestV23WooCommerceAliases:
             ("shipping_country", "country"),
         ],
     )
-    def test_woo_alias(self, registry: PatternRegistry, alias: str, expected: str) -> None:
+    def test_woo_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
         assert registry.exact_lookup(alias) == expected
 
 
@@ -2885,7 +2990,9 @@ class TestV23SocialMediaHeuristics:
             ("https://www.tiktok.com/@username", "tiktok"),
         ],
     )
-    def test_social_url_heuristic(self, mapper: ContactMapper, url: str, expected: str) -> None:
+    def test_social_url_heuristic(
+        self, mapper: ContactMapper, url: str, expected: str
+    ) -> None:
         m = mapper.identify("some_profile", value=url)
         assert m.canonical == expected, f"{url} → {m.canonical}, expected {expected}"
         assert m.strategy == "heuristic"
@@ -2999,7 +3106,9 @@ class TestV23VendorPrefixes:
             ("sl_company", "company"),
         ],
     )
-    def test_smartlead_prefix(self, mapper: ContactMapper, header: str, expected: str) -> None:
+    def test_smartlead_prefix(
+        self, mapper: ContactMapper, header: str, expected: str
+    ) -> None:
         m = mapper.identify(header)
         assert m.canonical == expected, f"{header} → {m.canonical}, expected {expected}"
 
@@ -3021,7 +3130,12 @@ class TestV23PublicExports:
         """Removed symbols should not be importable."""
         import rolodexter
 
-        for name in ("StrategyError", "NormalizationError", "ServiceNotFoundError", "ServiceMatchStrategy"):
+        for name in (
+            "StrategyError",
+            "NormalizationError",
+            "ServiceNotFoundError",
+            "ServiceMatchStrategy",
+        ):
             assert not hasattr(rolodexter, name), f"{name} should have been removed"
 
 
@@ -3073,15 +3187,34 @@ class TestExpansionEngine:
     def test_form_prefix_generates_aliases(self, registry: PatternRegistry) -> None:
         """Every form_prefix x form_field combo should resolve."""
         # These are NOT in the seed aliases — purely expansion-generated
-        for prefix in ("billing_", "shipping_", "your_", "your-", "contact_", "customer_", "applicant_"):
-            for suffix, expected in (("email", "email"), ("phone", "phone"), ("city", "city")):
+        for prefix in (
+            "billing_",
+            "shipping_",
+            "your_",
+            "your-",
+            "contact_",
+            "customer_",
+            "applicant_",
+        ):
+            for suffix, expected in (
+                ("email", "email"),
+                ("phone", "phone"),
+                ("city", "city"),
+            ):
                 alias = f"{prefix}{suffix}"
                 result = registry.exact_lookup(alias)
                 assert result == expected, f"{alias} → {result}, expected {expected}"
 
     def test_social_suffix_generates_aliases(self, registry: PatternRegistry) -> None:
         """Every social_field x social_suffix combo should resolve."""
-        for platform in ("twitter", "instagram", "facebook", "github", "discord", "telegram"):
+        for platform in (
+            "twitter",
+            "instagram",
+            "facebook",
+            "github",
+            "discord",
+            "telegram",
+        ):
             for suffix in ("_url", "_handle", "_profile", "_username", "_link", "_id"):
                 alias = f"{platform}{suffix}"
                 result = registry.exact_lookup(alias)
@@ -3132,7 +3265,9 @@ class TestPhoneNumberWithoutPnObj:
     def test_e164_fallback(self) -> None:
         from rolodexter._phone import PhoneNumber
 
-        pn = PhoneNumber(calling_code=1, national_number="2025551234", raw="+12025551234")
+        pn = PhoneNumber(
+            calling_code=1, national_number="2025551234", raw="+12025551234"
+        )
         assert pn.e164 == "+12025551234"
 
     def test_is_valid_fallback_false(self) -> None:
@@ -3663,7 +3798,9 @@ class TestI18nPackageDir:
 class TestI18nWriteAndLoadCache:
     """Test _write_cache + load_cached round-trip."""
 
-    def test_write_and_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_write_and_load(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from rolodexter.i18n import _write_cache, load_cached
 
         # Monkeypatch get_cache_dir to use tmp_path
@@ -3709,7 +3846,9 @@ class TestI18nCliList:
 class TestI18nGenerateLanguageCached:
     """Test generate_language when cached data already exists."""
 
-    def test_returns_cached_without_translating(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_cached_without_translating(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from rolodexter.i18n import generate_language
 
         cached_data = {
@@ -3719,7 +3858,10 @@ class TestI18nGenerateLanguageCached:
             "source_version": "2.6.0",
             "fields": {"email": ["correo"]},
         }
-        monkeypatch.setattr("rolodexter.i18n.load_cached", lambda code: cached_data if code == "es" else None)
+        monkeypatch.setattr(
+            "rolodexter.i18n.load_cached",
+            lambda code: cached_data if code == "es" else None,
+        )
         result = generate_language("es")
         assert result == cached_data
 
@@ -3765,7 +3907,9 @@ class TestI18nLoadMasterFallback:
         assert "fields" in data
         assert len(data["fields"]) > 30
 
-    def test_fallback_when_resources_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fallback_when_resources_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from rolodexter import i18n
 
         def broken_files(_pkg_name):
@@ -3803,7 +3947,9 @@ class TestPatternRegistryLanguages:
             if p.exists():
                 p.unlink()
 
-    def test_languages_uncached_no_translator(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_languages_uncached_no_translator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Loading a language with no cache and no deep-translator gracefully skips."""
         import rolodexter.i18n as _i18n_mod
 
@@ -3873,7 +4019,9 @@ class TestNormalizedMatchBranchCoverage:
 class TestI18nGenerateLanguageFull:
     """Test generate_language with mocked translation pipeline."""
 
-    def test_force_with_mocked_translator(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_force_with_mocked_translator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Full generate_language with mocked _translate_batch and deep-translator."""
         import sys
         import types
@@ -3900,7 +4048,9 @@ class TestI18nGenerateLanguageFull:
         # Verify cache was written
         assert (tmp_path / "es.json").exists()
 
-    def test_non_force_with_mocked_translator(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_force_with_mocked_translator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Non-force generate_language — covers the else branch for to_translate."""
         import sys
         import types
@@ -3911,7 +4061,9 @@ class TestI18nGenerateLanguageFull:
             # Return some None results to cover the 'continue' branch
             results = []
             for i, p in enumerate(phrases):
-                results.append(None if i % 3 == 0 else f"translated_{p.replace(' ', '_')}")
+                results.append(
+                    None if i % 3 == 0 else f"translated_{p.replace(' ', '_')}"
+                )
             return results
 
         monkeypatch.setattr(i18n, "_translate_batch", mock_translate)
@@ -3961,7 +4113,9 @@ class TestI18nTranslateBatchFallback:
         assert call_count["single"] == 2
         assert results == ["translated_hello", "translated_world"]
 
-    def test_fallback_per_phrase_also_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fallback_per_phrase_also_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """When both batch and per-phrase fail, returns Nones."""
         from rolodexter import i18n
 
@@ -3988,7 +4142,9 @@ class TestI18nTranslateBatchFallback:
 class TestI18nCliDryRun:
     """Test i18n CLI --dry-run and error paths."""
 
-    def test_dry_run(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dry_run(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import sys
         import types
 
@@ -4010,7 +4166,10 @@ class TestI18nCliDryRun:
         assert "[es]" in captured.out
 
     def test_generate_via_cli(
-        self, capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """CLI generate path (non-dry-run) with mocked translator."""
         import sys
@@ -4041,7 +4200,9 @@ class TestI18nCliDryRun:
         assert "[es]" in captured.out
         assert "Spanish" in captured.out
 
-    def test_default_all_languages(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_all_languages(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """CLI with no --languages flag defaults to all supported."""
         import sys
         import types
@@ -4076,7 +4237,9 @@ class TestI18nCliDryRun:
         captured = capsys.readouterr()
         assert "Unknown language" in captured.out
 
-    def test_no_deep_translator_error(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_deep_translator_error(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import builtins
         import sys
 
@@ -4108,7 +4271,9 @@ class TestI18nCliDryRun:
 class TestI18nCacheDirFallback:
     """Test cache dir fallback when package dir is not writable."""
 
-    def test_user_cache_used_when_pkg_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_user_cache_used_when_pkg_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from rolodexter.i18n import _user_cache_dir, get_cache_dir
 
         monkeypatch.setattr("rolodexter.i18n._package_i18n_dir", lambda: None)
@@ -4138,11 +4303,13 @@ class TestOverrides:
         assert reg.exact_lookup("myfield") == "email"
 
     def test_multiple_overrides(self) -> None:
-        reg = PatternRegistry(overrides={
-            "MMERGE3": "full_address",
-            "MMERGE6": "company",
-            "MMERGE7": "website",
-        })
+        reg = PatternRegistry(
+            overrides={
+                "MMERGE3": "full_address",
+                "MMERGE6": "company",
+                "MMERGE7": "website",
+            }
+        )
         assert reg.exact_lookup("mmerge3") == "full_address"
         assert reg.exact_lookup("mmerge6") == "company"
         assert reg.exact_lookup("mmerge7") == "website"
@@ -4154,14 +4321,18 @@ class TestOverrides:
         assert reg.exact_lookup("mmerge6") is None
 
     def test_overrides_on_contact_mapper(self) -> None:
-        mapper = ContactMapper(overrides={
-            "MMERGE1": "first_name",
-            "MMERGE2": "last_name",
-        })
-        result = mapper.map_payload({
-            "MMERGE1": "Alice",
-            "MMERGE2": "Smith",
-        })
+        mapper = ContactMapper(
+            overrides={
+                "MMERGE1": "first_name",
+                "MMERGE2": "last_name",
+            }
+        )
+        result = mapper.map_payload(
+            {
+                "MMERGE1": "Alice",
+                "MMERGE2": "Smith",
+            }
+        )
         assert result.normalized["first_name"] == "Alice"
         assert result.normalized["last_name"] == "Smith"
 
@@ -4225,9 +4396,7 @@ class TestEmbeddedPhoneExtraction:
 
     def test_disabled_by_default(self) -> None:
         mapper = ContactMapper()
-        result = mapper.map_payload(
-            {"weird_field": "reach me at +1-650-253-0000"}
-        )
+        result = mapper.map_payload({"weird_field": "reach me at +1-650-253-0000"})
         # Without extract_embedded_phones, phone should NOT appear
         assert "phone" not in result.normalized
 
@@ -4281,12 +4450,14 @@ class TestGetAllPhones:
 
     def test_multiple_phone_fields(self) -> None:
         mapper = ContactMapper()
-        result = mapper.map_payload({
-            "phone": "+1-555-000-1111",
-            "home_phone": "+1-555-000-2222",
-            "work_phone": "+1-555-000-3333",
-            "fax": "+1-555-000-4444",
-        })
+        result = mapper.map_payload(
+            {
+                "phone": "+1-555-000-1111",
+                "home_phone": "+1-555-000-2222",
+                "work_phone": "+1-555-000-3333",
+                "fax": "+1-555-000-4444",
+            }
+        )
         phones = result.get_all_phones()
         assert len(phones) == 4
         assert "+15550001111" in phones
@@ -4339,28 +4510,32 @@ class TestDepth2KeyResolution:
     def test_address_city_resolves(self) -> None:
         mapper = ContactMapper()
         result = mapper.map_payload(
-            {"address": {"city": "Austin"}}, depth=2,
+            {"address": {"city": "Austin"}},
+            depth=2,
         )
         assert result.normalized.get("city") == "Austin"
 
     def test_address_state_resolves(self) -> None:
         mapper = ContactMapper()
         result = mapper.map_payload(
-            {"address": {"state": "TX"}}, depth=2,
+            {"address": {"state": "TX"}},
+            depth=2,
         )
         assert result.normalized.get("state") == "TX"
 
     def test_contact_email_resolves(self) -> None:
         mapper = ContactMapper()
         result = mapper.map_payload(
-            {"contact": {"email": "a@b.com"}}, depth=2,
+            {"contact": {"email": "a@b.com"}},
+            depth=2,
         )
         assert result.normalized.get("email") == "a@b.com"
 
     def test_nested_company_name(self) -> None:
         mapper = ContactMapper()
         result = mapper.map_payload(
-            {"account": {"name": "Acme"}}, depth=2,
+            {"account": {"name": "Acme"}},
+            depth=2,
         )
         # account.name should resolve to company via dot-path logic
         assert result.normalized.get("company") == "Acme"
@@ -4369,7 +4544,8 @@ class TestDepth2KeyResolution:
         """With depth=1, nested dicts are NOT flattened."""
         mapper = ContactMapper()
         result = mapper.map_payload(
-            {"address": {"city": "Austin"}}, depth=1,
+            {"address": {"city": "Austin"}},
+            depth=1,
         )
         # 'address' is the key, value is a dict — heuristic can't match it
         assert "city" not in result.normalized
@@ -4380,7 +4556,8 @@ class TestDepth2KeyResolution:
 
     def test_depth3_nested(self) -> None:
         flat = ContactMapper._flatten(
-            {"level1": {"level2": {"level3": "val"}}}, depth=3,
+            {"level1": {"level2": {"level3": "val"}}},
+            depth=3,
         )
         assert "level1.level2.level3" in flat
 
@@ -4395,46 +4572,61 @@ class TestListNormalizer:
 
     def test_comma_separated(self) -> None:
         from rolodexter.core import ListNormalizer
-        assert ListNormalizer.normalize("marketing, sales, vip") == ["marketing", "sales", "vip"]
+
+        assert ListNormalizer.normalize("marketing, sales, vip") == [
+            "marketing",
+            "sales",
+            "vip",
+        ]
 
     def test_semicolon_separated(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize("a; b; c") == ["a", "b", "c"]
 
     def test_json_array(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize('["hot", "lead"]') == ["hot", "lead"]
 
     def test_single_value(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize("vip") == ["vip"]
 
     def test_python_list_passthrough(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize(["a", "b"]) == ["a", "b"]
 
     def test_empty_string_passthrough(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize("") == ""
 
     def test_non_string_passthrough(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize(42) == 42
 
     def test_whitespace_trimmed(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize("  a ,  b  , c  ") == ["a", "b", "c"]
 
     def test_empty_items_filtered(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize("a,,b,  ,c") == ["a", "b", "c"]
 
     def test_json_array_with_numbers(self) -> None:
         from rolodexter.core import ListNormalizer
-        assert ListNormalizer.normalize('[1, 2, 3]') == ["1", "2", "3"]
+
+        assert ListNormalizer.normalize("[1, 2, 3]") == ["1", "2", "3"]
 
     def test_list_with_empty_strings_filtered(self) -> None:
         from rolodexter.core import ListNormalizer
+
         assert ListNormalizer.normalize(["a", "", "  ", "b"]) == ["a", "b"]
 
     def test_tags_in_map_payload(self) -> None:
