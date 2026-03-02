@@ -70,7 +70,7 @@ class TestLoading:
         assert len(registry.canonical_fields) >= 30
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.5.0"
+        assert registry.version == "2.6.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
@@ -748,7 +748,10 @@ class TestNormalizeValue:
         assert normalize_value("city", "  new york  ") == "New York"
 
     def test_fallback_string(self) -> None:
-        assert normalize_value("tags", "  vip  ") == "vip"
+        # tags now uses ListNormalizer (v2.6.0) — single values become a list
+        assert normalize_value("tags", "  vip  ") == ["vip"]
+        # Fields without a category normalizer still use StringNormalizer
+        assert normalize_value("notes", "  hello  ") == "hello"
 
     def test_non_string_passthrough(self) -> None:
         assert normalize_value("phone", 12345) == 12345
@@ -1410,8 +1413,8 @@ class TestFormBotGuessRequiredValueKeywords:
 class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
-    def test_version_is_2_5_0(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.5.0"
+    def test_version_is_2_6_0(self, registry: PatternRegistry) -> None:
+        assert registry.version == "2.6.0"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3668,7 +3671,7 @@ class TestI18nWriteAndLoadCache:
             "language_code": "test_lang",
             "language_name": "Test Language",
             "generated_at": "2026-01-01T00:00:00+00:00",
-            "source_version": "2.5.0",
+            "source_version": "2.6.0",
             "fields": {"email": ["correo_test"]},
         }
         path = _write_cache(lang_data)
@@ -3710,7 +3713,7 @@ class TestI18nGenerateLanguageCached:
             "language_code": "es",
             "language_name": "Spanish",
             "generated_at": "2026-01-01",
-            "source_version": "2.5.0",
+            "source_version": "2.6.0",
             "fields": {"email": ["correo"]},
         }
         monkeypatch.setattr("rolodexter.i18n.load_cached", lambda code: cached_data if code == "es" else None)
@@ -3785,7 +3788,7 @@ class TestPatternRegistryLanguages:
             "language_code": "test_cov",
             "language_name": "Test Coverage",
             "generated_at": "2026-01-01",
-            "source_version": "2.5.0",
+            "source_version": "2.6.0",
             "fields": {"email": ["correo_cov_test"]},
         }
         _write_cache(lang_data)
