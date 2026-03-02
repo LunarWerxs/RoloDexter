@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rolodexter"
-version = "2.4.0"
+version = "2.5.0"
 description = "The universal contact field mapper — route messy, inconsistent contact data to a clean canonical schema."
 readme = "README.md"
 license = "MIT"
@@ -35,7 +35,10 @@ classifiers = [
     "Topic :: Office/Business",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "phonenumbers>=8.0",
+    "nameparser>=1.1",
+]
 
 [project.optional-dependencies]
 fuzzy = ["rapidfuzz>=3.0"]

@@ -59,9 +59,10 @@ from .core import (
 )
 from .i18n import SUPPORTED_LANGUAGES, generate_language
 
-__version__ = "2.3.0"
+__version__ = "2.5.0"
 
 __all__ = [
+    "SUPPORTED_LANGUAGES",
     "AddressNormalizer",
     "BooleanNormalizer",
     "CanonicalField",
@@ -76,19 +77,19 @@ __all__ = [
     "MappingResult",
     # Strategies
     "MatchStrategy",
+    "MatchType",
     "NameNormalizer",
     "NormalizedMatchStrategy",
+    "NumberType",
     "PatternLoadError",
     "PatternRegistry",
     # Normalizers
     "PhoneNormalizer",
-    "PostalCodeNormalizer",
     # Phone module
     "PhoneNumber",
     "PhoneNumberMatch",
     "PhoneNumberMatcher",
-    "MatchType",
-    "NumberType",
+    "PostalCodeNormalizer",
     # Exceptions
     "RolodexterError",
     "StringNormalizer",
@@ -101,5 +102,4 @@ __all__ = [
     "normalize_value",
     "number_type",
     "parse",
-    "SUPPORTED_LANGUAGES",
 ]

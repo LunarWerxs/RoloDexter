@@ -198,18 +198,17 @@ class MappingResult:
 #  NORMALIZERS
 # ═══════════════════════════════════════════════════════════════════════
 
-_PHONE_STRIP = re.compile(r"[^\d+]")
-
 
 class PhoneNormalizer:
-    """Normalize phone values to E.164 via the built-in ``_phone`` module.
+    """Normalize phone values to E.164 via ``phonenumbers``.
 
-    Uses rolodexter's own ITU metadata (230+ calling codes, zero external
-    dependencies) to parse and format phone numbers.  Falls back to a
-    lightweight regex strip when parsing cannot identify the number.
+    Delegates to Google's libphonenumber (via the ``phonenumbers`` hard
+    dependency) for parsing and E.164 formatting.  Returns the original
+    value unchanged if the input cannot be interpreted as a phone number.
+
+    .. versionchanged:: 2.5.0
+       Manual regex fallback removed; ``phonenumbers`` handles all cases.
     """
-
-    _STRIP = _PHONE_STRIP
 
     @classmethod
     def normalize(cls, value: str, *, default_region: str | None = None) -> str:
@@ -220,24 +219,13 @@ class PhoneNormalizer:
         if not raw:
             return value
 
-        # ── E.164 via built-in _phone module ────────────────────────
         from . import _phone
 
         result = _phone.format_e164(raw, default_region)
         if result is not None:
             return result
 
-        # ── Regex fallback ──────────────────────────────────────────
-        cleaned = cls._STRIP.sub("", raw)
-        if not cleaned:
-            return value
-        if len(cleaned) > 10 and not cleaned.startswith("+"):
-            cleaned = "+" + cleaned
-        # Reject implausible lengths
-        digit_count = sum(c.isdigit() for c in cleaned)
-        if digit_count < 7 or digit_count > 15:
-            return value
-        return cleaned
+        return value
 
 
 class EmailNormalizer:
@@ -249,51 +237,77 @@ class EmailNormalizer:
 
 
 class NameNormalizer:
-    _PARTICLES = frozenset(
-        {
-            "de",
-            "del",
-            "der",
-            "du",
-            "des",
-            "van",
-            "von",
-            "la",
-            "le",
-            "di",
-            "da",
-            "dos",
-            "das",
-            "el",
-            "al",
-            "af",
-            "op",
-            "ten",
-            "ter",
-            "zur",
-            "zum",
-            "bin",
-            "ibn",
-            "mac",
-            "mc",
-        }
+    """Normalize and parse names via ``nameparser``.
+
+    Delegates to the ``nameparser`` library for culturally-aware
+    capitalisation, particle handling ("van der", "de la", etc.),
+    title recognition, and suffix detection.
+
+    .. versionchanged:: 2.5.0
+       Replaced manual particle set with ``nameparser.HumanName``.
+    """
+
+    # Particles missing from nameparser's built-in prefix set.
+    _EXTRA_PREFIXES: tuple[str, ...] = (
+        "ten",
+        "ter",
+        "zur",
+        "zum",
+        "das",
+        "des",
+        "op",
+        "el",
+        "af",
     )
+    _prefixes_patched: bool = False
+
+    @classmethod
+    def _ensure_prefixes(cls) -> None:
+        """Add missing particles to nameparser on first use (once)."""
+        if cls._prefixes_patched:
+            return
+        from nameparser.config import CONSTANTS  # type: ignore[import-untyped]
+
+        CONSTANTS.prefixes.add(*cls._EXTRA_PREFIXES)
+        cls._prefixes_patched = True
 
     @classmethod
     def normalize(cls, value: str) -> str:
+        """Capitalize a name string with culturally-aware rules."""
         if not value or not isinstance(value, str):
             return value  # type: ignore[return-value]
-        parts = value.strip().split()
-        result: list[str] = []
-        for idx, part in enumerate(parts):
-            lower = part.lower()
-            if lower in cls._PARTICLES and idx > 0:
-                result.append(lower)
-            elif "-" in part:
-                result.append("-".join(seg.capitalize() for seg in part.split("-")))
-            else:
-                result.append(part.capitalize())
-        return " ".join(result)
+        text = value.strip()
+        if not text:
+            return value
+
+        cls._ensure_prefixes()
+        from nameparser import HumanName  # type: ignore[import-untyped]
+
+        hn = HumanName(text.lower())
+        hn.capitalize()
+        return str(hn)
+
+    @classmethod
+    def parse(cls, value: str) -> dict[str, str]:
+        """Parse a name string into structured components.
+
+        Returns a dict with keys: ``title``, ``first``, ``middle``,
+        ``last``, ``suffix``, ``nickname``.
+
+        .. versionadded:: 2.5.0
+        """
+        cls._ensure_prefixes()
+        from nameparser import HumanName  # type: ignore[import-untyped]
+
+        hn = HumanName(value.strip())
+        return {
+            "title": str(hn.title),
+            "first": str(hn.first),
+            "middle": str(hn.middle),
+            "last": str(hn.last),
+            "suffix": str(hn.suffix),
+            "nickname": str(hn.nickname),
+        }
 
 
 class AddressNormalizer:
@@ -348,21 +362,14 @@ class BooleanNormalizer:
 
 # Category sets — each canonical field belongs to exactly one normalizer group.
 # Adding a new CanonicalField? Just add it to the right set below.
-_PHONE_FIELDS: frozenset[str] = frozenset(
-    {"phone", "home_phone", "work_phone", "fax", "whatsapp"}
-)
+_PHONE_FIELDS: frozenset[str] = frozenset({"phone", "home_phone", "work_phone", "fax", "whatsapp"})
 _NAME_FIELDS: frozenset[str] = frozenset(
     {"first_name", "last_name", "full_name", "middle_name", "nickname", "prefix", "suffix"}
 )
-_ADDRESS_FIELDS: frozenset[str] = frozenset(
-    {"address_line1", "address_line2", "city", "full_address"}
-)
-_BOOLEAN_FIELDS: frozenset[str] = frozenset(
-    {"email_opt_out", "subscribed", "verified"}
-)
+_ADDRESS_FIELDS: frozenset[str] = frozenset({"address_line1", "address_line2", "city", "full_address"})
+_BOOLEAN_FIELDS: frozenset[str] = frozenset({"email_opt_out", "subscribed", "verified"})
 _SOCIAL_FIELDS: frozenset[str] = frozenset(
-    {"website", "linkedin", "twitter", "facebook", "instagram",
-     "github", "youtube", "tiktok", "discord", "telegram"}
+    {"website", "linkedin", "twitter", "facebook", "instagram", "github", "youtube", "tiktok", "discord", "telegram"}
 )
 
 # Build the lookup dict programmatically from the category sets.
@@ -642,14 +649,26 @@ class NormalizedMatchStrategy(MatchStrategy):
 
     # Vendor-specific prefixes to strip
     _VENDOR_PREFIXES = (
-        "hs_", "hubspot_", "sf_", "salesforce_", "sl_", "smartlead_",
+        "hs_",
+        "hubspot_",
+        "sf_",
+        "salesforce_",
+        "sl_",
+        "smartlead_",
     )
 
     # Address/context prefixes (the suffix IS the field).
     # Superset of expansion form_prefixes that overlap with address contexts.
     _ADDRESS_PREFIXES = (
-        "business_", "mailing_", "home_", "other_", "personal_",
-        "shipping_", "billing_", "primary_", "secondary_",
+        "business_",
+        "mailing_",
+        "home_",
+        "other_",
+        "personal_",
+        "shipping_",
+        "billing_",
+        "primary_",
+        "secondary_",
     )
 
     _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -815,13 +834,13 @@ class FuzzyMatchStrategy(MatchStrategy):
 # (canonical, domain(s), path_regex_suffix)
 # Adding a new platform = 1 row here.
 _SOCIAL_URL_DEFS: tuple[tuple[str, str | tuple[str, ...], str], ...] = (
-    ("linkedin",  "linkedin.com",             r"(in|company|pub|school)/"),
-    ("twitter",   ("twitter.com", "x.com"),   r"[a-zA-Z0-9_]+/?$"),
-    ("instagram", "instagram.com",            r"[a-zA-Z0-9_.]+/?$"),
-    ("github",    "github.com",               r"[a-zA-Z0-9\-]+/?$"),
-    ("facebook",  ("facebook.com", "fb.com"), r"[a-zA-Z0-9.]+/?$"),
-    ("youtube",   "youtube.com",              r"((channel|c)/[a-zA-Z0-9\-_]+|@[a-zA-Z0-9\-_]+)/?$"),
-    ("tiktok",    "tiktok.com",               r"@[a-zA-Z0-9_.]+/?$"),
+    ("linkedin", "linkedin.com", r"(in|company|pub|school)/"),
+    ("twitter", ("twitter.com", "x.com"), r"[a-zA-Z0-9_]+/?$"),
+    ("instagram", "instagram.com", r"[a-zA-Z0-9_.]+/?$"),
+    ("github", "github.com", r"[a-zA-Z0-9\-]+/?$"),
+    ("facebook", ("facebook.com", "fb.com"), r"[a-zA-Z0-9.]+/?$"),
+    ("youtube", "youtube.com", r"((channel|c)/[a-zA-Z0-9\-_]+|@[a-zA-Z0-9\-_]+)/?$"),
+    ("tiktok", "tiktok.com", r"@[a-zA-Z0-9_.]+/?$"),
 )
 
 
@@ -833,9 +852,7 @@ def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
             domain_re = "|".join(re.escape(d) for d in domains)
         else:
             domain_re = re.escape(domains)
-        result.append(
-            (field, re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE))
-        )
+        result.append((field, re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE)))
     return tuple(result)
 
 
