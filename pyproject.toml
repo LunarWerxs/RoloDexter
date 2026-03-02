@@ -31,14 +31,12 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Office/Business",
     "Typing :: Typed",
 ]
-dependencies = [
-    "phonenumbers>=8.0",
-    "nameparser>=1.1",
-]
+dependencies = ["phonenumbers>=8.0", "nameparser>=1.1"]
 
 [project.optional-dependencies]
 fuzzy = ["rapidfuzz>=3.0"]
