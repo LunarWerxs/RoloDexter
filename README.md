@@ -1,6 +1,7 @@
 <div align="center">
 
 <img src="https://res.cloudinary.com/dicsgc72e/image/upload/v1772425436/ezgif-42b0a21d2af73c08_iwq3aa.gif" alt="RoloDexter" width="600" />
+
 **The universal contact field mapper.**
 
 Route messy, inconsistent contact data from *any* source to a clean, canonical schema.
