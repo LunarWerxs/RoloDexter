@@ -104,9 +104,9 @@ SUPPORTED_LANGUAGES: dict[str, tuple[str, str]] = {
 
 
 def _package_i18n_dir() -> Path | None:
-    """Return ``_data/i18n/`` inside the installed package, if writable."""
+    """Return ``i18n/`` inside the installed package, if writable."""
     try:
-        pkg = resources.files("rolodexter._data")
+        pkg = resources.files("rolodexter")
         d = Path(str(pkg)) / "i18n"
         d.mkdir(parents=True, exist_ok=True)
         # Quick write-test
@@ -273,12 +273,12 @@ def _get_english_aliases(master: dict[str, Any]) -> set[str]:
 def _load_master() -> dict[str, Any]:
     """Load the bundled patterns.json."""
     try:
-        pkg = resources.files("rolodexter._data")
+        pkg = resources.files("rolodexter")
         text = pkg.joinpath("patterns.json").read_text(encoding="utf-8")
         return json.loads(text)
     except Exception:
         # Fallback: try filesystem path relative to this file
-        p = Path(__file__).resolve().parent / "_data" / "patterns.json"
+        p = Path(__file__).resolve().parent / "patterns.json"
         with open(p, encoding="utf-8") as fh:
             return json.load(fh)
 

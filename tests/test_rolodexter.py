@@ -3799,10 +3799,19 @@ class TestPatternRegistryLanguages:
             if p.exists():
                 p.unlink()
 
-    def test_languages_uncached_no_translator(self) -> None:
+    def test_languages_uncached_no_translator(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Loading a language with no cache and no deep-translator gracefully skips."""
+        import rolodexter.i18n as _i18n_mod
+
+        def _no_cache(code: str):
+            return None
+
+        def _no_translator(*a, **kw):
+            raise ImportError("deep-translator not installed (mocked)")
+
+        monkeypatch.setattr(_i18n_mod, "load_cached", _no_cache)
+        monkeypatch.setattr(_i18n_mod, "generate_language", _no_translator)
         reg = PatternRegistry(languages=["es"])
-        # es might or might not be cached; either way no crash
         assert isinstance(reg.all_aliases, list)
 
 

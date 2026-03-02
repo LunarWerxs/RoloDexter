@@ -453,7 +453,7 @@ class PatternRegistry:
     @staticmethod
     def _load_default() -> dict[str, Any]:
         try:
-            pkg = resources.files("rolodexter._data")
+            pkg = resources.files("rolodexter")
             text = pkg.joinpath("patterns.json").read_text(encoding="utf-8")
             return json.loads(text)
         except Exception as exc:
