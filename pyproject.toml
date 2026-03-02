@@ -56,11 +56,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rolodexter/rolodexter"
-Repository = "https://github.com/rolodexter/rolodexter"
-Documentation = "https://github.com/rolodexter/rolodexter#readme"
-Issues = "https://github.com/rolodexter/rolodexter/issues"
-Changelog = "https://github.com/rolodexter/rolodexter/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/L0garithmic/rolodexter"
+Repository = "https://github.com/L0garithmic/rolodexter"
+Documentation = "https://github.com/L0garithmic/rolodexter#readme"
+Issues = "https://github.com/L0garithmic/rolodexter/issues"
+Changelog = "https://github.com/L0garithmic/rolodexter/blob/main/CHANGELOG.md"
 
 # ── Setuptools ────────────────────────────────────────────────────────
 
