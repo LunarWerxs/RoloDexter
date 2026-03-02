@@ -70,7 +70,7 @@ class TestLoading:
         assert len(registry.canonical_fields) >= 30
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.3.0"
+        assert registry.version == "2.4.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
@@ -1410,8 +1410,8 @@ class TestFormBotGuessRequiredValueKeywords:
 class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
-    def test_version_is_2_3_0(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.3.0"
+    def test_version_is_2_4_0(self, registry: PatternRegistry) -> None:
+        assert registry.version == "2.4.0"
 
 
 # ═══════════════════════════════════════════════════════════════

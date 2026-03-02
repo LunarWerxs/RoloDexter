@@ -441,53 +441,75 @@ def is_valid(raw: str, default_region: str | None = None) -> bool:
 # If the national number doesn't match the expected total length, we
 # fall back to ungrouped output.
 
-_FORMAT_TEMPLATES: dict[int, tuple[list[int], list[int]]] = {
-    # CC: (national_groups, international_groups)
-    1:   ([3, 3, 4],      [3, 3, 4]),        # NANP: (555) 123-4567 / +1 555 123 4567
-    7:   ([3, 3, 2, 2],   [3, 3, 2, 2]),     # RU: (800) 123-45-67
-    20:  ([2, 4, 4],      [2, 4, 4]),         # EG
-    27:  ([2, 3, 4],      [2, 3, 4]),         # ZA
-    30:  ([3, 3, 4],      [3, 3, 4]),         # GR
-    31:  ([2, 3, 4],      [2, 3, 4]),         # NL
-    32:  ([3, 2, 2, 2],   [3, 2, 2, 2]),      # BE
-    33:  ([1, 2, 2, 2, 2],[1, 2, 2, 2, 2]),   # FR: 01 23 45 67 89
-    34:  ([3, 3, 3],      [3, 3, 3]),         # ES
-    36:  ([2, 3, 4],      [2, 3, 4]),         # HU
-    39:  ([3, 3, 4],      [3, 3, 4]),         # IT
-    40:  ([3, 3, 3],      [3, 3, 3]),         # RO
-    41:  ([2, 3, 2, 2],   [2, 3, 2, 2]),      # CH
-    43:  ([4, 4],         [4, 4]),            # AT
-    44:  ([4, 6],         [4, 6]),            # GB: 020 7946 0958
-    45:  ([2, 2, 2, 2],   [2, 2, 2, 2]),      # DK
-    46:  ([2, 3, 4],      [2, 3, 4]),         # SE
-    47:  ([3, 2, 3],      [3, 2, 3]),         # NO
-    48:  ([3, 3, 3],      [3, 3, 3]),         # PL
-    49:  ([4, 4],         [4, 4]),            # DE
-    51:  ([3, 3, 3],      [3, 3, 3]),         # PE
-    52:  ([3, 3, 4],      [3, 3, 4]),         # MX
-    55:  ([2, 5, 4],      [2, 5, 4]),         # BR
-    56:  ([1, 4, 4],      [1, 4, 4]),         # CL
-    57:  ([3, 3, 4],      [3, 3, 4]),         # CO
-    60:  ([2, 4, 4],      [2, 4, 4]),         # MY
-    61:  ([1, 4, 4],      [1, 4, 4]),         # AU
-    62:  ([3, 4, 4],      [3, 4, 4]),         # ID
-    63:  ([3, 3, 4],      [3, 3, 4]),         # PH
-    64:  ([1, 3, 4],      [1, 3, 4]),         # NZ
-    65:  ([4, 4],         [4, 4]),            # SG
-    66:  ([1, 4, 4],      [1, 4, 4]),         # TH
-    81:  ([2, 4, 4],      [2, 4, 4]),         # JP
-    82:  ([2, 4, 4],      [2, 4, 4]),         # KR
-    84:  ([2, 4, 4],      [2, 4, 4]),         # VN
-    86:  ([3, 4, 4],      [3, 4, 4]),         # CN
-    90:  ([3, 3, 4],      [3, 3, 4]),         # TR
-    91:  ([5, 5],         [5, 5]),            # IN
-    92:  ([3, 7],         [3, 7]),            # PK
-    98:  ([3, 3, 4],      [3, 3, 4]),         # IR
-    234: ([3, 3, 4],      [3, 3, 4]),         # NG
-    254: ([3, 6],         [3, 6]),            # KE
-    380: ([2, 3, 2, 2],   [2, 3, 2, 2]),      # UA
-    966: ([2, 3, 4],      [2, 3, 4]),         # SA
-    971: ([2, 3, 4],      [2, 3, 4]),         # AE
+# ── Named digit-grouping patterns (19 unique across 45 countries) ──
+_G_334   = [3, 3, 4]       # 10 digits: NNN NNN NNNN
+_G_3322  = [3, 3, 2, 2]    # 10 digits: NNN NNN NN NN
+_G_244   = [2, 4, 4]       # 10 digits: NN NNNN NNNN
+_G_234   = [2, 3, 4]       #  9 digits: NN NNN NNNN
+_G_3222  = [3, 2, 2, 2]    #  9 digits: NNN NN NN NN
+_G_12222 = [1, 2, 2, 2, 2] #  9 digits: N NN NN NN NN
+_G_333   = [3, 3, 3]       #  9 digits: NNN NNN NNN
+_G_2322  = [2, 3, 2, 2]    #  9 digits: NN NNN NN NN
+_G_44    = [4, 4]           #  8 digits: NNNN NNNN
+_G_46    = [4, 6]           # 10 digits: NNNN NNNNNN
+_G_2222  = [2, 2, 2, 2]    #  8 digits: NN NN NN NN
+_G_323   = [3, 2, 3]       #  8 digits: NNN NN NNN
+_G_254   = [2, 5, 4]       # 11 digits: NN NNNNN NNNN
+_G_144   = [1, 4, 4]       #  9 digits: N NNNN NNNN
+_G_344   = [3, 4, 4]       # 11 digits: NNN NNNN NNNN
+_G_134   = [1, 3, 4]       #  8 digits: N NNN NNNN
+_G_55    = [5, 5]           # 10 digits: NNNNN NNNNN
+_G_37    = [3, 7]           # 10 digits: NNN NNNNNNN
+_G_36    = [3, 6]           #  9 digits: NNN NNNNNN
+
+# Mapping: calling code → digit grouping (single list; national == international
+# for every country, so no need to store the grouping twice).
+_FORMAT_TEMPLATES: dict[int, list[int]] = {
+    1:   _G_334,   # NANP (US/CA/…)
+    7:   _G_3322,  # RU
+    20:  _G_244,   # EG
+    27:  _G_234,   # ZA
+    30:  _G_334,   # GR
+    31:  _G_234,   # NL
+    32:  _G_3222,  # BE
+    33:  _G_12222, # FR
+    34:  _G_333,   # ES
+    36:  _G_234,   # HU
+    39:  _G_334,   # IT
+    40:  _G_333,   # RO
+    41:  _G_2322,  # CH
+    43:  _G_44,    # AT
+    44:  _G_46,    # GB
+    45:  _G_2222,  # DK
+    46:  _G_234,   # SE
+    47:  _G_323,   # NO
+    48:  _G_333,   # PL
+    49:  _G_44,    # DE
+    51:  _G_333,   # PE
+    52:  _G_334,   # MX
+    55:  _G_254,   # BR
+    56:  _G_144,   # CL
+    57:  _G_334,   # CO
+    60:  _G_244,   # MY
+    61:  _G_144,   # AU
+    62:  _G_344,   # ID
+    63:  _G_334,   # PH
+    64:  _G_134,   # NZ
+    65:  _G_44,    # SG
+    66:  _G_144,   # TH
+    81:  _G_244,   # JP
+    82:  _G_244,   # KR
+    84:  _G_244,   # VN
+    86:  _G_344,   # CN
+    90:  _G_334,   # TR
+    91:  _G_55,    # IN
+    92:  _G_37,    # PK
+    98:  _G_334,   # IR
+    234: _G_334,   # NG
+    254: _G_36,    # KE
+    380: _G_2322,  # UA
+    966: _G_234,   # SA
+    971: _G_234,   # AE
 }
 
 
@@ -518,7 +540,7 @@ def format_international(phone: PhoneNumber) -> str:
     cc = phone.calling_code
     nn = phone.national_number
     tmpl = _FORMAT_TEMPLATES.get(cc)
-    formatted = _apply_grouping(nn, tmpl[1]) if tmpl else nn
+    formatted = _apply_grouping(nn, tmpl) if tmpl else nn
     return f"+{cc} {formatted}{_ext_suffix(phone.extension)}"
 
 
@@ -539,7 +561,7 @@ def format_national(phone: PhoneNumber) -> str:
     if tmpl:
         # National format: prepend trunk 0 for countries that use it
         trunk = "0" if cc not in _NO_TRUNK else ""
-        formatted = _apply_grouping(nn, tmpl[0])
+        formatted = _apply_grouping(nn, tmpl)
         return f"{trunk}{formatted}{ext}"
 
     return f"{nn}{ext}"

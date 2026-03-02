@@ -346,43 +346,35 @@ class BooleanNormalizer:
         return value.strip()
 
 
+# Category sets — each canonical field belongs to exactly one normalizer group.
+# Adding a new CanonicalField? Just add it to the right set below.
+_PHONE_FIELDS: frozenset[str] = frozenset(
+    {"phone", "home_phone", "work_phone", "fax", "whatsapp"}
+)
+_NAME_FIELDS: frozenset[str] = frozenset(
+    {"first_name", "last_name", "full_name", "middle_name", "nickname", "prefix", "suffix"}
+)
+_ADDRESS_FIELDS: frozenset[str] = frozenset(
+    {"address_line1", "address_line2", "city", "full_address"}
+)
+_BOOLEAN_FIELDS: frozenset[str] = frozenset(
+    {"email_opt_out", "subscribed", "verified"}
+)
+_SOCIAL_FIELDS: frozenset[str] = frozenset(
+    {"website", "linkedin", "twitter", "facebook", "instagram",
+     "github", "youtube", "tiktok", "discord", "telegram"}
+)
+
+# Build the lookup dict programmatically from the category sets.
 _FIELD_NORMALIZERS: dict[str, type] = {
-    "phone": PhoneNormalizer,
-    "home_phone": PhoneNormalizer,
-    "work_phone": PhoneNormalizer,
-    "fax": PhoneNormalizer,
-    "whatsapp": PhoneNormalizer,
+    **{f: PhoneNormalizer for f in _PHONE_FIELDS},
+    **{f: NameNormalizer for f in _NAME_FIELDS},
+    **{f: AddressNormalizer for f in _ADDRESS_FIELDS},
+    **{f: BooleanNormalizer for f in _BOOLEAN_FIELDS},
+    **{f: StringNormalizer for f in _SOCIAL_FIELDS},
     "email": EmailNormalizer,
-    "first_name": NameNormalizer,
-    "last_name": NameNormalizer,
-    "full_name": NameNormalizer,
-    "middle_name": NameNormalizer,
-    "nickname": NameNormalizer,
-    "prefix": NameNormalizer,
-    "suffix": NameNormalizer,
-    "address_line1": AddressNormalizer,
-    "address_line2": AddressNormalizer,
-    "city": AddressNormalizer,
-    "full_address": AddressNormalizer,
     "postal_code": PostalCodeNormalizer,
-    "state": StringNormalizer,
-    "country": StringNormalizer,
-    "message": StringNormalizer,
-    "subject": StringNormalizer,
-    "company_size": StringNormalizer,
-    "email_opt_out": BooleanNormalizer,
-    "subscribed": BooleanNormalizer,
-    "verified": BooleanNormalizer,
-    "website": StringNormalizer,
-    "linkedin": StringNormalizer,
-    "twitter": StringNormalizer,
-    "facebook": StringNormalizer,
-    "instagram": StringNormalizer,
-    "github": StringNormalizer,
-    "youtube": StringNormalizer,
-    "tiktok": StringNormalizer,
-    "discord": StringNormalizer,
-    "telegram": StringNormalizer,
+    # Remaining fields default to StringNormalizer via normalize_value()
 }
 
 
@@ -615,26 +607,6 @@ class ExactMatchStrategy(MatchStrategy):
         return None
 
 
-class ServiceMatchStrategy(MatchStrategy):
-    """Deprecated stub — service profiles were removed in v2.0.
-
-    Kept so that code referencing the class does not crash on import.
-    ``match()`` always returns ``None``.
-    """
-
-    __slots__ = ("_registry",)
-
-    def __init__(self, registry: PatternRegistry) -> None:
-        self._registry = registry
-
-    @property
-    def name(self) -> str:
-        return "service"
-
-    def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None:
-        return None
-
-
 class NormalizedMatchStrategy(MatchStrategy):
     """Smart header normalisation → exact alias lookup (confidence 0.95).
 
@@ -664,20 +636,20 @@ class NormalizedMatchStrategy(MatchStrategy):
         }
     )
 
-    # Vendor-specific prefixes to strip
-    _VENDOR_PREFIXES = ("hs_", "hubspot_", "sf_", "salesforce_", "sl_", "smartlead_")
+    # ── Strippable prefixes (module-level constants) ──
+    # These are intentionally NOT duplicated; NormalizedMatchStrategy reads
+    # the same objects that the expansion engine could reference if needed.
 
-    # Address-context prefixes (the suffix IS the field)
+    # Vendor-specific prefixes to strip
+    _VENDOR_PREFIXES = (
+        "hs_", "hubspot_", "sf_", "salesforce_", "sl_", "smartlead_",
+    )
+
+    # Address/context prefixes (the suffix IS the field).
+    # Superset of expansion form_prefixes that overlap with address contexts.
     _ADDRESS_PREFIXES = (
-        "business_",
-        "mailing_",
-        "home_",
-        "other_",
-        "personal_",
-        "shipping_",
-        "billing_",
-        "primary_",
-        "secondary_",
+        "business_", "mailing_", "home_", "other_", "personal_",
+        "shipping_", "billing_", "primary_", "secondary_",
     )
 
     _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -839,6 +811,34 @@ class FuzzyMatchStrategy(MatchStrategy):
         return FieldMatch(original=header, canonical=canonical, confidence=confidence, strategy=self.name)
 
 
+# ── Social URL data table ──
+# (canonical, domain(s), path_regex_suffix)
+# Adding a new platform = 1 row here.
+_SOCIAL_URL_DEFS: tuple[tuple[str, str | tuple[str, ...], str], ...] = (
+    ("linkedin",  "linkedin.com",             r"(in|company|pub|school)/"),
+    ("twitter",   ("twitter.com", "x.com"),   r"[a-zA-Z0-9_]+/?$"),
+    ("instagram", "instagram.com",            r"[a-zA-Z0-9_.]+/?$"),
+    ("github",    "github.com",               r"[a-zA-Z0-9\-]+/?$"),
+    ("facebook",  ("facebook.com", "fb.com"), r"[a-zA-Z0-9.]+/?$"),
+    ("youtube",   "youtube.com",              r"((channel|c)/[a-zA-Z0-9\-_]+|@[a-zA-Z0-9\-_]+)/?$"),
+    ("tiktok",    "tiktok.com",               r"@[a-zA-Z0-9_.]+/?$"),
+)
+
+
+def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """Generate compiled social URL regexes from *_SOCIAL_URL_DEFS*."""
+    result: list[tuple[str, re.Pattern[str]]] = []
+    for field, domains, path in _SOCIAL_URL_DEFS:
+        if isinstance(domains, tuple):
+            domain_re = "|".join(re.escape(d) for d in domains)
+        else:
+            domain_re = re.escape(domains)
+        result.append(
+            (field, re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE))
+        )
+    return tuple(result)
+
+
 class HeuristicMatchStrategy(MatchStrategy):
     """Regex data-shape detection for unrecognisable headers."""
 
@@ -848,19 +848,8 @@ class HeuristicMatchStrategy(MatchStrategy):
         # Phone
         ("phone", re.compile(r"^\+?1?\s*[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$")),
         ("phone", re.compile(r"^\+?[1-9]\d{6,14}$")),
-        # Social media URLs (must come BEFORE generic website)
-        ("linkedin", re.compile(r"^https?://(www\.)?linkedin\.com/(in|company|pub|school)/", re.IGNORECASE)),
-        ("twitter", re.compile(r"^https?://(www\.)?(twitter\.com|x\.com)/[a-zA-Z0-9_]+/?$", re.IGNORECASE)),
-        ("instagram", re.compile(r"^https?://(www\.)?instagram\.com/[a-zA-Z0-9_.]+/?$", re.IGNORECASE)),
-        ("github", re.compile(r"^https?://(www\.)?github\.com/[a-zA-Z0-9\-]+/?$", re.IGNORECASE)),
-        ("facebook", re.compile(r"^https?://(www\.)?(facebook\.com|fb\.com)/[a-zA-Z0-9.]+/?$", re.IGNORECASE)),
-        (
-            "youtube",
-            re.compile(
-                r"^https?://(www\.)?youtube\.com/((channel|c)/[a-zA-Z0-9\-_]+|@[a-zA-Z0-9\-_]+)/?$", re.IGNORECASE
-            ),
-        ),
-        ("tiktok", re.compile(r"^https?://(www\.)?tiktok\.com/@[a-zA-Z0-9_.]+/?$", re.IGNORECASE)),
+        # Social media URLs — generated from _SOCIAL_URL_DEFS at import time
+        *_build_social_url_patterns(),
         # Generic URLs
         ("website", re.compile(r"^https?://[^\s]+$", re.IGNORECASE)),
         ("website", re.compile(r"^www\.[^\s]+\.[a-zA-Z]{2,}$", re.IGNORECASE)),

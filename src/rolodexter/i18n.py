@@ -222,28 +222,29 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
 #  FIELD DERIVATION
 # ═══════════════════════════════════════════════════════════════════════
 
-# Fields that don't benefit from translation (technical/English-universal)
-_SKIP_FIELDS: frozenset[str] = frozenset(
+# Fields that don't benefit from translation (technical/English-universal).
+# Split into named categories so adding a new field is self-documenting:
+# just decide *why* it's skipped and add it to the right set.
+
+# Timestamps — machine-generated, never user-labeled in other languages
+_TIMESTAMP_SKIP: frozenset[str] = frozenset(
+    {"created_at", "updated_at", "last_contacted"}
+)
+
+# CRM / pipeline internals — English-only technical concepts
+_CRM_SKIP: frozenset[str] = frozenset(
     {
-        "utm_parameters",
-        "metadata",
-        "score",
-        "owner",
-        "tags",
-        "lead_status",
-        "lifecycle_stage",
-        "email_opt_out",
-        "created_at",
-        "updated_at",
-        "last_contacted",
-        "currency",
-        "source",
-        "discord",
-        "telegram",
-        "referrer_url",
-        "timezone",
+        "utm_parameters", "metadata", "score", "owner", "tags",
+        "lead_status", "lifecycle_stage", "email_opt_out",
+        "currency", "source", "referrer_url", "timezone",
     }
 )
+
+# Niche platforms whose name IS the universal label
+# (major platforms like linkedin/twitter/facebook DO get translated aliases)
+_PLATFORM_SKIP: frozenset[str] = frozenset({"discord", "telegram"})
+
+_SKIP_FIELDS: frozenset[str] = _TIMESTAMP_SKIP | _CRM_SKIP | _PLATFORM_SKIP
 
 
 def _derive_field_phrases(master: dict[str, Any]) -> dict[str, str]:

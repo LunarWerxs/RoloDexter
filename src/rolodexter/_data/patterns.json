@@ -1,5 +1,5 @@
 {
-  "version": "2.3.0",
+  "version": "2.4.0",
   "expansion": {
     "form_prefixes": [
       "billing_",
@@ -9,7 +9,14 @@
       "contact_",
       "customer_",
       "applicant_",
-      "name_"
+      "name_",
+      "business_",
+      "mailing_",
+      "home_",
+      "other_",
+      "personal_",
+      "primary_",
+      "secondary_"
     ],
     "form_fields": {
       "first_name": "first_name",
