@@ -110,10 +110,10 @@ def _package_i18n_dir() -> Path | None:
         pkg = resources.files("rolodexter")
         d = Path(str(pkg)) / "i18n"
         d.mkdir(parents=True, exist_ok=True)
-        # Quick write-test
+        # Quick write-test — use missing_ok in case a parallel probe deleted it
         probe = d / ".probe"
         probe.write_text("ok")
-        probe.unlink()
+        probe.unlink(missing_ok=True)
         return d
     except Exception:  # pylint: disable=broad-exception-caught
         return None
@@ -199,26 +199,44 @@ def _to_alias_variants(text: str) -> set[str]:
 
 
 def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
-    """Translate English phrases to *lang_code* via deep-translator."""
-    try:
-        from deep_translator import GoogleTranslator
+    """Translate English phrases to *lang_code* via deep-translator.
 
+    Tries a single batch call first; on failure, falls back to per-phrase
+    translation with a brief inter-call delay to be polite to the API.
+    Per-phrase failures are logged as warnings rather than swallowed
+    silently so callers can diagnose partial-translation results.
+    """
+    from deep_translator import (  # type: ignore[import-untyped]
+        GoogleTranslator,
+    )
+
+    try:
         results = GoogleTranslator(source="en", target=lang_code).translate_batch(
             phrases
         )
         return [r.strip() if r else None for r in results]
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception as batch_exc:  # pylint: disable=broad-exception-caught
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.warning(
+            "Batch translate failed for %s (%s); falling back to per-phrase.",
+            lang_code,
+            batch_exc,
+        )
         out: list[str | None] = []
         for phrase in phrases:
             try:
-                from deep_translator import (  # type: ignore[import-untyped]
-                    GoogleTranslator,
-                )
-
                 r = GoogleTranslator(source="en", target=lang_code).translate(phrase)
                 out.append(r.strip() if r else None)
                 time.sleep(0.05)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception as phrase_exc:  # pylint: disable=broad-exception-caught
+                log.warning(
+                    "Per-phrase translate failed for %r → %s: %s",
+                    phrase,
+                    lang_code,
+                    phrase_exc,
+                )
                 out.append(None)
         return out
 
@@ -437,8 +455,20 @@ def generate_language(  # pylint: disable=too-many-locals
         "fields": merged,
     }
 
-    # Cache the result
-    _write_cache(lang_data)
+    # Cache the result — but skip writing an empty file that would
+    # short-circuit future runs.  If we attempted translation and got
+    # nothing, leave the cache state unchanged so the next invocation
+    # can retry rather than reading back an empty file.
+    if merged or existing is not None:
+        _write_cache(lang_data)
+    else:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "No translations produced for %s; skipping cache write so a "
+            "future run can retry.",
+            lang_code,
+        )
     return lang_data
 
 

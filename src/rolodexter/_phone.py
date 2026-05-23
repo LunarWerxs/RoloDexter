@@ -130,12 +130,17 @@ _TEL_PARAMS_RE = re.compile(r";[a-z\-]+=.*$", re.IGNORECASE)
 
 def _wrap(pn_obj: _pn.PhoneNumber, raw: str) -> PhoneNumber:
     """Wrap a ``phonenumbers.PhoneNumber`` into our ``PhoneNumber``."""
-    e164 = _pn.format_number(pn_obj, _Fmt.E164)
-    cc = pn_obj.country_code
-    national = e164[1 + len(str(cc)) :]
+    cc = pn_obj.country_code or 0
+    # libphonenumber stores national_number as int; preserve any leading
+    # zeros via italian_leading_zero (used by some locales, e.g. Italy).
+    nn = pn_obj.national_number or 0
+    national = str(nn)
+    if getattr(pn_obj, "italian_leading_zero", False):
+        leading = getattr(pn_obj, "number_of_leading_zeros", 1) or 1
+        national = "0" * leading + national
     ext: str | None = pn_obj.extension if pn_obj.extension else None
     return PhoneNumber(
-        calling_code=cc or 0,
+        calling_code=cc,
         national_number=national,
         raw=raw,
         extension=ext,

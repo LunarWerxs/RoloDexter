@@ -60,7 +60,7 @@ from .core import (
 )
 from .i18n import SUPPORTED_LANGUAGES, generate_language
 
-__version__ = "2.6.5"
+__version__ = "2.6.6"
 
 __all__ = [
     "SUPPORTED_LANGUAGES",

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -291,16 +292,24 @@ class NameNormalizer:
         "af",
     )
     _prefixes_patched: bool = False
+    _prefix_lock = threading.Lock()
 
     @classmethod
     def _ensure_prefixes(cls) -> None:
-        """Add missing particles to nameparser on first use (once)."""
+        """Add missing particles to nameparser on first use (once).
+
+        Thread-safe — the i18n CLI uses a worker pool that may invoke
+        ``NameNormalizer`` concurrently from multiple threads.
+        """
         if cls._prefixes_patched:
             return
-        from nameparser.config import CONSTANTS  # type: ignore[import-untyped]
+        with cls._prefix_lock:
+            if cls._prefixes_patched:
+                return
+            from nameparser.config import CONSTANTS  # type: ignore[import-untyped]
 
-        CONSTANTS.prefixes.add(*cls._EXTRA_PREFIXES)
-        cls._prefixes_patched = True
+            CONSTANTS.prefixes.add(*cls._EXTRA_PREFIXES)
+            cls._prefixes_patched = True
 
     @classmethod
     def normalize(cls, value: str) -> str:
@@ -516,6 +525,7 @@ class PatternRegistry:
     """
 
     __slots__ = (
+        "_alias_set",
         "_all_aliases",
         "_canonical_fields",
         "_data",
@@ -541,6 +551,7 @@ class PatternRegistry:
         self._languages = languages
         self._reverse_index: dict[str, str] = {}
         self._all_aliases: list[str] = []
+        self._alias_set: set[str] = set()
         self._canonical_fields: list[str] = []
         self._loaded_languages: list[str] = []
         self._build_indexes()
@@ -567,15 +578,21 @@ class PatternRegistry:
         except Exception as exc:
             raise PatternLoadError(f"Failed to load bundled patterns: {exc}") from exc
 
+    def _add_alias(self, key: str, canonical: str) -> None:
+        """Register *key* → *canonical* (first-write-wins on reverse_index)
+        and append to ``_all_aliases`` only on first sight."""
+        if key not in self._reverse_index:
+            self._reverse_index[key] = canonical
+        if key not in self._alias_set:
+            self._alias_set.add(key)
+            self._all_aliases.append(key)
+
     def _build_indexes(self) -> None:  # pylint: disable=too-many-branches
         fields: dict[str, list[str]] = self._data.get("fields", {})
         for canonical, aliases in fields.items():
             self._canonical_fields.append(canonical)
             for alias in aliases:
-                key = alias.lower().strip()
-                if key not in self._reverse_index:
-                    self._reverse_index[key] = canonical
-                self._all_aliases.append(key)
+                self._add_alias(alias.lower().strip(), canonical)
 
         # ── expansion rules (programmatic alias generation) ─────────
         self._apply_expansion_rules()
@@ -613,10 +630,7 @@ class PatternRegistry:
             self._loaded_languages.append(lang)
             for canonical, aliases in lang_data.get("fields", {}).items():
                 for alias in aliases:
-                    key = alias.lower().strip()
-                    if key not in self._reverse_index:
-                        self._reverse_index[key] = canonical
-                    self._all_aliases.append(key)
+                    self._add_alias(alias.lower().strip(), canonical)
 
     def _apply_overrides(self, overrides: dict[str, str] | None) -> None:
         """Apply caller-supplied alias overrides with highest priority.
@@ -640,7 +654,8 @@ class PatternRegistry:
         for alias, canonical in overrides.items():
             key = alias.lower().strip()
             self._reverse_index[key] = canonical  # highest priority
-            if key not in self._all_aliases:
+            if key not in self._alias_set:
+                self._alias_set.add(key)
                 self._all_aliases.append(key)
 
     def _apply_expansion_rules(self) -> None:
@@ -655,10 +670,7 @@ class PatternRegistry:
             return
 
         def _register(alias: str, canonical: str) -> None:
-            key = alias.lower().strip()
-            if key not in self._reverse_index:
-                self._reverse_index[key] = canonical
-                self._all_aliases.append(key)
+            self._add_alias(alias.lower().strip(), canonical)
 
         # ── form prefixes (billing_, shipping_, your_, …) ──────────
         form_prefixes: list[str] = expansion.get("form_prefixes", [])
@@ -817,6 +829,10 @@ class NormalizedMatchStrategy(MatchStrategy):
 
     _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
     _INDEXED_RE = re.compile(r"^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$")
+    _SEP_RE = re.compile(r"[\s\-]+")
+    _NONWORD_RE = re.compile(r"[^\w]")
+    _UNDERSCORE_RUN_RE = re.compile(r"_+")
+    _NUM_SUFFIX_RE = re.compile(r"_\d+")
 
     def __init__(self, registry: PatternRegistry) -> None:
         self._registry = registry
@@ -836,16 +852,16 @@ class NormalizedMatchStrategy(MatchStrategy):
             return out
 
         # 1. Space / hyphen → underscore  +  strip non-word chars
-        uscore = re.sub(r"[\s\-]+", "_", h).lower()
-        uscore = re.sub(r"[^\w]", "_", uscore)
-        uscore = re.sub(r"_+", "_", uscore).strip("_")
+        uscore = self._SEP_RE.sub("_", h).lower()
+        uscore = self._NONWORD_RE.sub("_", uscore)
+        uscore = self._UNDERSCORE_RUN_RE.sub("_", uscore).strip("_")
         if uscore:
             out.append(uscore)
 
         # 2. CamelCase / PascalCase split
         if any(c.isupper() for c in h[1:]):
             snake = self._CAMEL_RE.sub("_", h).lower()
-            snake = re.sub(r"_+", "_", snake).strip("_")
+            snake = self._UNDERSCORE_RUN_RE.sub("_", snake).strip("_")
             if snake and snake != uscore:
                 out.append(snake)
 
@@ -854,7 +870,7 @@ class NormalizedMatchStrategy(MatchStrategy):
             parts = h.rsplit(".", 1)
             prefix_raw = parts[0].lower().strip()
             suffix_raw = parts[1].strip()
-            suffix_lower = re.sub(r"[\s\-]+", "_", suffix_raw).lower()
+            suffix_lower = self._SEP_RE.sub("_", suffix_raw).lower()
             # Context-aware: company-like prefix + 'name' → company
             last_prefix = prefix_raw.rsplit(".", 1)[-1]
             if last_prefix in self._COMPANY_PREFIXES and suffix_lower in (
@@ -867,22 +883,22 @@ class NormalizedMatchStrategy(MatchStrategy):
             # CamelCase split of last segment
             if any(c.isupper() for c in suffix_raw[1:]):
                 snake_sfx = self._CAMEL_RE.sub("_", suffix_raw).lower()
-                snake_sfx = re.sub(r"_+", "_", snake_sfx).strip("_")
+                snake_sfx = self._UNDERSCORE_RUN_RE.sub("_", snake_sfx).strip("_")
                 if snake_sfx != suffix_lower:
                     out.append(snake_sfx)
 
         # 4. Indexed pattern:  "E-mail 1 - Value", "Organization 1 - Title"
         m = self._INDEXED_RE.match(h)
         if m:
-            grp = re.sub(r"[\s\-]+", "_", m.group(1).strip()).lower()
-            prop = re.sub(r"[\s\-]+", "_", m.group(2).strip()).lower()
+            grp = self._SEP_RE.sub("_", m.group(1).strip()).lower()
+            prop = self._SEP_RE.sub("_", m.group(2).strip()).lower()
             out.append(f"{grp}_{prop}")  # organization_name
             out.append(prop)  # name
             out.append(grp)  # organization
 
         # 5. Number stripping  ("E-mail 2 Address" → e_mail_address)
-        num_stripped = re.sub(r"_\d+", "", uscore)
-        num_stripped = re.sub(r"_+", "_", num_stripped).strip("_")
+        num_stripped = self._NUM_SUFFIX_RE.sub("", uscore)
+        num_stripped = self._UNDERSCORE_RUN_RE.sub("_", num_stripped).strip("_")
         if num_stripped and num_stripped != uscore:
             out.append(num_stripped)
 
@@ -932,10 +948,17 @@ class NormalizedMatchStrategy(MatchStrategy):
 
 
 class FuzzyMatchStrategy(MatchStrategy):
-    __slots__ = ("_available", "_registry")
+    __slots__ = ("_available", "_filtered_aliases", "_filtered_source_len", "_registry")
+
+    # Module-level compiled regexes (used in match() — see NormalizedMatchStrategy
+    # for similar patterns).
+    _NONWORD_RE = re.compile(r"[^\w]")
+    _UNDERSCORE_RUN_RE = re.compile(r"_+")
 
     def __init__(self, registry: PatternRegistry) -> None:
         self._registry = registry
+        self._filtered_aliases: list[str] | None = None
+        self._filtered_source_len: int = -1
         try:
             import rapidfuzz  # noqa: F401  # pylint: disable=unused-import
 
@@ -947,6 +970,20 @@ class FuzzyMatchStrategy(MatchStrategy):
     def name(self) -> str:
         return "fuzzy"
 
+    def _get_filtered_aliases(self) -> list[str] | None:
+        """Return aliases with length > 2, cached across calls.
+
+        The cache invalidates if the registry grows (e.g. lazy i18n load),
+        detected by comparing the source list length.
+        """
+        aliases = self._registry.all_aliases
+        if not aliases:
+            return None
+        if self._filtered_aliases is None or self._filtered_source_len != len(aliases):
+            self._filtered_aliases = [a for a in aliases if len(a) > 2]
+            self._filtered_source_len = len(aliases)
+        return self._filtered_aliases or None
+
     def match(
         self, header: str, value: str | None = None, **kwargs: object
     ) -> FieldMatch | None:
@@ -954,17 +991,10 @@ class FuzzyMatchStrategy(MatchStrategy):
             return None
         from rapidfuzz import fuzz, process
 
-        clean = re.sub(r"[^\w]", "_", header.lower().strip())
-        clean = re.sub(r"_+", "_", clean).strip("_")
+        clean = self._NONWORD_RE.sub("_", header.lower().strip())
+        clean = self._UNDERSCORE_RUN_RE.sub("_", clean).strip("_")
 
-        aliases = self._registry.all_aliases
-        if not aliases:
-            return None
-
-        # Exclude very short aliases (≤2 chars) — they cause false positives
-        # with WRatio partial matching (e.g. "co" matching "column").
-        # Short aliases still work via exact/normalized strategies.
-        filtered = [a for a in aliases if len(a) > 2]
+        filtered = self._get_filtered_aliases()
         if not filtered:
             return None
 
@@ -1061,13 +1091,24 @@ class HeuristicMatchStrategy(MatchStrategy):
         if not cleaned:
             return None
         for canonical, pattern in self._PATTERNS:
-            if pattern.match(cleaned):
-                return FieldMatch(
-                    original=header,
-                    canonical=canonical,
-                    confidence=HEURISTIC_CONFIDENCE,
-                    strategy=self.name,
-                )
+            if not pattern.match(cleaned):
+                continue
+            # Secondary check: when the pattern is one of the loose phone
+            # regexes, confirm via libphonenumber that the digits are a
+            # *possible* phone number.  Filters out 10-digit numeric IDs
+            # that happen to match the bare-digit phone pattern.
+            if canonical == "phone":
+                from . import _phone
+
+                parsed = _phone.parse(cleaned, default_region="US")
+                if parsed is None:
+                    continue
+            return FieldMatch(
+                original=header,
+                canonical=canonical,
+                confidence=HEURISTIC_CONFIDENCE,
+                strategy=self.name,
+            )
         return None
 
 
@@ -1295,12 +1336,18 @@ class ContactMapper:
 
 
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:
-    """Merge *value* into *target[key]*, promoting to list on collision."""
+    """Merge *value* into *target[key]*, promoting to list on collision.
+
+    Duplicate values are dropped so the same normalized phone/email
+    from multiple aliases (e.g. ``phone`` + ``mobile`` carrying the
+    same number) appears only once.
+    """
     if key not in target:
         target[key] = value
         return
     existing = target[key]
     if isinstance(existing, list):
-        existing.append(value)
-    else:
+        if value not in existing:
+            existing.append(value)
+    elif existing != value:
         target[key] = [existing, value]
