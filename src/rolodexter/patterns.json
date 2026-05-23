@@ -163,9 +163,7 @@
       "e_mail",
       "em",
       "mail",
-      "primary_email",
       "work_email",
-      "personal_email",
       "email1",
       "email2",
       "email_id",
@@ -193,8 +191,6 @@
       "ph",
       "phone1",
       "phone2",
-      "primary_phone",
-      "secondary_phone",
       "direct_phone",
       "main_phone",
       "daytime_phone",
@@ -209,7 +205,6 @@
       "cellphone",
       "mob",
       "cell_number",
-      "personal_phone",
       "sms",
       "text_number",
       "tel_number",
@@ -250,8 +245,7 @@
       "facsimile",
       "faxnumber",
       "fax_no",
-      "telefax",
-      "business_fax"
+      "telefax"
     ],
     "whatsapp": [
       "whatsapp",
@@ -381,7 +375,6 @@
       "town",
       "city_name",
       "municipality",
-      "mailing_city",
       "suburb",
       "address-level2",
       "city_town"
@@ -397,7 +390,6 @@
       "county",
       "territory",
       "state_name",
-      "mailing_state",
       "state_region",
       "address-level1"
     ],
@@ -412,7 +404,6 @@
       "zip_postal_code",
       "pin_code",
       "pincode",
-      "mailing_zip",
       "mailing_postal_code",
       "postal"
     ],
@@ -423,7 +414,6 @@
       "nation",
       "country_name",
       "country_region",
-      "mailing_country",
       "country-name"
     ],
     "full_address": [
@@ -453,8 +443,7 @@
       "company_url",
       "web_page",
       "blog",
-      "blog_url",
-      "personal_website"
+      "blog_url"
     ],
     "linkedin": [
       "linkedin",
