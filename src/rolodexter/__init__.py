@@ -47,8 +47,10 @@ from .core import (
     HeuristicMatchStrategy,
     ListNormalizer,
     MappingResult,
+    MappingSchema,
     MatchStrategy,
     NameNormalizer,
+    NormalizationError,
     NormalizedMatchStrategy,
     PatternLoadError,
     PatternRegistry,
@@ -60,7 +62,15 @@ from .core import (
 )
 from .i18n import SUPPORTED_LANGUAGES, generate_language
 
-__version__ = "2.7.0"
+# Single source of truth: read the installed package version rather than
+# duplicating a literal that can drift from pyproject.toml.
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("rolodexter")
+except PackageNotFoundError:  # pragma: no cover - running from a source tree
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "SUPPORTED_LANGUAGES",
@@ -77,10 +87,12 @@ __all__ = [
     "HeuristicMatchStrategy",
     "ListNormalizer",
     "MappingResult",
+    "MappingSchema",
     # Strategies
     "MatchStrategy",
     "MatchType",
     "NameNormalizer",
+    "NormalizationError",
     "NormalizedMatchStrategy",
     "NumberType",
     "PatternLoadError",

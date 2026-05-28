@@ -9,14 +9,23 @@ exceptions, enums, models, normalizers, registry, strategies, and mapper.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass, field
 from enum import Enum, unique
 from importlib import resources
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+# Library logger.  A NullHandler keeps rolodexter silent by default; callers
+# opt into output by configuring logging on this logger (or the root).
+logger = logging.getLogger("rolodexter")
+logger.addHandler(logging.NullHandler())
 
 # ═══════════════════════════════════════════════════════════════════════
 #  EXCEPTIONS
@@ -29,6 +38,18 @@ class RolodexterError(Exception):
 
 class PatternLoadError(RolodexterError):
     """Raised when pattern data cannot be loaded or parsed."""
+
+
+class NormalizationError(RolodexterError):
+    """Raised in ``strict`` mode when a matched field cannot be normalized.
+
+    The most common trigger is a value that mapped to a phone field but could
+    not be parsed into E.164 (e.g. a national-format number with no region).
+    Outside ``strict`` mode the same condition surfaces as a non-fatal entry in
+    :attr:`MappingResult.warnings`.
+
+    .. versionadded:: 2.8.0
+    """
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -159,18 +180,29 @@ class FieldMatch:
 
 @dataclass(frozen=True, slots=True)
 class MappingResult:
-    """Result of normalizing an entire contact data payload."""
+    """Result of normalizing an entire contact data payload.
+
+    .. versionchanged:: 2.8.0
+       Added :attr:`warnings` (non-fatal issues such as a phone value that
+       could not be normalized to E.164, or a low-confidence match) and the
+       :meth:`explain` helper.  ``get_match`` is now O(1) via a lazily-built
+       index.
+    """
 
     normalized: dict[str, Any]
     unmapped: dict[str, Any]
     field_matches: tuple[FieldMatch, ...]
+    warnings: tuple[str, ...] = ()
+    # Lazily-built {original_header: FieldMatch} index for O(1) get_match.
+    # Not part of equality/repr; populated on first lookup.
+    _index: dict[str, FieldMatch] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @property
     def match_rate(self) -> float:
         total = len(self.field_matches)
-        return (
-            sum(1 for m in self.field_matches if m.is_matched) / total if total else 0.0
-        )
+        return self.matched_count / total if total else 0.0
 
     @property
     def matched_count(self) -> int:
@@ -178,13 +210,43 @@ class MappingResult:
 
     @property
     def unmatched_count(self) -> int:
-        return sum(1 for m in self.field_matches if not m.is_matched)
+        return len(self.field_matches) - self.matched_count
 
     def get_match(self, original_header: str) -> FieldMatch | None:
+        """Return the :class:`FieldMatch` for *original_header*, or ``None``.
+
+        The header→match index is built once on first call and reused, so
+        repeated lookups (and large payloads) are O(1) per lookup.
+        """
+        idx = self._index
+        if idx is None:
+            idx = {m.original: m for m in self.field_matches}
+            object.__setattr__(self, "_index", idx)
+        return idx.get(original_header)
+
+    def explain(self) -> str:
+        """Return a human-readable, multi-line summary of the mapping.
+
+        Useful from the REPL or the ``rolodexter explain`` CLI to see exactly
+        how each header resolved, what was dropped, and any warnings.
+
+        .. versionadded:: 2.8.0
+        """
+        lines = [
+            f"Mapping: {self.matched_count} matched, "
+            f"{self.unmatched_count} unmatched "
+            f"(match rate {self.match_rate:.0%})",
+        ]
         for m in self.field_matches:
-            if m.original == original_header:
-                return m
-        return None
+            arrow = "->" if m.is_matched else " x"
+            lines.append(
+                f"  {m.original!r} {arrow} {m.canonical} "
+                f"[{m.strategy}, conf={m.confidence:.2f}]"
+            )
+        if self.warnings:
+            lines.append("Warnings:")
+            lines.extend(f"  ! {w}" for w in self.warnings)
+        return "\n".join(lines)
 
     def get_all_phones(self) -> list[str]:
         """Return all phone values from ``normalized``, deduplicated.
@@ -214,13 +276,13 @@ class MappingResult:
         return result
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "normalized": dict(self.normalized),
-            "unmapped": dict(self.unmapped),
-            "match_rate": round(self.match_rate, 4),
-            "matched": self.matched_count,
-            "unmatched": self.unmatched_count,
-            "details": [
+        # Single pass over field_matches: count and serialize together.
+        matched = 0
+        details: list[dict[str, Any]] = []
+        for m in self.field_matches:
+            if m.is_matched:
+                matched += 1
+            details.append(
                 {
                     "original": m.original,
                     "canonical": m.canonical,
@@ -228,8 +290,16 @@ class MappingResult:
                     "strategy": m.strategy,
                     "service": m.service,
                 }
-                for m in self.field_matches
-            ],
+            )
+        total = len(self.field_matches)
+        return {
+            "normalized": dict(self.normalized),
+            "unmapped": dict(self.unmapped),
+            "match_rate": round(matched / total if total else 0.0, 4),
+            "matched": matched,
+            "unmatched": total - matched,
+            "warnings": list(self.warnings),
+            "details": details,
         }
 
 
@@ -1160,14 +1230,14 @@ _SOCIAL_URL_DEFS: tuple[tuple[str, str | tuple[str, ...], str], ...] = (
 def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
     """Generate compiled social URL regexes from *_SOCIAL_URL_DEFS*."""
     result: list[tuple[str, re.Pattern[str]]] = []
-    for field, domains, path in _SOCIAL_URL_DEFS:
+    for canonical, domains, path in _SOCIAL_URL_DEFS:
         if isinstance(domains, tuple):
             domain_re = "|".join(re.escape(d) for d in domains)
         else:
             domain_re = re.escape(domains)
         result.append(
             (
-                field,
+                canonical,
                 re.compile(rf"^https?://(www\.)?({domain_re})/{path}", re.IGNORECASE),
             )
         )
@@ -1221,13 +1291,19 @@ class HeuristicMatchStrategy(MatchStrategy):
     def name(self) -> str:
         return "heuristic"
 
+    # Cap the value length the data-shape regexes scan.  Cell values are
+    # caller/attacker-controlled; nothing longer than this is a phone, email,
+    # URL, or postal code, so skipping long values is both correct and a cheap
+    # guard against pathological inputs.
+    _MAX_VALUE_LEN: int = 512
+
     def match(
         self, header: str, value: str | None = None, **kwargs: object
     ) -> FieldMatch | None:
         if not value or not isinstance(value, str):
             return None
         cleaned = value.strip()
-        if not cleaned:
+        if not cleaned or len(cleaned) > self._MAX_VALUE_LEN:
             return None
         region_kw = kwargs.get("default_region")
         region = region_kw if isinstance(region_kw, str) else self._default_region
@@ -1297,10 +1373,17 @@ class ContactMapper:
     .. versionchanged:: 2.7.0
         Header resolution is cached across rows; added *default_region*;
         construction loads i18n caches only (no network translation).
+
+    .. versionchanged:: 2.8.0
+        Added *strict* and *confidence_threshold*; non-fatal issues are
+        reported on :attr:`MappingResult.warnings`.  Added :meth:`map_stream`
+        (constant-memory iteration), :meth:`compile_schema` (reusable header
+        plan), and :meth:`map_dataframe` (pandas).
     """
 
     __slots__ = (
         "_cacheable_pipeline",
+        "_confidence_threshold",
         "_default_region",
         "_default_service",
         "_header_cache",
@@ -1308,6 +1391,7 @@ class ContactMapper:
         "_normalize",
         "_registry",
         "_strategies",
+        "_strict",
         "_value_strategies",
     )
 
@@ -1322,6 +1406,8 @@ class ContactMapper:
         languages: str | Sequence[str] | None = None,
         overrides: dict[str, str] | None = None,
         default_region: str | None = "US",
+        strict: bool = False,
+        confidence_threshold: float = 0.0,
     ) -> None:
         self._registry = PatternRegistry(
             patterns=patterns,
@@ -1331,6 +1417,8 @@ class ContactMapper:
         )
         self._normalize = normalize
         self._default_region = default_region
+        self._strict = strict
+        self._confidence_threshold = confidence_threshold
         self._default_service = (
             default_service  # accepted for backward compat; not used since v2.0
         )
@@ -1434,7 +1522,7 @@ class ContactMapper:
                 return result
         return self._unknown(header)
 
-    def map_payload(  # pylint: disable=unused-argument
+    def map_payload(  # pylint: disable=unused-argument,too-many-locals,too-many-branches
         self,
         payload: dict[str, Any],
         *,
@@ -1442,6 +1530,8 @@ class ContactMapper:
         depth: int = 1,
         extract_embedded_phones: bool = False,
         default_region: str | None = None,
+        strict: bool | None = None,
+        confidence_threshold: float | None = None,
     ) -> MappingResult:
         """Normalize an entire contact data dictionary.
 
@@ -1468,6 +1558,20 @@ class ContactMapper:
             region given at construction (``"US"`` by default).
 
             .. versionadded:: 2.7.0
+        strict : bool, optional
+            Overrides the mapper's ``strict`` setting for this call.  When
+            truthy, any non-fatal issue (a phone that could not be normalized
+            to E.164, or a match dropped by *confidence_threshold*) raises
+            :class:`NormalizationError` instead of being recorded on
+            :attr:`MappingResult.warnings`.
+
+            .. versionadded:: 2.8.0
+        confidence_threshold : float, optional
+            Overrides the mapper's threshold for this call.  Matches whose
+            confidence is below the threshold are dropped to ``unmapped`` and
+            recorded as a warning.  Defaults to ``0.0`` (keep everything).
+
+            .. versionadded:: 2.8.0
 
         Returns
         -------
@@ -1476,22 +1580,51 @@ class ContactMapper:
         depth = max(1, min(depth, 5))
         flat = self._flatten(payload, depth) if depth > 1 else payload
         region = default_region if default_region is not None else self._default_region
+        threshold = (
+            confidence_threshold
+            if confidence_threshold is not None
+            else self._confidence_threshold
+        )
+        is_strict = self._strict if strict is None else strict
 
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
         matches: list[FieldMatch] = []
+        warnings: list[str] = []
 
         for key, value in flat.items():
             str_val = str(value) if value is not None else None
             match = self._resolve(key, str_val, region)
+
+            # Drop matches below the confidence floor (recorded, not silent).
+            if match.is_matched and match.confidence < threshold:
+                warnings.append(
+                    f"{key!r}: dropped low-confidence match to {match.canonical!r} "
+                    f"(confidence {match.confidence:.2f} < threshold {threshold:.2f})"
+                )
+                match = self._unknown(key)
+
             matches.append(match)
 
             if match.is_matched:
-                final = (
-                    normalize_value(match.canonical, value, default_region=region)
-                    if self._normalize
-                    else value
-                )
+                if self._normalize:
+                    final = normalize_value(
+                        match.canonical, value, default_region=region
+                    )
+                    # Surface the silent-degradation case: a phone field whose
+                    # value didn't become E.164 (e.g. wrong/missing region).
+                    if (
+                        match.canonical in _PHONE_FIELDS
+                        and isinstance(final, str)
+                        and final.strip()
+                        and not final.startswith("+")
+                    ):
+                        warnings.append(
+                            f"{key!r}: phone value {final!r} could not be normalized "
+                            f"to E.164 (set a matching default_region?)"
+                        )
+                else:
+                    final = value
                 _merge(normalized, match.canonical, final)
             else:
                 unmapped[key] = value
@@ -1500,8 +1633,17 @@ class ContactMapper:
         if extract_embedded_phones:
             self._extract_embedded_phones(normalized, unmapped, matches, region)
 
+        if warnings:
+            for w in warnings:
+                logger.warning("%s", w)
+            if is_strict:
+                raise NormalizationError("; ".join(warnings))
+
         return MappingResult(
-            normalized=normalized, unmapped=unmapped, field_matches=tuple(matches)
+            normalized=normalized,
+            unmapped=unmapped,
+            field_matches=tuple(matches),
+            warnings=tuple(warnings),
         )
 
     @staticmethod
@@ -1575,17 +1717,157 @@ class ContactMapper:
         service: str | None = None,
         depth: int = 1,
         default_region: str | None = None,
+        strict: bool | None = None,
+        confidence_threshold: float | None = None,
     ) -> list[MappingResult]:
-        """Process multiple payloads.
+        """Process multiple payloads, materializing all results into a list.
 
         Header resolution is cached on the mapper, so payloads that share the
         same headers (the typical CSV/export case) resolve each unique header
         only once across the whole batch rather than once per row.
+
+        For very large inputs prefer :meth:`map_stream`, which yields results
+        lazily and keeps memory constant.
         """
-        return [
-            self.map_payload(p, depth=depth, default_region=default_region)
-            for p in payloads
-        ]
+        return list(
+            self.map_stream(
+                payloads,
+                depth=depth,
+                default_region=default_region,
+                strict=strict,
+                confidence_threshold=confidence_threshold,
+            )
+        )
+
+    def map_stream(
+        self,
+        payloads: Iterable[dict[str, Any]],
+        *,
+        depth: int = 1,
+        default_region: str | None = None,
+        extract_embedded_phones: bool = False,
+        strict: bool | None = None,
+        confidence_threshold: float | None = None,
+    ) -> Iterator[MappingResult]:
+        """Lazily map an iterable of payloads, yielding one result at a time.
+
+        Unlike :meth:`map_batch`, this never holds more than one result in
+        memory, so it scales to million-row CSV/JSONL streams.  Header
+        resolution is still cached across rows.
+
+        Example::
+
+            import csv
+            with open("contacts.csv") as fh:
+                for result in mapper.map_stream(csv.DictReader(fh)):
+                    write(result.normalized)
+
+        .. versionadded:: 2.8.0
+        """
+        for payload in payloads:
+            yield self.map_payload(
+                payload,
+                depth=depth,
+                default_region=default_region,
+                extract_embedded_phones=extract_embedded_phones,
+                strict=strict,
+                confidence_threshold=confidence_threshold,
+            )
+
+    def compile_schema(
+        self,
+        headers: Iterable[str],
+        *,
+        default_region: str | None = None,
+    ) -> MappingSchema:
+        """Resolve a fixed set of headers once into a reusable mapping plan.
+
+        Returns a :class:`MappingSchema` capturing the header-only verdict for
+        each header (exact / normalized / fuzzy).  This warms the mapper's
+        per-header cache and exposes a ``column_map`` (header → canonical),
+        which is exactly what column-oriented callers — DataFrame renames,
+        SQL ``SELECT`` aliases — need.  Value-shape heuristics are inherently
+        per-row and are *not* part of a static schema; use ``apply`` / the
+        mapper for those.
+
+        .. versionadded:: 2.8.0
+        """
+        region = default_region if default_region is not None else self._default_region
+        matches: dict[str, FieldMatch] = {}
+        for header in headers:
+            key = str(header)
+            if self._cacheable_pipeline:
+                # value=None → only header-only strategies fire; also warms the
+                # mapper's _header_cache for subsequent row mapping.
+                matches[key] = self._resolve(key, None, region)
+            else:
+                matches[key] = self.identify(key, default_region=region)
+        return MappingSchema(matches=matches, mapper=self, default_region=region)
+
+    def map_dataframe(
+        self,
+        df: pd.DataFrame,
+        *,
+        default_region: str | None = None,
+        normalize: bool | None = None,
+    ) -> pd.DataFrame:
+        """Return a copy of *df* with columns renamed to canonical fields.
+
+        Column headers are resolved via :meth:`compile_schema`; matched columns
+        are renamed to their canonical name and (when *normalize* is on) their
+        values are normalized.  Unmatched columns are left untouched, so no
+        data is dropped.  If two source columns map to the same canonical
+        field, the first keeps the canonical name and later ones get a
+        ``<canonical>__N`` suffix (with a logged warning).
+
+        Requires pandas (``pip install rolodexter[pandas]``).
+
+        .. versionadded:: 2.8.0
+        """
+        try:
+            import pandas  # noqa: F401  # pylint: disable=unused-import
+        except ImportError:
+            raise ImportError(
+                "map_dataframe requires pandas. Install with: "
+                "pip install 'rolodexter[pandas]'"
+            ) from None
+
+        region = default_region if default_region is not None else self._default_region
+        do_norm = self._normalize if normalize is None else normalize
+        schema = self.compile_schema(
+            [str(c) for c in df.columns], default_region=region
+        )
+
+        rename: dict[Any, str] = {}
+        seen: dict[str, int] = {}
+        for col in df.columns:
+            match = schema.matches.get(str(col))
+            if match is None or not match.is_matched:
+                continue
+            canonical = match.canonical
+            if canonical in seen:
+                seen[canonical] += 1
+                new_name = f"{canonical}__{seen[canonical]}"
+                logger.warning(
+                    "map_dataframe: column %r also maps to %r; renamed to %r "
+                    "to avoid a collision",
+                    col,
+                    canonical,
+                    new_name,
+                )
+            else:
+                seen[canonical] = 1
+                new_name = canonical
+            rename[col] = new_name
+
+        out = df.rename(columns=rename)
+        if do_norm:
+            for new_name in rename.values():
+                canonical = new_name.split("__", 1)[0]
+                out[new_name] = out[new_name].map(
+                    lambda v, c=canonical: normalize_value(c, v, default_region=region)
+                )
+        return out
 
     @property
     def registry(self) -> PatternRegistry:
@@ -1596,6 +1878,40 @@ class ContactMapper:
             f"ContactMapper(strategies={[s.name for s in self._strategies]}, "
             f"normalize={self._normalize})"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class MappingSchema:
+    """A reusable header→canonical plan produced by :meth:`ContactMapper.compile_schema`.
+
+    Captures the header-only verdict for a fixed set of headers so column-
+    oriented work (DataFrame renames, CSV header mapping) resolves each header
+    exactly once.  Per-row value-shape heuristics are not part of the schema;
+    :meth:`apply` delegates to the mapper for full per-row semantics.
+
+    .. versionadded:: 2.8.0
+    """
+
+    matches: dict[str, FieldMatch]
+    mapper: ContactMapper
+    default_region: str | None = None
+
+    def column_map(self) -> dict[str, str]:
+        """Return ``{header: canonical}`` for the matched headers only."""
+        return {h: m.canonical for h, m in self.matches.items() if m.is_matched}
+
+    def unmatched_headers(self) -> list[str]:
+        """Return the headers that did not resolve to a canonical field."""
+        return [h for h, m in self.matches.items() if not m.is_matched]
+
+    def apply(self, row: dict[str, Any], **kwargs: Any) -> MappingResult:
+        """Map a single *row* using the mapper (header verdicts already cached).
+
+        Extra keyword arguments are forwarded to
+        :meth:`ContactMapper.map_payload`.
+        """
+        kwargs.setdefault("default_region", self.default_region)
+        return self.mapper.map_payload(row, **kwargs)
 
 
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:

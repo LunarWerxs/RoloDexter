@@ -3127,12 +3127,16 @@ class TestV23PublicExports:
         assert BooleanNormalizer is not None
 
     def test_dead_symbols_removed(self) -> None:
-        """Removed symbols should not be importable."""
+        """Removed symbols should not be importable.
+
+        Note: ``NormalizationError`` was reintroduced in 2.8.0 with a new
+        meaning (strict-mode normalization failure), so it is intentionally
+        no longer in this list.
+        """
         import rolodexter
 
         for name in (
             "StrategyError",
-            "NormalizationError",
             "ServiceNotFoundError",
             "ServiceMatchStrategy",
         ):

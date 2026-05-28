@@ -5,6 +5,65 @@ All notable changes to **rolodexter** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] — 2026-05-28
+
+Forward-looking feature release: observability, a CLI, DataFrame + streaming
+APIs, an accuracy benchmark, and supply-chain hardening.
+
+### Added
+
+- **`rolodexter` command-line interface** (`rolodexter <cmd>` or
+  `python -m rolodexter`):
+  - `map IN [-o OUT]` maps a CSV/JSON/JSONL export to the canonical schema
+    (formats inferred from extensions; `--region`, `--languages`, `--strict`,
+    `--min-confidence`, `--no-normalize`, `--embedded-phones`).
+  - `explain HEADER [--value V]` shows how a header resolves and why.
+  - `fields` lists every canonical field.
+- **`ContactMapper.map_dataframe(df)`** (pandas, via the `pandas` extra) —
+  returns a copy with columns renamed to canonical fields and values
+  normalized; unmatched columns are preserved, collisions get a `__N` suffix.
+- **`ContactMapper.map_stream(iterable)`** — lazily yields one `MappingResult`
+  per row, keeping memory constant for million-row CSV/JSONL streams.
+  `map_batch` now delegates to it.
+- **`ContactMapper.compile_schema(headers)`** → **`MappingSchema`** — resolves
+  a fixed header set once into a reusable plan with `column_map()` (header →
+  canonical, ideal for DataFrame/SQL renames), `unmatched_headers()`, and
+  `apply(row)`.
+- **`MappingResult.warnings`** — non-fatal issues (a phone that didn't reach
+  E.164, or a match dropped by the confidence threshold), also surfaced in
+  `to_dict()`.
+- **`MappingResult.explain()`** — a human-readable, ASCII summary of the
+  mapping (used by `rolodexter explain`).
+- **`strict` and `confidence_threshold`** on `ContactMapper()` /
+  `map_payload()` / `map_batch()` / `map_stream()`. `strict` raises
+  `NormalizationError` on any warning; `confidence_threshold` drops
+  below-threshold matches to `unmapped`.
+- **`NormalizationError`** exception and a configured library logger
+  (`logging.getLogger("rolodexter")`, silent by default via `NullHandler`).
+- **`pandas` optional extra** (`pip install rolodexter[pandas]`).
+
+### Changed
+
+- **`__version__` is now read from package metadata** (`importlib.metadata`)
+  instead of a hand-maintained literal, removing a source of version drift.
+- **`MappingResult.get_match` is O(1)** via a lazily-built header index, and
+  `to_dict()` computes its counts in a single pass.
+
+### Security
+
+- **Heuristic data-shape matching now skips values longer than 512 chars** —
+  cell values are caller-controlled, and nothing longer is a phone/email/URL,
+  so this is both correct and a cheap guard against pathological inputs.
+- Added `SECURITY.md` and Dependabot (pip + GitHub Actions).
+- Capped `phonenumbers` at `<10` for parsing stability while allowing 8.x/9.x.
+
+### Testing
+
+- Added labeled **golden corpora (HubSpot/Salesforce/Google/Mailchimp/Outlook)**
+  with measured precision/recall floors and a no-misroute guard, plus
+  **Hypothesis** property tests (determinism, never-crashes, idempotent
+  normalization). Suite is now 861 tests at ~96% branch coverage.
+
 ## [2.7.0] — 2026-05-28
 
 Code-health audit follow-up: scalability, reliability, and data-quality fixes.

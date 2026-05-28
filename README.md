@@ -168,10 +168,65 @@ Automatic cleanup on matched fields:
 - **Addresses** → excess whitespace collapsed, title-cased
 - **Tags** → normalized to `list[str]`
 
-### 📦 Batch Processing
+### 📦 Batch & Streaming
 
 ```python
 results = mapper.map_batch([contact1, contact2, contact3, ...])
+
+# Constant-memory streaming for huge CSV/JSONL exports:
+import csv
+with open("contacts.csv") as fh:
+    for result in mapper.map_stream(csv.DictReader(fh)):
+        save(result.normalized)
+```
+
+### 🐼 DataFrames
+
+```python
+import pandas as pd
+from rolodexter import ContactMapper
+
+df = pd.read_csv("hubspot_export.csv")
+clean = ContactMapper().map_dataframe(df)   # pip install rolodexter[pandas]
+# Columns renamed to canonical fields, values normalized, unmatched columns kept.
+```
+
+### 🖥️ Command Line
+
+```bash
+# Map a CSV/JSON/JSONL export to the canonical schema
+rolodexter map contacts.csv -o clean.csv --region US
+
+# Stream JSON Lines, drop low-confidence guesses, fail loudly
+rolodexter map export.jsonl --min-confidence 0.8 --strict -o out.jsonl
+
+# See exactly how a header resolves
+rolodexter explain "Job Titel" --value CEO
+# 'Job Titel' -> job_title [fuzzy, conf=0.70]
+
+rolodexter fields        # list every canonical field
+```
+
+### 🛡️ Strict Mode, Warnings & Confidence
+
+```python
+# Non-fatal issues are reported, never silent:
+result = mapper.map_payload({"mobile": "not a phone"})
+print(result.warnings)
+# ("'mobile': phone value 'not a phone' could not be normalized to E.164 ...",)
+
+# Demand high-confidence mappings; fail loudly on any problem:
+mapper = ContactMapper(strict=True, confidence_threshold=0.8)
+
+print(result.explain())   # human-readable resolution + warnings
+```
+
+### 🗺️ Compile a Schema Once
+
+```python
+schema = mapper.compile_schema(["First Name", "Mobile Phone", "Org"])
+schema.column_map()         # {'First Name': 'first_name', 'Mobile Phone': 'phone', 'Org': 'company'}
+schema.apply(row)           # reuse the resolved plan per row
 ```
 
 ### 📈 Rich Diagnostics
@@ -204,23 +259,29 @@ result = mapper.map_payload(
 ```python
 ContactMapper(
     *,
-    patterns=None,        # Custom pattern dict (overrides built-in)
-    patterns_path=None,   # Path to a custom patterns.json file
-    normalize=True,       # Apply value normalization after mapping
-    strategies=None,      # Override the default strategy pipeline
-    languages=None,       # None=English only | "es" | ["es","fr"] | "all"
-    overrides=None,       # Extra alias→canonical mappings {"MMERGE6": "company"}
+    patterns=None,             # Custom pattern dict (overrides built-in)
+    patterns_path=None,        # Path to a custom patterns.json file
+    normalize=True,            # Apply value normalization after mapping
+    strategies=None,           # Override the default strategy pipeline
+    languages=None,            # None=English only | "es" | ["es","fr"] | "all"
+    overrides=None,            # Extra alias→canonical mappings {"MMERGE6": "company"}
+    default_region="US",       # ISO-3166 region for phone parsing/E.164
+    strict=False,              # Raise NormalizationError on any warning
+    confidence_threshold=0.0,  # Drop matches below this confidence to unmapped
 )
 ```
 
 **Methods:**
 
-| Method                                                    | Description                               |
-| --------------------------------------------------------- | ----------------------------------------- |
-| `identify(header, *, value)`                              | Resolve a single header to a `FieldMatch` |
-| `map_payload(payload, *, depth, extract_embedded_phones)` | Normalize an entire dict                  |
-| `map_batch(payloads, *, depth)`                           | Process a list of payloads                |
-| `registry`                                                | Access the underlying `PatternRegistry`   |
+| Method                                                    | Description                                       |
+| --------------------------------------------------------- | ------------------------------------------------- |
+| `identify(header, *, value)`                              | Resolve a single header to a `FieldMatch`         |
+| `map_payload(payload, *, depth, ...)`                     | Normalize an entire dict → `MappingResult`        |
+| `map_batch(payloads, *, ...)`                             | Process a list of payloads → `list[MappingResult]`|
+| `map_stream(iterable, *, ...)`                            | Lazily yield results (constant memory)            |
+| `compile_schema(headers)`                                 | Resolve headers once → reusable `MappingSchema`   |
+| `map_dataframe(df)`                                       | Rename/normalize a pandas DataFrame               |
+| `registry`                                                | Access the underlying `PatternRegistry`           |
 
 ### `FieldMatch`
 
@@ -244,8 +305,10 @@ FieldMatch(
 | `match_rate`        | `float`                  | Fraction of fields successfully matched           |
 | `matched_count`     | `int`                    | Count of matched fields                           |
 | `unmatched_count`   | `int`                    | Count of unmatched fields                         |
-| `get_match(header)` | `FieldMatch \| None`     | Look up the match for a specific input header     |
+| `warnings`          | `tuple[str, ...]`        | Non-fatal issues (failed E.164, dropped matches)  |
+| `get_match(header)` | `FieldMatch \| None`     | O(1) lookup of the match for an input header       |
 | `get_all_phones()`  | `list[str]`              | All phone values across all phone-adjacent fields |
+| `explain()`         | `str`                    | Human-readable resolution + warnings summary      |
 | `to_dict()`         | `dict`                   | Full JSON-serializable report                     |
 
 ### `CanonicalField`
@@ -284,6 +347,7 @@ mapper = ContactMapper(patterns=custom)
 ```
 rolodexter/
 ├── __init__.py      # Public API
+├── __main__.py      # CLI: rolodexter map / explain / fields
 ├── core.py          # ContactMapper, PatternRegistry, strategies, normalizers
 ├── _phone.py        # E.164 phone parser (wraps libphonenumber)
 ├── i18n.py          # On-demand i18n generator (40 languages, cached)
