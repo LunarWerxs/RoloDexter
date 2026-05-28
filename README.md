@@ -77,7 +77,7 @@ pip install rolodexter[dev]
 
 Every field runs through the strategy chain in priority order:
 
-1. **Exact Match** — O(1) lookup against 615+ known aliases across 62 canonical fields
+1. **Exact Match** — O(1) lookup against 600+ known aliases across 62 canonical fields
 2. **Normalized Match** — handles `CamelCase`, `dot.path`, `space → underscore`, and similar variations
 3. **Fuzzy Match** — `rapidfuzz` catches typos like `"phne_nmbr"` → `phone`
 4. **Heuristic Match** — regex detects emails, phones, URLs, postal codes by *data shape*
@@ -260,9 +260,9 @@ assert CanonicalField.PHONE.value == "phone"
 ```
 
 <details>
-<summary>All 62 canonical fields</summary>
+<summary>All 62 canonical fields (+ the <code>unknown</code> sentinel)</summary>
 
-`first_name` · `last_name` · `full_name` · `email` · `phone` · `home_phone` · `work_phone` · `fax` · `whatsapp` · `address` · `address_line_2` · `city` · `state` · `postal_code` · `country` · `company` · `job_title` · `department` · `website` · `linkedin` · `twitter` · `instagram` · `facebook` · `birthday` · `gender` · `language` · `timezone` · `currency` · `tags` · `notes` · `source` · `source_id` · `source_service` · `subscribed` · `verified` · `created_at` · `updated_at` · `ip_address` · `user_agent` · `referrer` · `utm_source` · `utm_medium` · `utm_campaign` · `utm_term` · `utm_content` · `revenue` · `lifetime_value` · `company_size` · `industry` · `message` · `subject` · `salutation` · `suffix` · `nickname` · `middle_name` · `maiden_name` · `preferred_name` · `pronouns` · `age` · `annual_income` · `score` · `unknown`
+`first_name` · `last_name` · `full_name` · `middle_name` · `nickname` · `prefix` · `suffix` · `email` · `phone` · `home_phone` · `work_phone` · `fax` · `whatsapp` · `website` · `company` · `job_title` · `department` · `industry` · `address_line1` · `address_line2` · `city` · `state` · `postal_code` · `country` · `full_address` · `linkedin` · `twitter` · `facebook` · `instagram` · `github` · `youtube` · `tiktok` · `discord` · `telegram` · `lead_status` · `lifecycle_stage` · `email_opt_out` · `tags` · `source` · `utm_parameters` · `score` · `owner` · `birthday` · `age` · `created_at` · `updated_at` · `last_contacted` · `revenue` · `currency` · `message` · `subject` · `company_size` · `notes` · `metadata` · `gender` · `timezone` · `language_preference` · `referrer_url` · `source_id` · `source_service` · `subscribed` · `verified` · `unknown`
 
 </details>
 
@@ -287,7 +287,7 @@ rolodexter/
 ├── core.py          # ContactMapper, PatternRegistry, strategies, normalizers
 ├── _phone.py        # E.164 phone parser (wraps libphonenumber)
 ├── i18n.py          # On-demand i18n generator (40 languages, cached)
-├── patterns.json    # Master alias table (615+ aliases, 62 canonical fields)
+├── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
 └── i18n/            # Cached language files (generated on demand)
 ```
 

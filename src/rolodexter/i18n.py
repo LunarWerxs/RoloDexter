@@ -17,12 +17,15 @@ Usage from code
 
     from rolodexter.i18n import generate_language, SUPPORTED_LANGUAGES
 
-    # Generate Spanish aliases (cached for future use)
+    # Generate Spanish aliases once (cached for future use). This makes a
+    # network call to the translation service, so do it as an explicit,
+    # offline build step — never on a request path.
     data = generate_language("es")
 
-    # Automatic when using ContactMapper / PatternRegistry with languages=
+    # ContactMapper / PatternRegistry only *load* cached aliases at
+    # construction; they never translate over the network themselves.
     from rolodexter import ContactMapper
-    mapper = ContactMapper(languages=["es"])  # generates on first use
+    mapper = ContactMapper(languages=["es"])  # loads the cache generated above
 
 CLI
 ───

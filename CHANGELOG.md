@@ -5,6 +5,74 @@ All notable changes to **rolodexter** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-05-28
+
+Code-health audit follow-up: scalability, reliability, and data-quality fixes.
+
+### Performance
+
+- **Header resolution is cached across rows.** The header-only strategies
+  (exact / normalized / fuzzy) are deterministic per header, so `map_payload`
+  / `map_batch` now resolve each unique header once and reuse the verdict for
+  every subsequent row. Bulk ingestion of CSV/exports (where every row shares
+  the same headers) now scales with the number of *unique headers*, not rows —
+  a 20k-row mixed-header batch drops from ~33 s to ~1 s. Value-dependent
+  heuristics still run per row, so per-row correctness is unchanged.
+
+### Changed
+
+- **`PatternRegistry` / `ContactMapper` no longer translate over the network
+  during construction.** Requesting a language now loads only pre-generated
+  cache files; a supported-but-uncached language is skipped with a logged
+  warning explaining how to generate it offline (`python -m rolodexter.i18n`).
+  This removes unbounded network latency and silent rate-limit failures from
+  the object constructor. Translation generation remains available as an
+  explicit step via `i18n.generate_language()` / the CLI.
+- **`AddressNormalizer` no longer uses `str.title()`**, which mangled common
+  address tokens (`MCDONALD` → `Mcdonald`, `5TH` → `5Th`, `Macy's` → `Macy'S`).
+  Title-casing now preserves ordinals, Mc-names, already-mixed-case tokens, and
+  apostrophe segments (`O'Brien`, `Macy's`).
+
+### Added
+
+- **`default_region` parameter** on `ContactMapper()`, `map_payload()`, and
+  `map_batch()` (and `HeuristicMatchStrategy()`), default `"US"`. Controls the
+  region used by value-shape phone detection and embedded-phone extraction, so
+  non-US data no longer relies on a hardcoded US assumption.
+- **`MatchStrategy.header_only`** class flag (default `False`) marking
+  strategies whose verdict depends only on the header, enabling the per-header
+  cache above. Custom strategies opt in explicitly.
+
+### Fixed
+
+- **Phone values now normalize to E.164 through `map_payload` / `map_batch`.**
+  `default_region` previously reached only header matching, not the
+  value-normalization layer, so a national-format number without a `+` prefix
+  (e.g. `"(202) 555-0143"`) was silently left raw even with `default_region`
+  set. `normalize_value()` now accepts and forwards `default_region` to phone
+  normalization, so `map_payload({"mobile": "(202) 555-0143"})` yields
+  `"+12025550143"`.
+- **Fuzzy matching no longer misroutes columns via short embedded aliases.**
+  `WRatio`'s partial-ratio component ranked a short alias contained in a longer
+  header (e.g. `tel` inside `job_titel`) above the intended field, sending
+  `"Job Titel"` to `phone` instead of `job_title`. Fuzzy matching now considers
+  the top candidates and rejects any whose length is far from the header's
+  (`FUZZY_LENGTH_RATIO`), keeping genuine typo recovery while dropping the
+  degenerate substring matches.
+- **`FuzzyMatchStrategy` alias-cache thread-safety** — the length-filtered
+  alias cache is now guarded by a lock, so a single `ContactMapper` is safe to
+  share across worker threads. Thread-safety is now documented on
+  `ContactMapper`.
+- Removed a stray committed `logs/mcp-calls.jsonl` artifact and ignored the
+  `logs/` directory.
+
+### Security
+
+- **Removed a PyPI upload token from the working-tree `.env`.** Releases use
+  OIDC trusted publishing, so no token is needed. Added a `gitleaks` secret
+  scan to CI to prevent recurrence. (The previously-stored token must be
+  revoked on pypi.org — it cannot be revoked from the repo.)
+
 ## [2.6.6] — 2026-05-23
 
 ### Fixed

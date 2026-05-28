@@ -127,6 +127,13 @@ NORMALIZED_MATCH_CONFIDENCE: float = 0.95
 FUZZY_MATCH_THRESHOLD: int = 80
 FUZZY_HIGH_CONFIDENCE: float = 0.85
 FUZZY_LOW_CONFIDENCE: float = 0.70
+# Reject a fuzzy candidate that is far shorter than the header.  ``WRatio``'s
+# partial-ratio component inflates the score of a short alias embedded in a
+# longer header (e.g. ``"tel"`` inside ``"job_titel"``), which silently
+# misroutes the column.  A genuine typo barely changes a header's length, so we
+# require the shorter of (alias, header) to be at least this fraction of the
+# longer before accepting the match.
+FUZZY_LENGTH_RATIO: float = 0.5
 HEURISTIC_CONFIDENCE: float = 0.60
 
 
@@ -350,12 +357,63 @@ class NameNormalizer:
         }
 
 
+# ── Address title-casing helpers ──
+# ``str.title()`` mangles real-world address tokens (``MCDONALD`` → ``Mcdonald``,
+# ``5TH`` → ``5Th``, possessives like ``Macy's`` → ``Macy'S``).  These helpers do
+# a conservative title-case that preserves ordinals, Mc-names, already-mixed-case
+# tokens, and apostrophe segments.
+_ORDINAL_RE = re.compile(r"^\d+(?:st|nd|rd|th)$")
+
+
+def _cap_part(part: str) -> str:
+    """Capitalize a single apostrophe-free word with address-aware rules."""
+    if not part:
+        return part
+    low = part.lower()
+    if _ORDINAL_RE.match(low):  # 5th, 21st, 2nd — keep the ordinal suffix lower
+        return low
+    if low.startswith("mc") and len(low) > 2:  # mcdonald → McDonald
+        return "Mc" + low[2].upper() + low[3:]
+    return low[:1].upper() + low[1:]
+
+
+def _smart_titlecase(text: str) -> str:
+    """Title-case *text* (whitespace already collapsed) without mangling.
+
+    Preserves tokens that already carry internal mixed case (``McDonald``,
+    ``iPhone``), handles ordinals and Mc-names, and capitalizes apostrophe
+    segments only when long enough (``O'Brien`` but not ``Macy'S``).
+    """
+    out: list[str] = []
+    for word in text.split():
+        # Preserve tokens that already mix upper and lower case.
+        if (
+            not word.isupper()
+            and not word.islower()
+            and any(c.isupper() for c in word[1:])
+        ):
+            out.append(word)
+            continue
+        if "'" in word:
+            segs = word.split("'")
+            rebuilt = _cap_part(segs[0])
+            for seg in segs[1:]:
+                rebuilt += "'" + (_cap_part(seg) if len(seg) > 1 else seg.lower())
+            out.append(rebuilt)
+        else:
+            out.append(_cap_part(word))
+    return " ".join(out)
+
+
 class AddressNormalizer:
     @staticmethod
     def normalize(value: str) -> str:
         if not value or not isinstance(value, str):
             return value
-        return " ".join(value.strip().split()).title()
+        collapsed = " ".join(value.strip().split())
+        if not collapsed:
+            return value
+        return _smart_titlecase(collapsed)
 
 
 class StringNormalizer:
@@ -496,11 +554,24 @@ _FIELD_NORMALIZERS: dict[str, Any] = {  # maps canonical field → normalizer cl
 }
 
 
-def normalize_value(canonical_field: str, value: Any) -> Any:
-    """Apply the correct normalizer for *canonical_field*."""
+def normalize_value(
+    canonical_field: str, value: Any, *, default_region: str | None = None
+) -> Any:
+    """Apply the correct normalizer for *canonical_field*.
+
+    *default_region* (ISO 3166-1 alpha-2) is forwarded to phone
+    normalization so national-format numbers without a ``+`` prefix
+    (e.g. ``"(202) 555-0143"``) still format to E.164.  It is ignored by
+    normalizers that don't take a region.
+
+    .. versionchanged:: 2.7.0
+       Honours *default_region* for phone fields.
+    """
     if not isinstance(value, str):
         return value
     cls = _FIELD_NORMALIZERS.get(canonical_field, StringNormalizer)
+    if cls is PhoneNormalizer:
+        return cls.normalize(value, default_region=default_region)
     return cls.normalize(value)
 
 
@@ -516,12 +587,16 @@ class PatternRegistry:
     aliases are merged into the alias index:
 
     * ``None`` or ``[]`` (default) — **English only**, no i18n.
-    * ``"all"`` — every supported language (generates on first use).
-    * ``["es", "fr"]`` — only the listed language codes are loaded
-      (generated on first use if not already cached).
+    * ``"all"`` — every supported language that has a **cached** alias file.
+    * ``["es", "fr"]`` — only the listed language codes, loaded from cache.
 
-    Generated i18n files are cached so translation only happens once.
-    Requires ``deep-translator`` to be installed for generation.
+    Construction **only loads pre-generated cache files** — it never calls
+    out to a translation service.  This keeps object construction fast,
+    offline, and free of unbounded network latency.  Languages that have no
+    cached file are skipped (with a logged warning); generate them ahead of
+    time with the explicit, offline step::
+
+        python -m rolodexter.i18n --languages es,fr   # or i18n.generate_language(...)
     """
 
     __slots__ = (
@@ -597,7 +672,8 @@ class PatternRegistry:
         # ── expansion rules (programmatic alias generation) ─────────
         self._apply_expansion_rules()
 
-        # ── i18n layer (on-demand) ──────────────────────────────────
+        # ── i18n layer (cached files only — never translates over the
+        #    network from inside the constructor) ─────────────────────
         from .i18n import SUPPORTED_LANGUAGES, load_cached
 
         if self._languages == "all":
@@ -611,26 +687,34 @@ class PatternRegistry:
         else:
             lang_codes = []
 
+        missing: list[str] = []
         for lang in lang_codes:
-            # Try loading from cache first (no translation needed)
             lang_data = load_cached(lang)
             if lang_data is None:
-                # Try to generate on the fly
-                try:
-                    from .i18n import generate_language
-
-                    lang_data = generate_language(lang)
-                except (ImportError, ValueError):
-                    # deep-translator not installed or unsupported lang
-                    continue
-
-            if lang_data is None:
+                # Deliberately do NOT translate here: that would issue
+                # blocking network calls (with unbounded latency and silent
+                # rate-limit failures) from inside object construction.
+                # Generation is an explicit, offline step — see the class
+                # docstring.  Only flag genuinely-supported languages.
+                if lang in SUPPORTED_LANGUAGES:
+                    missing.append(lang)
                 continue
 
             self._loaded_languages.append(lang)
             for canonical, aliases in lang_data.get("fields", {}).items():
                 for alias in aliases:
                     self._add_alias(alias.lower().strip(), canonical)
+
+        if missing:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "No cached i18n aliases for %s — these languages were NOT "
+                "loaded. Generate them first (offline) with: "
+                "python -m rolodexter.i18n --languages %s",
+                ", ".join(missing),
+                ",".join(missing),
+            )
 
     def _apply_overrides(self, overrides: dict[str, str] | None) -> None:
         """Apply caller-supplied alias overrides with highest priority.
@@ -736,6 +820,14 @@ class PatternRegistry:
 class MatchStrategy(ABC):
     """Protocol every matching strategy must satisfy."""
 
+    # True when ``match()`` depends only on the header (never the value).
+    # Header-only strategies are deterministic per header, so a mapper can
+    # resolve each unique header once and reuse the verdict across every row
+    # of a batch.  Value-dependent strategies (e.g. data-shape heuristics)
+    # must run per row.  Defaults to ``False`` (conservative) so a custom
+    # strategy is never cached unless it explicitly opts in.
+    header_only: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str: ...
@@ -748,6 +840,7 @@ class MatchStrategy(ABC):
 
 class ExactMatchStrategy(MatchStrategy):
     __slots__ = ("_registry",)
+    header_only = True
 
     def __init__(self, registry: PatternRegistry) -> None:
         self._registry = registry
@@ -780,6 +873,7 @@ class NormalizedMatchStrategy(MatchStrategy):
     """
 
     __slots__ = ("_registry",)
+    header_only = True
 
     # Prefixes whose dotted object.name → company
     _COMPANY_PREFIXES = frozenset(
@@ -948,7 +1042,14 @@ class NormalizedMatchStrategy(MatchStrategy):
 
 
 class FuzzyMatchStrategy(MatchStrategy):
-    __slots__ = ("_available", "_filtered_aliases", "_filtered_source_len", "_registry")
+    __slots__ = (
+        "_available",
+        "_cache_lock",
+        "_filtered_aliases",
+        "_filtered_source_len",
+        "_registry",
+    )
+    header_only = True
 
     # Module-level compiled regexes (used in match() — see NormalizedMatchStrategy
     # for similar patterns).
@@ -959,6 +1060,7 @@ class FuzzyMatchStrategy(MatchStrategy):
         self._registry = registry
         self._filtered_aliases: list[str] | None = None
         self._filtered_source_len: int = -1
+        self._cache_lock = threading.Lock()
         try:
             import rapidfuzz  # noqa: F401  # pylint: disable=unused-import
 
@@ -974,15 +1076,19 @@ class FuzzyMatchStrategy(MatchStrategy):
         """Return aliases with length > 2, cached across calls.
 
         The cache invalidates if the registry grows (e.g. lazy i18n load),
-        detected by comparing the source list length.
+        detected by comparing the source list length.  Guarded by a lock so
+        a single strategy instance is safe to share across threads.
         """
         aliases = self._registry.all_aliases
         if not aliases:
             return None
-        if self._filtered_aliases is None or self._filtered_source_len != len(aliases):
-            self._filtered_aliases = [a for a in aliases if len(a) > 2]
-            self._filtered_source_len = len(aliases)
-        return self._filtered_aliases or None
+        with self._cache_lock:
+            if self._filtered_aliases is None or self._filtered_source_len != len(
+                aliases
+            ):
+                self._filtered_aliases = [a for a in aliases if len(a) > 2]
+                self._filtered_source_len = len(aliases)
+            return self._filtered_aliases or None
 
     def match(
         self, header: str, value: str | None = None, **kwargs: object
@@ -994,17 +1100,36 @@ class FuzzyMatchStrategy(MatchStrategy):
         clean = self._NONWORD_RE.sub("_", header.lower().strip())
         clean = self._UNDERSCORE_RUN_RE.sub("_", clean).strip("_")
 
+        if not clean:
+            return None
+
         filtered = self._get_filtered_aliases()
         if not filtered:
             return None
 
-        result = process.extractOne(
-            clean, filtered, scorer=fuzz.WRatio, score_cutoff=FUZZY_MATCH_THRESHOLD
+        # Pull several top candidates rather than only the single best: WRatio's
+        # partial-ratio component can rank a short alias embedded in a longer
+        # header (e.g. "tel" inside "job_titel") above the genuinely-intended
+        # one.  Skip candidates whose length is far from the header's and take
+        # the best survivor; this keeps real typo recovery while dropping the
+        # degenerate substring matches that misroute data.
+        candidates = process.extract(
+            clean,
+            filtered,
+            scorer=fuzz.WRatio,
+            score_cutoff=FUZZY_MATCH_THRESHOLD,
+            limit=5,
         )
-        if result is None:
+        matched_alias: str | None = None
+        score = 0.0
+        for alias, alias_score, _ in candidates:
+            shorter, longer = sorted((len(alias), len(clean)))
+            if longer and shorter / longer >= FUZZY_LENGTH_RATIO:
+                matched_alias, score = alias, alias_score
+                break
+        if matched_alias is None:
             return None
 
-        matched_alias, score, _ = result
         canonical = self._registry.exact_lookup(matched_alias)
         if canonical is None:
             return None
@@ -1050,7 +1175,21 @@ def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
 
 
 class HeuristicMatchStrategy(MatchStrategy):
-    """Regex data-shape detection for unrecognisable headers."""
+    """Regex data-shape detection for unrecognisable headers.
+
+    Value-dependent (``header_only = False``): the verdict depends on the
+    cell value, so it is recomputed per row rather than cached.
+
+    The *default_region* (ISO 3166-1 alpha-2, default ``"US"``) is used when
+    confirming bare-digit values look like real phone numbers; pass a region
+    matching your data to avoid US-centric misparsing of international rows.
+    """
+
+    __slots__ = ("_default_region",)
+    header_only = False
+
+    def __init__(self, default_region: str | None = "US") -> None:
+        self._default_region = default_region
 
     _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         # Email
@@ -1090,6 +1229,8 @@ class HeuristicMatchStrategy(MatchStrategy):
         cleaned = value.strip()
         if not cleaned:
             return None
+        region_kw = kwargs.get("default_region")
+        region = region_kw if isinstance(region_kw, str) else self._default_region
         for canonical, pattern in self._PATTERNS:
             if not pattern.match(cleaned):
                 continue
@@ -1100,7 +1241,7 @@ class HeuristicMatchStrategy(MatchStrategy):
             if canonical == "phone":
                 from . import _phone
 
-                parsed = _phone.parse(cleaned, default_region="US")
+                parsed = _phone.parse(cleaned, default_region=region)
                 if parsed is None:
                     continue
             return FieldMatch(
@@ -1128,6 +1269,23 @@ class ContactMapper:
     3. Fuzzy match for typos and variations (rapidfuzz)
     4. Heuristic match using data-shape regex patterns
 
+    Steps 1-3 depend only on the header, so each unique header is resolved
+    **once** and the verdict is cached for reuse across every row of a batch
+    (see :meth:`map_batch`).  Step 4 depends on the cell value and runs per
+    row.  This makes bulk ingestion of CSV/exports (where every row shares the
+    same headers) scale with the number of *unique headers*, not rows.
+
+    *default_region* (ISO 3166-1 alpha-2, e.g. ``"GB"``, ``"AU"``) sets the
+    region used by value-shape phone detection and embedded-phone extraction.
+    It defaults to ``"US"``; set it to match your data to avoid US-centric
+    misparsing.  It can be overridden per call via ``map_payload`` /
+    ``identify``.
+
+    Thread-safety: a single ``ContactMapper`` may be shared across threads —
+    ``map_payload``/``identify`` are read-only over the registry, and the
+    internal header cache and fuzzy-alias cache are guarded for concurrent
+    use.
+
     .. versionchanged:: 2.0.0
         Per-service profiles removed.  The ``default_service`` and
         ``service`` parameters are accepted but ignored.
@@ -1135,9 +1293,23 @@ class ContactMapper:
     .. versionchanged:: 2.6.0
         Added *overrides* parameter for caller-supplied alias mappings
         (e.g. vendor-specific merge fields).
+
+    .. versionchanged:: 2.7.0
+        Header resolution is cached across rows; added *default_region*;
+        construction loads i18n caches only (no network translation).
     """
 
-    __slots__ = ("_default_service", "_normalize", "_registry", "_strategies")
+    __slots__ = (
+        "_cacheable_pipeline",
+        "_default_region",
+        "_default_service",
+        "_header_cache",
+        "_header_strategies",
+        "_normalize",
+        "_registry",
+        "_strategies",
+        "_value_strategies",
+    )
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -1149,6 +1321,7 @@ class ContactMapper:
         strategies: Sequence[MatchStrategy] | None = None,
         languages: str | Sequence[str] | None = None,
         overrides: dict[str, str] | None = None,
+        default_region: str | None = "US",
     ) -> None:
         self._registry = PatternRegistry(
             patterns=patterns,
@@ -1157,6 +1330,7 @@ class ContactMapper:
             overrides=overrides,
         )
         self._normalize = normalize
+        self._default_region = default_region
         self._default_service = (
             default_service  # accepted for backward compat; not used since v2.0
         )
@@ -1168,27 +1342,97 @@ class ContactMapper:
                 ExactMatchStrategy(self._registry),
                 NormalizedMatchStrategy(self._registry),
                 FuzzyMatchStrategy(self._registry),
-                HeuristicMatchStrategy(),
+                HeuristicMatchStrategy(default_region=default_region),
             ]
 
-    def identify(  # pylint: disable=unused-argument
-        self, header: str, *, value: str | None = None, service: str | None = None
-    ) -> FieldMatch:
-        """Resolve a single header to its canonical field.
+        # ── Header-resolution cache (per unique header) ──────────────
+        # Steps 1-3 are header_only=True (deterministic per header).  We can
+        # split the pipeline and cache the header-only verdict ONLY when every
+        # header-only strategy precedes every value-dependent one; otherwise a
+        # value-dependent strategy could pre-empt a header-only match on some
+        # rows and caching would change results.  Fall back to per-call
+        # resolution for such custom pipelines.
+        seen_value = False
+        cacheable = True
+        for strat in self._strategies:
+            if strat.header_only:
+                if seen_value:
+                    cacheable = False
+                    break
+            else:
+                seen_value = True
+        self._cacheable_pipeline = cacheable
+        self._header_strategies = [s for s in self._strategies if s.header_only]
+        self._value_strategies = [s for s in self._strategies if not s.header_only]
+        # header → cached header-only verdict (None = all header-only missed)
+        self._header_cache: dict[str, FieldMatch | None] = {}
 
-        The *service* parameter is accepted for backward compatibility
-        but is ignored since v2.0.
-        """
-        for strategy in self._strategies:
-            result = strategy.match(header, value=value)
-            if result is not None:
-                return result
+    @staticmethod
+    def _unknown(header: str) -> FieldMatch:
         return FieldMatch(
             original=header,
             canonical=CanonicalField.UNKNOWN.value,
             confidence=0.0,
             strategy="none",
         )
+
+    def identify(  # pylint: disable=unused-argument
+        self,
+        header: str,
+        *,
+        value: str | None = None,
+        service: str | None = None,
+        default_region: str | None = None,
+    ) -> FieldMatch:
+        """Resolve a single header to its canonical field.
+
+        The *service* parameter is accepted for backward compatibility
+        but is ignored since v2.0.  *default_region* overrides the mapper's
+        region for value-shape phone detection on this call only.
+        """
+        region = default_region if default_region is not None else self._default_region
+        for strategy in self._strategies:
+            result = strategy.match(header, value=value, default_region=region)
+            if result is not None:
+                return result
+        return self._unknown(header)
+
+    def _resolve(
+        self, header: str, value: str | None, region: str | None
+    ) -> FieldMatch:
+        """Resolve a header, caching the deterministic header-only verdict.
+
+        For a cache-friendly pipeline, header-only strategies (exact /
+        normalized / fuzzy) are run at most once per unique header; only the
+        value-dependent strategies (heuristic) run per call.  This is what
+        makes :meth:`map_batch` scale to large, repetitive exports.
+        """
+        if not self._cacheable_pipeline:
+            return self.identify(header, value=value, default_region=region)
+
+        if header in self._header_cache:
+            verdict = self._header_cache[header]
+        else:
+            verdict = None
+            for strategy in self._header_strategies:
+                result = strategy.match(header, value=None, default_region=region)
+                if result is not None:
+                    verdict = result
+                    break
+            # dict writes are atomic under the GIL; a same-header race just
+            # recomputes the identical verdict, so no lock is needed.
+            self._header_cache[header] = verdict
+
+        if verdict is not None:
+            return verdict
+
+        # Header-only strategies missed — the value-dependent ones may still
+        # match, and their result can differ per row, so never cache them.
+        for strategy in self._value_strategies:
+            result = strategy.match(header, value=value, default_region=region)
+            if result is not None:
+                return result
+        return self._unknown(header)
 
     def map_payload(  # pylint: disable=unused-argument
         self,
@@ -1197,6 +1441,7 @@ class ContactMapper:
         service: str | None = None,
         depth: int = 1,
         extract_embedded_phones: bool = False,
+        default_region: str | None = None,
     ) -> MappingResult:
         """Normalize an entire contact data dictionary.
 
@@ -1217,6 +1462,12 @@ class ContactMapper:
             the ``phone`` field of the result.
 
             .. versionadded:: 2.6.0
+        default_region : str, optional
+            Overrides the mapper's region for value-shape phone detection and
+            embedded-phone extraction on this call only.  Falls back to the
+            region given at construction (``"US"`` by default).
+
+            .. versionadded:: 2.7.0
 
         Returns
         -------
@@ -1224,6 +1475,7 @@ class ContactMapper:
         """
         depth = max(1, min(depth, 5))
         flat = self._flatten(payload, depth) if depth > 1 else payload
+        region = default_region if default_region is not None else self._default_region
 
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
@@ -1231,12 +1483,12 @@ class ContactMapper:
 
         for key, value in flat.items():
             str_val = str(value) if value is not None else None
-            match = self.identify(key, value=str_val)
+            match = self._resolve(key, str_val, region)
             matches.append(match)
 
             if match.is_matched:
                 final = (
-                    normalize_value(match.canonical, value)
+                    normalize_value(match.canonical, value, default_region=region)
                     if self._normalize
                     else value
                 )
@@ -1246,7 +1498,7 @@ class ContactMapper:
 
         # ── Embedded phone extraction (opt-in) ─────────────────────
         if extract_embedded_phones:
-            self._extract_embedded_phones(normalized, unmapped, matches)
+            self._extract_embedded_phones(normalized, unmapped, matches, region)
 
         return MappingResult(
             normalized=normalized, unmapped=unmapped, field_matches=tuple(matches)
@@ -1257,6 +1509,7 @@ class ContactMapper:
         normalized: dict[str, Any],
         unmapped: dict[str, Any],
         matches: list[FieldMatch],
+        default_region: str | None = None,
     ) -> None:
         """Scan non-phone string values for embedded phone numbers.
 
@@ -1264,6 +1517,7 @@ class ContactMapper:
         recorded in *matches* with ``strategy="embedded_phone"``.
 
         .. versionadded:: 2.6.0
+        .. versionchanged:: 2.7.0 Honours *default_region*.
         """
         from . import _phone
 
@@ -1277,7 +1531,7 @@ class ContactMapper:
                 candidates.append((key, val))
 
         for key, text in candidates:
-            for pm in _phone.PhoneNumberMatcher(text):
+            for pm in _phone.PhoneNumberMatcher(text, default_region=default_region):
                 e164 = pm.number.e164
                 _merge(normalized, "phone", e164)
                 matches.append(
@@ -1320,9 +1574,18 @@ class ContactMapper:
         *,
         service: str | None = None,
         depth: int = 1,
+        default_region: str | None = None,
     ) -> list[MappingResult]:
-        """Process multiple payloads."""
-        return [self.map_payload(p, depth=depth) for p in payloads]
+        """Process multiple payloads.
+
+        Header resolution is cached on the mapper, so payloads that share the
+        same headers (the typical CSV/export case) resolve each unique header
+        only once across the whole batch rather than once per row.
+        """
+        return [
+            self.map_payload(p, depth=depth, default_region=default_region)
+            for p in payloads
+        ]
 
     @property
     def registry(self) -> PatternRegistry:

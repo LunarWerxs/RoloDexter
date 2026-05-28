@@ -12,11 +12,11 @@ Quick start::
     result = mapper.map_payload({
         "fname": "Jane",
         "surname": "Doe",
-        "mobile": "555-0199",
+        "mobile": "(202) 555-0143",
         "employer": "Tech Corp",
     })
     print(result.normalized)
-    # {'first_name': 'Jane', 'last_name': 'Doe', 'phone': '5550199', 'company': 'Tech Corp'}
+    # {'first_name': 'Jane', 'last_name': 'Doe', 'phone': '+12025550143', 'company': 'Tech Corp'}
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ from .core import (
 )
 from .i18n import SUPPORTED_LANGUAGES, generate_language
 
-__version__ = "2.6.6"
+__version__ = "2.7.0"
 
 __all__ = [
     "SUPPORTED_LANGUAGES",

@@ -4644,3 +4644,200 @@ class TestListNormalizer:
         mapper = ContactMapper()
         result = mapper.map_payload({"tags": ["a", "b", "c"]})
         assert result.normalized["tags"] == ["a", "b", "c"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.7.0 — AUDIT FIXES
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestAddressSmartCasing:
+    """AddressNormalizer no longer mangles real-world tokens (was str.title())."""
+
+    def test_existing_behaviour_preserved(self) -> None:
+        assert AddressNormalizer.normalize("  123  main   st  ") == "123 Main St"
+        assert normalize_value("city", "  new york  ") == "New York"
+
+    def test_mc_names(self) -> None:
+        assert AddressNormalizer.normalize("123 MCDONALD ST") == "123 McDonald St"
+        assert AddressNormalizer.normalize("mcdonald") == "McDonald"
+
+    def test_ordinals_preserved(self) -> None:
+        assert AddressNormalizer.normalize("5TH AVENUE") == "5th Avenue"
+        assert AddressNormalizer.normalize("21st street") == "21st Street"
+        assert AddressNormalizer.normalize("2ND FLOOR") == "2nd Floor"
+
+    def test_internal_mixed_case_preserved(self) -> None:
+        # Already-correct tokens must not be flattened.
+        assert AddressNormalizer.normalize("123 iPhone Way") == "123 iPhone Way"
+
+    def test_apostrophes(self) -> None:
+        # Proper noun: capitalize the long trailing segment.
+        assert AddressNormalizer.normalize("O'BRIEN ROAD") == "O'Brien Road"
+        # Possessive: do NOT capitalize a single trailing letter (no "Macy'S").
+        assert AddressNormalizer.normalize("macy's plaza") == "Macy's Plaza"
+
+    def test_empty_passthrough(self) -> None:
+        assert AddressNormalizer.normalize("") == ""
+        assert AddressNormalizer.normalize("   ") == "   "
+
+
+class TestDefaultRegion:
+    """default_region is configurable on the mapper, per call, and on heuristics."""
+
+    def test_constructor_accepts_region(self) -> None:
+        mapper = ContactMapper(default_region="GB")
+        assert isinstance(repr(mapper), str)
+
+    def test_heuristic_strategy_accepts_region(self) -> None:
+        strat = HeuristicMatchStrategy(default_region="GB")
+        m = strat.match("col", value="+442079460958")
+        assert m is not None
+        assert m.canonical == "phone"
+
+    def test_embedded_extraction_honours_region(self) -> None:
+        # A UK national-format number embedded in text is only recognised
+        # when the region is GB — proves the region threads all the way down.
+        text = {"notes": "ring me on 020 7946 0958 after six"}
+        gb = ContactMapper().map_payload(
+            dict(text), extract_embedded_phones=True, default_region="GB"
+        )
+        us = ContactMapper().map_payload(
+            dict(text), extract_embedded_phones=True, default_region="US"
+        )
+        assert gb.normalized.get("phone") == "+442079460958"
+        assert us.normalized.get("phone") is None
+
+    def test_map_batch_accepts_region(self) -> None:
+        mapper = ContactMapper()
+        results = mapper.map_batch(
+            [{"notes": "call 020 7946 0958"}],
+            default_region="GB",
+        )
+        assert len(results) == 1
+
+
+class TestHeaderResolutionCache:
+    """Header-only verdicts are cached across rows (the C2 scalability fix)."""
+
+    def test_batch_consistent_and_cached(self) -> None:
+        mapper = ContactMapper()
+        rows = [{"FirstName": "Jane"}, {"FirstName": "John"}, {"FirstName": "Jo"}]
+        results = mapper.map_batch(rows)
+        assert [r.normalized["first_name"] for r in results] == ["Jane", "John", "Jo"]
+        # The unique header was resolved once and cached.
+        assert "FirstName" in mapper._header_cache
+        assert mapper._header_cache["FirstName"].canonical == "first_name"
+
+    def test_unknown_header_still_value_sensitive_despite_cache(self) -> None:
+        # Same header, different values: the per-row heuristic must still run
+        # even though header-only strategies are cached as "missed".
+        mapper = ContactMapper()
+        r1 = mapper.map_payload({"mystery": "jane@example.com"})
+        r2 = mapper.map_payload({"mystery": "just some text"})
+        assert r1.normalized.get("email") == "jane@example.com"
+        assert r2.unmapped.get("mystery") == "just some text"
+        # A header-only miss is cached as None (not a spurious match).
+        assert mapper._header_cache.get("mystery") is None
+
+    def test_non_cacheable_pipeline_falls_back(self) -> None:
+        # Value-dependent strategy placed BEFORE a header-only one makes the
+        # pipeline non-cacheable; resolution must still be correct per call.
+        reg = PatternRegistry()
+        mapper = ContactMapper(
+            strategies=[HeuristicMatchStrategy(), ExactMatchStrategy(reg)]
+        )
+        assert mapper._cacheable_pipeline is False
+        # Header-only exact match still works (heuristic misses with no value).
+        assert mapper.identify("fname").canonical == "first_name"
+        # Heuristic (first in pipeline) wins on a value-shaped unknown header.
+        r = mapper.map_payload({"weird": "jane@example.com"})
+        assert r.normalized.get("email") == "jane@example.com"
+
+
+class TestI18nLoadsCacheOnly:
+    """Construction never translates over the network (the H1 reliability fix)."""
+
+    def test_uncached_supported_language_warns_and_skips(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        import rolodexter.i18n as _i18n_mod
+
+        def _no_cache(_code: str) -> None:
+            return None
+
+        def _must_not_be_called(*_a: object, **_kw: object) -> dict:
+            raise AssertionError("generate_language must not run during construction")
+
+        monkeypatch.setattr(_i18n_mod, "load_cached", _no_cache)
+        monkeypatch.setattr(_i18n_mod, "generate_language", _must_not_be_called)
+
+        with caplog.at_level(logging.WARNING, logger="rolodexter.core"):
+            reg = PatternRegistry(languages=["es"])
+
+        # No network call, language not loaded, and the user is warned how to
+        # generate it offline.
+        assert reg.loaded_languages == []
+        assert any("python -m rolodexter.i18n" in r.message for r in caplog.records)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.7.0 — REGION-AWARE VALUE NORMALIZATION (E.164 through map_payload)
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestRegionAwareNormalization:
+    """``default_region`` must reach the value-normalization layer, not just
+    header matching — otherwise national-format phones silently stay raw."""
+
+    def test_national_number_normalizes_to_e164_via_map_payload(self) -> None:
+        mapper = ContactMapper()  # default_region="US"
+        result = mapper.map_payload({"Mobile Phone": "(202) 555-0143"})
+        assert result.normalized["phone"] == "+12025550143"
+
+    def test_normalize_value_honours_region(self) -> None:
+        assert normalize_value("phone", "(202) 555-0143", default_region="US") == (
+            "+12025550143"
+        )
+
+    def test_normalize_value_without_region_is_passthrough(self) -> None:
+        # No region and no '+' prefix → libphonenumber can't resolve it, so the
+        # original value is preserved (non-destructive).
+        assert normalize_value("phone", "(202) 555-0143") == "(202) 555-0143"
+
+    def test_per_call_region_override(self) -> None:
+        mapper = ContactMapper(default_region=None)
+        result = mapper.map_payload({"mobile": "020 7946 0958"}, default_region="GB")
+        assert result.normalized["phone"] == "+442079460958"
+
+    def test_batch_region_normalizes_values(self) -> None:
+        mapper = ContactMapper(default_region="US")
+        rows = [{"Mobile Phone": "(202) 555-0143"} for _ in range(5)]
+        results = mapper.map_batch(rows)
+        assert all(r.normalized["phone"] == "+12025550143" for r in results)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  v2.7.0 — FUZZY SHORT-ALIAS FALSE-POSITIVE GUARD
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestFuzzyShortAliasGuard:
+    """A short alias embedded in a longer header (e.g. ``tel`` inside
+    ``job_titel``) must not win the fuzzy match and misroute the column."""
+
+    def test_job_titel_is_not_phone(self) -> None:
+        match = ContactMapper().identify("Job Titel")
+        assert match.canonical != "phone"
+        assert match.canonical == "job_title"
+
+    def test_legitimate_typos_still_recover(self) -> None:
+        mapper = ContactMapper()
+        assert mapper.identify("phne_nmbr").canonical == "phone"
+        assert mapper.identify("first_nam").canonical == "first_name"
+        assert mapper.identify("Compny").canonical == "company"
+
+    def test_garbage_still_unmatched(self) -> None:
+        assert ContactMapper().identify("supercalifragilistic").canonical == "unknown"
