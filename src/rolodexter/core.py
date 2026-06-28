@@ -17,10 +17,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from importlib import resources
-from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    import pandas as pd
+from typing import Any, cast
 
 # Library logger.  A NullHandler keeps rolodexter silent by default; callers
 # opt into output by configuring logging on this logger (or the root).
@@ -1850,13 +1847,13 @@ class ContactMapper:
 
     def map_dataframe(
         self,
-        df: pd.DataFrame,
+        df: Any,
         *,
         default_region: str | None = None,
         normalize: bool | None = None,
         strict: bool | None = None,
         confidence_threshold: float | None = None,
-    ) -> pd.DataFrame:
+    ) -> Any:
         """Return a copy of *df* with columns renamed to canonical fields.
 
         Column headers are resolved via :meth:`compile_schema`; matched columns
