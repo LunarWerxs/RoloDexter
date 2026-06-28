@@ -9,21 +9,21 @@ This is the restart list for the next RoloDexter maintenance stint.
 - [x] Diagnose the failing Python CI jobs on Dependabot PR #9.
   - PR: <https://github.com/Lunarwerx/rolodexter/pull/9>
   - Change: `actions/checkout` from 4 to 7.
-  - Current state when noted: PR left open because Python 3.10, 3.11, 3.12, 3.13, and 3.14 CI jobs were failing.
-  - Finding: checkout itself works. The Python jobs fail at `mypy src/` because
-    newer mypy reports unused line-level `type: ignore[import-untyped]`
-    comments for `nameparser`.
-  - Local fix: remove the line-level ignores and add a config-level
-    `nameparser.*` mypy override.
-  - Remaining: push the Python fix commit, update/re-run PR #9, and merge only
-    after the full CI matrix is green.
+  - Finding: checkout itself works. The first failure was stricter mypy handling
+    of `nameparser` ignores; the later failure is NumPy 2.5 stubs being parsed
+    while mypy is intentionally configured for the Python 3.10 type target.
+  - Local fixes: remove the line-level ignores, add a config-level
+    `nameparser.*` mypy override, avoid static pandas stub imports, and pin
+    `numpy<2.5` in the dev extra for CI stability.
+  - Remaining: push the latest CI fix, update/rerun PR #9, and merge only after
+    the full CI matrix is green.
 
 - [x] Sync local branch with the remote main branch after the merged Dependabot PRs.
   - Merged already: PR #5 `actions/setup-python`, PR #7 `actions/upload-artifact`, PR #8 `codecov/codecov-action`.
   - Do this carefully because there are substantial local uncommitted changes from the previous fix pass.
   - Preserve local work; do not reset it away.
 
-- [ ] Review, commit, and push the completed Python maintenance fixes.
+- [x] Review, commit, and push the completed Python maintenance fixes.
   - Includes mapper correctness fixes, CLI atomic output, i18n cache behavior, README wording, regression tests, and todo/maintenance docs.
   - Leave or explicitly handle pre-existing untracked scratch files: `cb_better_01.md` and `cb_issues_01.md`.
 
