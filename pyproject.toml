@@ -136,11 +136,6 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
-# pandas is an optional, lazily-imported extra and ships no type stubs by default.
-[[tool.mypy.overrides]]
-module = ["pandas.*"]
-ignore_missing_imports = true
-
 # nameparser currently ships no type stubs/py.typed marker in some resolver
 # environments. Keep this as a config-level override instead of line-level
 # ignores so newer mypy releases do not fail on unused ignore comments.

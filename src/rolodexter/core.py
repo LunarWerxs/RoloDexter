@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, unique
-from importlib import resources
+from importlib import import_module, resources
 from typing import Any, cast
 
 # Library logger.  A NullHandler keeps rolodexter silent by default; callers
@@ -1868,7 +1868,7 @@ class ContactMapper:
         .. versionadded:: 2.8.0
         """
         try:
-            import pandas  # noqa: F401  # pylint: disable=unused-import
+            import_module("pandas")
         except ImportError:
             raise ImportError(
                 "map_dataframe requires pandas. Install with: "
