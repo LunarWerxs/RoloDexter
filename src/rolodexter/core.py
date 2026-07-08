@@ -460,7 +460,15 @@ class NameNormalizer:
 
         hn = HumanName(text.lower())
         hn.capitalize()
-        return str(hn)
+        result = str(hn)
+        # ``nameparser`` >= 1.2 leaves a *leading* recognized particle
+        # lowercase (e.g. "ter braak" -> "ter Braak"), whereas older
+        # releases capitalized it. A normalized display name should always
+        # begin with an uppercase letter, so fix the first character here
+        # without disturbing internal particle casing ("Jan van der Berg").
+        if result[:1].islower():
+            result = result[:1].upper() + result[1:]
+        return result
 
     @classmethod
     def parse(cls, value: str) -> dict[str, str]:
