@@ -1,20 +1,31 @@
 # Release And Distribution Notes
 
-Last checked: 2026-06-30.
+Last checked: 2026-07-08.
 
 ## Current Package Status
 
-RoloDexter is currently a Python package published on PyPI:
+RoloDexter ships a Python package on PyPI and a JavaScript/TypeScript package on
+npm, both at `2.9.0` (released 2026-07-08):
 
-- PyPI project: <https://pypi.org/project/rolodexter/>
-- Current published version checked from PyPI: `2.8.0`
-- Local package version in `pyproject.toml`: `2.9.0`
-- Python requirement: `>=3.10`
-- NPM package source: `packages/js`
-- NPM package version: `2.9.0` pre-publish package candidate
-- Current NPM registry status checked with `npm view rolodexter version --json`:
-  registry `E404`, meaning the package is not publicly visible under that name
-  or the current account lacks access.
+- PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.0`.
+- NPM package: <https://www.npmjs.com/package/rolodexter> — latest published
+  `2.9.0`, published from `packages/js` with Sigstore provenance.
+- Local versions in `pyproject.toml` and `packages/js/package.json`: `2.9.0`.
+- Python requirement: `>=3.10`; Node requirement: `>=20`.
+
+### 2.9.0 release (2026-07-08)
+
+2.9.0 (minor) shipped the first-class TypeScript/NPM package plus Python fixes.
+PyPI published automatically from the `v2.9.0` GitHub Release (trusted
+publishing); NPM published via the manual `Publish to NPM` workflow
+(`dry_run=false`) using an `NPM_TOKEN` in the `npm` environment. CI installing
+fresh dependencies caught four cross-environment issues that a stale local
+environment had hidden, now fixed: `nameparser` 1.3.0 leading-particle
+capitalization, `tomllib` on Python 3.10 (`tomli` fallback), `node --test` glob
+support on Node 20 (`packages/js/scripts/run-tests.mjs`), and CPython
+version-dependent `argparse` text in the CLI parity probe. The first NPM publish
+also required correcting the stale `lunawerx` GitHub org name to `Lunarwerx` so
+`--provenance` validation passed.
 
 ## Release Policy
 

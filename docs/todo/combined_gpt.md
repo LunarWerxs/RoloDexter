@@ -44,19 +44,15 @@ consolidated DRY, bottleneck, dependency, deletion, or deviance audits.
 
 ## Remaining Todo, Ordered By Importance
 
-- [ ] Severity: 1/5 - Commit/push the current release-candidate work only after
-  reviewing the dirty worktree and confirming CI goes green on GitHub.
-  - Verified need: local gates are green, but remote CI cannot be proven until
-    the branch is pushed or the workflows are run in GitHub.
-- [ ] Severity: 1/5 - Publish `rolodexter` `2.8.1` to PyPI after explicit release
-  approval and green CI.
-  - Verified need: PyPI latest is still `2.8.0` as of 2026-06-30; local
-    `pyproject.toml` is `2.8.1`; build and twine checks pass.
-- [ ] Severity: 1/5 - Publish `rolodexter` `2.8.1` to NPM after explicit release
-  approval and NPM credentials or trusted publishing are configured.
-  - Verified need: `npm view rolodexter version --json` returns registry `E404`
-    as of 2026-06-30, so the package is not publicly visible under that name;
-    local pack and publish dry-runs pass.
+- [x] Severity: 1/5 - Commit/push the release work and confirm CI is green on
+  GitHub. Done 2026-07-08: merged via PR #11 with the full Python/Node CI matrix
+  green.
+- [x] Severity: 1/5 - Publish `rolodexter` to PyPI. Done 2026-07-08: released as
+  `2.9.0` (renumbered from the 2.8.1 candidate) via the `v2.9.0` GitHub Release
+  and PyPI trusted publishing.
+- [x] Severity: 1/5 - Publish `rolodexter` to NPM. Done 2026-07-08: released as
+  `2.9.0` via the `Publish to NPM` workflow (`dry_run=false`) with Sigstore
+  provenance.
 - [ ] Severity: 2/5 - Keep broadening Python/NPM parity probes whenever the
   public API grows.
   - Verified need: current probes report zero mismatches, but this is an ongoing

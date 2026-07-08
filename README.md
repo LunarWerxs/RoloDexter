@@ -6,7 +6,7 @@
 
 Route messy, inconsistent contact data from *any* source to a clean, canonical schema.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/lunawerx/rolodexter/ci.yml?label=CI)](https://github.com/lunawerx/rolodexter/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Lunarwerx/rolodexter/ci.yml?label=CI)](https://github.com/Lunarwerx/rolodexter/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/rolodexter)](https://pypi.org/project/rolodexter/)
 [![Python](https://img.shields.io/pypi/pyversions/rolodexter)](https://pypi.org/project/rolodexter/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -22,7 +22,7 @@ RoloDexter is maintained as a dual-package repository:
 | Ecosystem | Package | Source | Package metadata | Publish target |
 | --------- | ------- | ------ | ---------------- | -------------- |
 | Python | `rolodexter` | [`src/rolodexter`](src/rolodexter) | [`pyproject.toml`](pyproject.toml) | [PyPI](https://pypi.org/project/rolodexter/) |
-| JavaScript / TypeScript | `rolodexter` | [`packages/js/src`](packages/js/src) | [`packages/js/package.json`](packages/js/package.json) | npmjs after first publish |
+| JavaScript / TypeScript | `rolodexter` | [`packages/js/src`](packages/js/src) | [`packages/js/package.json`](packages/js/package.json) | [npm](https://www.npmjs.com/package/rolodexter) |
 
 The Python package remains the canonical implementation and owns the shared
 `patterns.json` alias table. The NPM package lives under `packages/js`, syncs
@@ -89,14 +89,11 @@ pip install rolodexter[dev]
 
 ### JavaScript / TypeScript
 
-After the NPM package is published:
-
 ```bash
 npm install rolodexter
 ```
 
-The NPM package source lives in `packages/js`. For local development before or
-after publication:
+The NPM package source lives in `packages/js`. For local development:
 
 ```bash
 cd packages/js
@@ -418,7 +415,7 @@ src/rolodexter/
 ## Contributing
 
 ```bash
-git clone https://github.com/lunawerx/rolodexter.git
+git clone https://github.com/Lunarwerx/rolodexter.git
 cd rolodexter
 pip install -e ".[dev]"
 pytest
