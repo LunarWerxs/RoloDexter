@@ -73,7 +73,7 @@
     "build": "npm run sync:patterns && tsc -p tsconfig.json && node scripts/build-cjs.mjs && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test \"dist/test/**/*.js\"",
+    "test": "npm run build && node scripts/run-tests.mjs",
     "test:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
     "prepack": "npm test && npm run test:parity"
   },
