@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,13 +21,41 @@ def run(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> dict[str, Any]:
     return {"code": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
 
+_CHOOSE_RE = re.compile(r"choose from ([^)]*)")
+
+
+def _normalize_argparse(text: str) -> str:
+    """Neutralize argparse output that varies across Python versions.
+
+    argparse's help/error text is not stable across CPython releases: the
+    ``-m`` program name, usage-line wrapping/indentation, and whether the
+    ``choose from`` choices are quoted all differ between versions (and even
+    patch releases). The JS CLI reimplements one particular rendering, so we
+    compare argparse boilerplate on semantic content rather than exact bytes.
+    Non-argparse output (mapped JSON/CSV/JSONL) is returned unchanged.
+    """
+    if "usage:" not in text:
+        return text
+    # Collapse version-dependent usage-line wrapping and indentation.
+    text = re.sub(r"[ \t]*\n[ \t]*", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Normalize "choose from 'a', 'b'" (older) vs "choose from a, b" (newer).
+    text = _CHOOSE_RE.sub(lambda m: "choose from " + m.group(1).replace("'", ""), text)
+    return text.strip()
+
+
 def scrub(result: dict[str, Any], tmp: Path) -> dict[str, Any]:
     text = json.dumps(result)
     text = text.replace(str(tmp), "<TMP>")
     text = text.replace(str(tmp).replace("\\", "\\\\"), "<TMP>")
     text = text.replace(str(ROOT), "<ROOT>")
     text = text.replace(str(ROOT).replace("\\", "\\\\"), "<ROOT>")
-    return json.loads(text)
+    out = json.loads(text)
+    for key in ("stdout", "stderr"):
+        value = out.get(key)
+        if isinstance(value, str):
+            out[key] = _normalize_argparse(value)
+    return out
 
 
 def main() -> int:
