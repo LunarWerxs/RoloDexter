@@ -66,16 +66,30 @@ jobs:
           ./gitleaks detect --no-banner --redact --exit-code 1
 
   test-js:
-    name: Test (Node)
+    name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "24"]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: packages/js/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Install Python parity dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
       - name: Install dependencies
         working-directory: packages/js
@@ -88,6 +102,10 @@ jobs:
       - name: Test
         working-directory: packages/js
         run: npm test
+
+      - name: Python/NPM parity probes
+        working-directory: packages/js
+        run: npm run test:parity
 
       - name: Pack check
         working-directory: packages/js

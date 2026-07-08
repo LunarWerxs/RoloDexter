@@ -60,7 +60,6 @@ from .core import (
     StringNormalizer,
     normalize_value,
 )
-from .i18n import SUPPORTED_LANGUAGES, generate_language
 
 # Single source of truth: read the installed package version rather than
 # duplicating a literal that can drift from pyproject.toml.
@@ -71,6 +70,15 @@ try:
     __version__ = _pkg_version("rolodexter")
 except PackageNotFoundError:  # pragma: no cover - running from a source tree
     __version__ = "0.0.0+unknown"
+
+
+def __getattr__(name: str) -> object:
+    if name in {"SUPPORTED_LANGUAGES", "generate_language"}:
+        from . import i18n
+
+        return getattr(i18n, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "SUPPORTED_LANGUAGES",

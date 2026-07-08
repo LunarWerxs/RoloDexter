@@ -82,11 +82,12 @@ def test_write_cache_creates_selected_dir_without_probe_or_leftover_temp(
 
     path = i18n._write_cache(lang_data)
 
-    assert path == package_root / "i18n" / "zz_write.json"
+    assert path == i18n._user_cache_dir() / "zz_write.json"
     assert json.loads(path.read_text(encoding="utf-8")) == lang_data
     assert not (path.parent / ".probe").exists()
     assert not list(path.parent.glob("*.tmp"))
-    assert not user_cache_base.exists()
+    assert path.is_relative_to(user_cache_base)
+    assert not (package_root / "i18n").exists()
 
 
 def test_cli_dry_run_does_not_create_cache_dirs_or_probe(

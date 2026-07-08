@@ -13,6 +13,7 @@ import logging
 import re
 import threading
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, unique
@@ -156,6 +157,44 @@ HEURISTIC_CONFIDENCE: float = 0.60
 EMBEDDED_PHONE_MAX_TEXT_CHARS: int = 8192
 EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD: int = 5
 EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD: int = 20
+DEFAULT_HEADER_CACHE_MAX_SIZE: int = 4096
+
+__all__ = [
+    "DEFAULT_HEADER_CACHE_MAX_SIZE",
+    "EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD",
+    "EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD",
+    "EMBEDDED_PHONE_MAX_TEXT_CHARS",
+    "EXACT_MATCH_CONFIDENCE",
+    "FUZZY_HIGH_CONFIDENCE",
+    "FUZZY_LENGTH_RATIO",
+    "FUZZY_LOW_CONFIDENCE",
+    "FUZZY_MATCH_THRESHOLD",
+    "HEURISTIC_CONFIDENCE",
+    "NORMALIZED_MATCH_CONFIDENCE",
+    "AddressNormalizer",
+    "BooleanNormalizer",
+    "CanonicalField",
+    "ContactMapper",
+    "EmailNormalizer",
+    "ExactMatchStrategy",
+    "FieldMatch",
+    "FuzzyMatchStrategy",
+    "HeuristicMatchStrategy",
+    "ListNormalizer",
+    "MappingResult",
+    "MappingSchema",
+    "MatchStrategy",
+    "NameNormalizer",
+    "NormalizationError",
+    "NormalizedMatchStrategy",
+    "PatternLoadError",
+    "PatternRegistry",
+    "PhoneNormalizer",
+    "PostalCodeNormalizer",
+    "RolodexterError",
+    "StringNormalizer",
+    "normalize_value",
+]
 
 
 def _validate_confidence_threshold(value: float) -> float:
@@ -421,7 +460,15 @@ class NameNormalizer:
 
         hn = HumanName(text.lower())
         hn.capitalize()
-        return str(hn)
+        result = str(hn)
+        # ``nameparser`` >= 1.2 leaves a *leading* recognized particle
+        # lowercase (e.g. "ter braak" -> "ter Braak"), whereas older
+        # releases capitalized it. A normalized display name should always
+        # begin with an uppercase letter, so fix the first character here
+        # without disturbing internal particle casing ("Jan van der Berg").
+        if result[:1].islower():
+            result = result[:1].upper() + result[1:]
+        return result
 
     @classmethod
     def parse(cls, value: str) -> dict[str, str]:
@@ -1303,10 +1350,62 @@ class HeuristicMatchStrategy(MatchStrategy):
         ("birthday", re.compile(r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$")),
         ("birthday", re.compile(r"^\d{1,2}\.\d{1,2}\.\d{2,4}$")),
     )
+    _HEADER_CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+    _HEADER_NONWORD_RE = re.compile(r"[^\w]+")
+    _HEADER_UNDERSCORE_RUN_RE = re.compile(r"_+")
+    _PHONE_HEADER_HINTS = frozenset(
+        {
+            "cell",
+            "fax",
+            "mobile",
+            "phone",
+            "phones",
+            "sms",
+            "tel",
+            "telephone",
+            "whatsapp",
+        }
+    )
+    _BIRTHDAY_HEADER_HINTS = frozenset(
+        {
+            "birth",
+            "birthday",
+            "birthdate",
+            "bday",
+            "dob",
+        }
+    )
+    _BIRTHDAY_HEADER_PHRASES = frozenset(
+        {
+            "birth_date",
+            "date_of_birth",
+            "day_of_birth",
+        }
+    )
 
     @property
     def name(self) -> str:
         return "heuristic"
+
+    @classmethod
+    def _header_terms(cls, header: str) -> tuple[str, set[str]]:
+        camel_split = cls._HEADER_CAMEL_RE.sub("_", header.strip())
+        normalized = cls._HEADER_NONWORD_RE.sub("_", camel_split.lower())
+        normalized = cls._HEADER_UNDERSCORE_RUN_RE.sub("_", normalized).strip("_")
+        return normalized, {part for part in normalized.split("_") if part}
+
+    @classmethod
+    def _has_phone_header_hint(cls, header: str) -> bool:
+        _normalized, terms = cls._header_terms(header)
+        return bool(terms & cls._PHONE_HEADER_HINTS)
+
+    @classmethod
+    def _has_birthday_header_hint(cls, header: str) -> bool:
+        normalized, terms = cls._header_terms(header)
+        return bool(
+            (terms & cls._BIRTHDAY_HEADER_HINTS)
+            or normalized in cls._BIRTHDAY_HEADER_PHRASES
+        )
 
     # Cap the value length the data-shape regexes scan.  Cell values are
     # caller/attacker-controlled; nothing longer than this is a phone, email,
@@ -1332,11 +1431,15 @@ class HeuristicMatchStrategy(MatchStrategy):
             # *possible* phone number.  Filters out 10-digit numeric IDs
             # that happen to match the bare-digit phone pattern.
             if canonical == "phone":
+                if cleaned.isdigit() and not self._has_phone_header_hint(header):
+                    continue
                 from . import _phone
 
                 parsed = _phone.parse(cleaned, default_region=region)
                 if parsed is None:
                     continue
+            if canonical == "birthday" and not self._has_birthday_header_hint(header):
+                continue
             return FieldMatch(
                 original=header,
                 canonical=canonical,
@@ -1404,6 +1507,8 @@ class ContactMapper:
         "_default_region",
         "_default_service",
         "_header_cache",
+        "_header_cache_lock",
+        "_header_cache_max_size",
         "_header_strategies",
         "_normalize",
         "_registry",
@@ -1425,6 +1530,7 @@ class ContactMapper:
         default_region: str | None = "US",
         strict: bool = False,
         confidence_threshold: float = 0.0,
+        header_cache_max_size: int | None = DEFAULT_HEADER_CACHE_MAX_SIZE,
     ) -> None:
         self._registry = PatternRegistry(
             patterns=patterns,
@@ -1438,6 +1544,9 @@ class ContactMapper:
         self._confidence_threshold = _validate_confidence_threshold(
             confidence_threshold
         )
+        if header_cache_max_size is not None and header_cache_max_size < 0:
+            raise ValueError("header_cache_max_size must be non-negative or None")
+        self._header_cache_max_size = header_cache_max_size
         self._default_service = (
             default_service  # accepted for backward compat; not used since v2.0
         )
@@ -1471,8 +1580,9 @@ class ContactMapper:
         self._cacheable_pipeline = cacheable
         self._header_strategies = [s for s in self._strategies if s.header_only]
         self._value_strategies = [s for s in self._strategies if not s.header_only]
-        # header → cached header-only verdict (None = all header-only missed)
-        self._header_cache: dict[str, FieldMatch | None] = {}
+        # header -> cached header-only verdict (None = all header-only missed)
+        self._header_cache: OrderedDict[str, FieldMatch | None] = OrderedDict()
+        self._header_cache_lock = threading.Lock()
 
     @staticmethod
     def _unknown(header: str) -> FieldMatch:
@@ -1517,18 +1627,22 @@ class ContactMapper:
                 header, value=_value_for_matching(value), default_region=region
             )
 
-        if header in self._header_cache:
-            verdict = self._header_cache[header]
-        else:
-            verdict = None
-            for strategy in self._header_strategies:
-                result = strategy.match(header, value=None, default_region=region)
-                if result is not None:
-                    verdict = result
-                    break
-            # dict writes are atomic under the GIL; a same-header race just
-            # recomputes the identical verdict, so no lock is needed.
-            self._header_cache[header] = verdict
+        with self._header_cache_lock:
+            if header in self._header_cache:
+                verdict = self._header_cache[header]
+                self._header_cache.move_to_end(header)
+            else:
+                verdict = None
+                for strategy in self._header_strategies:
+                    result = strategy.match(header, value=None, default_region=region)
+                    if result is not None:
+                        verdict = result
+                        break
+                if self._header_cache_max_size != 0:
+                    self._header_cache[header] = verdict
+                    if self._header_cache_max_size is not None:
+                        while len(self._header_cache) > self._header_cache_max_size:
+                            self._header_cache.popitem(last=False)
 
         if verdict is not None:
             return verdict
@@ -1541,6 +1655,24 @@ class ContactMapper:
             if result is not None:
                 return result
         return self._unknown(header)
+
+    def clear_cache(self) -> None:
+        """Clear cached header-resolution verdicts.
+
+        Long-lived mapper instances can call this after processing a tenant or
+        import job to release header cache memory without rebuilding the mapper.
+        """
+        with self._header_cache_lock:
+            self._header_cache.clear()
+
+    def cache_info(self) -> dict[str, Any]:
+        """Return lightweight header-cache diagnostics."""
+        with self._header_cache_lock:
+            return {
+                "size": len(self._header_cache),
+                "max_size": self._header_cache_max_size,
+                "cacheable_pipeline": self._cacheable_pipeline,
+            }
 
     def map_payload(  # pylint: disable=unused-argument,too-many-locals,too-many-branches
         self,

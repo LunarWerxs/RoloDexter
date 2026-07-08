@@ -5,23 +5,45 @@ All notable changes to **rolodexter** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.8.1] — 2026-06-28
+## [2.9.0] — 2026-07-08
 
-Patch release candidate: correctness fixes, safer CLI/i18n behavior, and CI
-compatibility with current dependency/tooling resolutions.
+Minor release: new public features and API additions (first-class
+TypeScript/NPM package, expanded CLI, batch/stream/schema/DataFrame helpers)
+alongside correctness fixes, safer CLI/i18n behavior, and CI compatibility with
+current dependency/tooling resolutions.
 
 ### Added
 
-- **Initial TypeScript/NPM package scaffold.** `packages/js` now builds a typed
-  `rolodexter` package with exact and normalized header matching, value-shape
-  heuristics, core value normalization, batch/stream/schema helpers, and tests.
-  It syncs the Python `patterns.json` table before build to avoid alias drift.
+- **TypeScript/NPM package candidate.** `packages/js` now builds a typed
+  `rolodexter@2.9.0` package with exact, normalized, fuzzy, and heuristic
+  matching; public normalizers, phone helpers, match strategies, Python-shaped
+  aliases, cached i18n loading/generation helpers,
+  batch/stream/schema/DataFrame-style helpers, ESM and CommonJS exports,
+  `rolodexter` and `rolodexter-i18n` CLIs, and tests. It syncs the Python
+  `patterns.json` table before build to avoid alias drift.
+- **Shared Python/TypeScript golden corpora.** CRM/export header fixtures now
+  live in `tests/fixtures/golden_corpora.json` and are exercised by both
+  Python and TypeScript tests.
+- **Manual NPM publish workflow.** `.github/workflows/npm-publish.yml` runs the
+  JS package checks and dry-run pack by default, with opt-in publishing once NPM
+  credentials or trusted publishing are configured.
 
 ### Fixed
 
 - **List-valued fields now normalize consistently.** Python list values for
   `tags` now route through `ListNormalizer`, trimming and filtering empty
   entries instead of bypassing field-specific normalization.
+- **TypeScript parity gaps tightened.** The JS package now supports
+  Python-style normalizer instance calls, DataFrame-like adapters, i18n cache
+  helper exports, missing-cache warnings, streaming JSONL/CSV CLI paths, and
+  additional `nameparser` title/comma-name cases.
+- **NPM package exports now mirror Python entry points.** The package root,
+  `rolodexter/core`, and `rolodexter/i18n` expose Python-shaped names.
+- **Phone and CLI edge-case parity tightened.** JS now matches Python for
+  7-digit US local phone normalization, cross-country number-match behavior,
+  7-digit US local national formatting, reply-to/owner fuzzy edge cases,
+  leading-plus numeric CLI arguments, JSONL quarantine diagnostics, and strict
+  numeric CLI argument parsing.
 - **Duplicate list-valued aliases now merge flat and dedupe.** Multiple `tags`
   aliases no longer produce nested lists on collision.
 - **`map_batch()` now supports embedded-phone extraction parity.** The
@@ -34,17 +56,47 @@ compatibility with current dependency/tooling resolutions.
 - **CLI file output is atomic.** `rolodexter map -o OUT` writes to a
   same-directory temp file and replaces the target only after a successful map,
   avoiding partial or truncated outputs on strict/fault failures.
+- **CLI row failures are isolatable.** `rolodexter map --on-error` now supports
+  `fail` (default), `skip`, and `quarantine`, including row-numbered warnings
+  for malformed JSONL rows and strict normalization failures.
+- **CLI materialization is bounded.** JSON input file reads and JSON/CSV output
+  collection now have explicit caps (`--max-json-input-bytes`,
+  `--max-materialized-rows`) while JSONL output remains streaming.
 - **i18n cache reads are read-only.** Cache discovery and loading no longer
-  create package/user cache directories or `.probe` files; cache writes use
-  temp-file replacement.
+  create package/user cache directories or `.probe` files; generated cache
+  writes now go to the platform user cache and use temp-file replacement.
+- **i18n generation is bounded and fault-isolated.** Translation calls now use
+  configurable timeout/retry/backoff options, worker counts are clamped, and one
+  failed language no longer prevents other worker results from being reported.
+- **i18n generation dependencies are split from runtime cache loading.** The
+  lightweight `i18n` extra is dependency-free, while `i18n-generate` installs
+  `deep-translator` and `unidecode` for cache generation.
 - **`PatternRegistry.all_aliases` no longer exposes mutable internals.** It
   keeps returning a `list[str]` for compatibility, but now returns a copy.
 - **Embedded phone extraction is bounded.** Opt-in free-text scanning now caps
   scanned text length plus matches per field and payload, and records warnings
   when those limits stop the scan.
+- **Header-resolution caching is bounded.** `ContactMapper` now uses an LRU
+  header cache with `header_cache_max_size=4096` by default, plus
+  `clear_cache()` and `cache_info()` for long-lived mapper instances.
+- **Value-shape heuristics are less eager.** Generic date-shaped values no
+  longer map to `birthday` without a birth/DOB header hint, and digit-only
+  phone-shaped values require a phone/tel/mobile-style header hint. Formatted
+  and E.164 phone values still match by shape.
+- **Removed stale prototype documentation.** The old tracked `rolodexter.md`
+  prototype dump was deleted because it was not referenced by package metadata,
+  docs, or tests.
 - **CI type checking no longer depends on line-level ignores for `nameparser`.**
   The untyped dependency is handled through mypy configuration so newer mypy
   releases do not fail on unused ignore comments.
+- **NPM package publish metadata is clean.** The JS package now uses an
+  npm-normalized CLI `bin` path and includes `LICENSE` in the packed tarball,
+  so `npm publish --dry-run` accepts the package without auto-correcting the
+  CLI entry.
+- **NPM parity gaps from audit were closed.** TypeScript now matches audited
+  Python behavior for fuzzy confidence bands, quoted/parenthesized nickname
+  parsing, short local phone-number comparisons, and
+  `MappingSchema.default_region`.
 
 ### Changed
 
@@ -54,9 +106,11 @@ compatibility with current dependency/tooling resolutions.
 ### Testing
 
 - Added focused regressions for list normalization, schema/DataFrame threshold
-  handling, atomic CLI output, read-only i18n cache discovery, and alias-list
-  immutability. Added long-notes and match-limit coverage for embedded phone
-  extraction.
+  handling, atomic CLI output, CLI row fault isolation, read-only i18n cache
+  discovery, i18n generation resilience, and alias-list immutability. Added CLI
+  materialization-limit tests, long-notes and match-limit coverage for embedded
+  phone extraction, i18n user-cache/dependency-split tests, ambiguity guards for
+  date/phone value-shape heuristics, plus LRU cache-control coverage.
 
 ## [2.8.0] — 2026-05-28
 

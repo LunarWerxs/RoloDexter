@@ -5,11 +5,11 @@ language the generator translates canonical field names via
 ``deep-translator`` (Google Translate) and caches the result as a
 JSON file so it only needs to happen once.
 
-Cached files are written to ``_data/i18n/<lang>.json`` **inside the
-installed package** when the directory is writable (editable / dev
-installs), or to the platform cache directory
+Generated files are written to the platform user cache directory
 (``~/.cache/rolodexter/i18n/`` on Linux, ``%LOCALAPPDATA%\\rolodexter\\i18n\\``
-on Windows) when it is not (e.g. site-packages in a venv).
+on Windows). Packaged ``rolodexter/i18n/*.json`` files, if a future release
+ships curated packs, are read-only inputs and are never used for generated
+cache writes.
 
 Usage from code
 ───────────────
@@ -42,17 +42,40 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
+
+DEFAULT_TRANSLATE_TIMEOUT: float = 10.0
+DEFAULT_TRANSLATE_RETRIES: int = 1
+DEFAULT_TRANSLATE_RETRY_BACKOFF: float = 0.5
+MAX_I18N_WORKERS: int = 8
+_T = TypeVar("_T")
+
+__all__ = [
+    "DEFAULT_TRANSLATE_RETRIES",
+    "DEFAULT_TRANSLATE_RETRY_BACKOFF",
+    "DEFAULT_TRANSLATE_TIMEOUT",
+    "MAX_I18N_WORKERS",
+    "SUPPORTED_LANGUAGES",
+    "discover_cached",
+    "generate_language",
+    "get_all_cache_dirs",
+    "get_cache_dir",
+    "get_writable_cache_dir",
+    "load_cached",
+    "main",
+]
 
 # ═══════════════════════════════════════════════════════════════════════
 #  SUPPORTED LANGUAGES
@@ -119,15 +142,6 @@ def _package_i18n_dir() -> Path | None:
     return d if d.is_dir() else None
 
 
-def _package_i18n_write_candidate() -> Path | None:
-    """Return the package ``i18n/`` path as a possible write target."""
-    try:
-        pkg = resources.files("rolodexter")
-        return Path(str(pkg)) / "i18n"
-    except Exception:  # pylint: disable=broad-exception-caught
-        return None
-
-
 def _user_cache_dir(*, create: bool = False) -> Path:
     """Platform-specific user-writable cache directory."""
     if sys.platform == "win32":
@@ -154,20 +168,15 @@ def _ensure_writable_cache_dir(path: Path) -> Path | None:
 
 
 def get_writable_cache_dir() -> Path:
-    """Return the best available writable i18n cache directory."""
-    pkg_dir = _package_i18n_write_candidate()
-    candidates = [pkg_dir] if pkg_dir is not None else []
-    candidates.append(_user_cache_dir())
-
-    for candidate in candidates:
-        cache_dir = _ensure_writable_cache_dir(candidate)
-        if cache_dir is not None:
-            return cache_dir
+    """Return the user-writable i18n generation cache directory."""
+    cache_dir = _ensure_writable_cache_dir(_user_cache_dir())
+    if cache_dir is not None:
+        return cache_dir
     raise OSError("No writable i18n cache directory available")
 
 
 def get_cache_dir() -> Path:
-    """Return the best available writable i18n cache directory."""
+    """Return the user-writable i18n generation cache directory."""
     return get_writable_cache_dir()
 
 
@@ -229,27 +238,97 @@ def _to_alias_variants(text: str) -> set[str]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
-    """Translate English phrases to *lang_code* via deep-translator.
+def _non_negative_int(raw: str) -> int:
+    value = int(raw)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return value
 
-    Tries a single batch call first; on failure, falls back to per-phrase
-    translation with a brief inter-call delay to be polite to the API.
-    Per-phrase failures are logged as warnings rather than swallowed
-    silently so callers can diagnose partial-translation results.
-    """
+
+def _non_negative_float(raw: str) -> float:
+    value = float(raw)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return value
+
+
+def _bounded_workers(requested: int, target_count: int) -> int:
+    if target_count <= 0:
+        return 1
+    return min(max(1, requested), target_count, MAX_I18N_WORKERS)
+
+
+def _translator(lang_code: str, timeout: float) -> Any:
     from deep_translator import (  # type: ignore[import-untyped]
         GoogleTranslator,
     )
 
     try:
-        results = GoogleTranslator(source="en", target=lang_code).translate_batch(
-            phrases
+        return GoogleTranslator(source="en", target=lang_code, timeout=timeout)
+    except TypeError:
+        # Older deep-translator versions may not expose a timeout parameter.
+        return GoogleTranslator(source="en", target=lang_code)
+
+
+def _call_with_retries(
+    func: Callable[[], _T],
+    *,
+    retries: int,
+    retry_backoff: float,
+    context: str,
+    log: logging.Logger,
+) -> _T:
+    attempts = max(0, retries) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return func()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if attempt >= attempts:
+                raise
+            log.warning(
+                "%s failed on attempt %s/%s (%s); retrying.",
+                context,
+                attempt,
+                attempts,
+                exc,
+            )
+            if retry_backoff:
+                time.sleep(retry_backoff * attempt)
+    raise RuntimeError("unreachable retry state")
+
+
+def _translate_batch(
+    phrases: list[str],
+    lang_code: str,
+    *,
+    timeout: float = DEFAULT_TRANSLATE_TIMEOUT,
+    retries: int = DEFAULT_TRANSLATE_RETRIES,
+    retry_backoff: float = DEFAULT_TRANSLATE_RETRY_BACKOFF,
+) -> list[str | None]:
+    """Translate English phrases to *lang_code* via deep-translator.
+
+    Tries a single batch call first; on failure, falls back to per-phrase
+    translation with a brief inter-call delay to be polite to the API.  Calls
+    use a bounded retry/timeout budget where supported by the translator.
+    Per-phrase failures are logged as warnings rather than swallowed
+    silently so callers can diagnose partial-translation results.
+    """
+    log = logging.getLogger(__name__)
+    retries = max(0, retries)
+    timeout = max(0.0, timeout)
+    retry_backoff = max(0.0, retry_backoff)
+
+    try:
+        translator = _translator(lang_code, timeout)
+        results = _call_with_retries(
+            lambda: translator.translate_batch(phrases),
+            retries=retries,
+            retry_backoff=retry_backoff,
+            context=f"Batch translate for {lang_code}",
+            log=log,
         )
         return [r.strip() if r else None for r in results]
     except Exception as batch_exc:  # pylint: disable=broad-exception-caught
-        import logging
-
-        log = logging.getLogger(__name__)
         log.warning(
             "Batch translate failed for %s (%s); falling back to per-phrase.",
             lang_code,
@@ -258,7 +337,20 @@ def _translate_batch(phrases: list[str], lang_code: str) -> list[str | None]:
         out: list[str | None] = []
         for phrase in phrases:
             try:
-                r = GoogleTranslator(source="en", target=lang_code).translate(phrase)
+                translator = _translator(lang_code, timeout)
+
+                def translate_phrase(
+                    translator: Any = translator, phrase: str = phrase
+                ) -> Any:
+                    return translator.translate(phrase)
+
+                r = _call_with_retries(
+                    translate_phrase,
+                    retries=retries,
+                    retry_backoff=retry_backoff,
+                    context=f"Translate {phrase!r} to {lang_code}",
+                    log=log,
+                )
                 out.append(r.strip() if r else None)
                 time.sleep(0.05)
             except Exception as phrase_exc:  # pylint: disable=broad-exception-caught
@@ -404,6 +496,9 @@ def generate_language(  # pylint: disable=too-many-locals
     *,
     force: bool = False,
     force_fields: set[str] | None = None,
+    timeout: float = DEFAULT_TRANSLATE_TIMEOUT,
+    retries: int = DEFAULT_TRANSLATE_RETRIES,
+    retry_backoff: float = DEFAULT_TRANSLATE_RETRY_BACKOFF,
 ) -> dict[str, Any]:
     """Generate (or retrieve cached) i18n aliases for *lang_code*.
 
@@ -416,6 +511,12 @@ def generate_language(  # pylint: disable=too-many-locals
         If ``True``, re-translate even if a cached file exists.
     force_fields : set[str] | None
         Specific canonical fields to re-translate (merge with cache).
+    timeout : float
+        Translation request timeout, passed to deep-translator when supported.
+    retries : int
+        Number of retries after the first failed translation attempt.
+    retry_backoff : float
+        Base seconds to sleep between retries; multiplied by attempt number.
 
     Returns
     -------
@@ -478,7 +579,20 @@ def generate_language(  # pylint: disable=too-many-locals
     if to_translate:
         canonicals = sorted(to_translate)
         phrases = [field_phrases[c] for c in canonicals]
-        results = _translate_batch(phrases, translate_code)
+        if (
+            timeout == DEFAULT_TRANSLATE_TIMEOUT
+            and retries == DEFAULT_TRANSLATE_RETRIES
+            and retry_backoff == DEFAULT_TRANSLATE_RETRY_BACKOFF
+        ):
+            results = _translate_batch(phrases, translate_code)
+        else:
+            results = _translate_batch(
+                phrases,
+                translate_code,
+                timeout=timeout,
+                retries=retries,
+                retry_backoff=retry_backoff,
+            )
         for canonical, translated in zip(canonicals, results, strict=False):
             if not translated:
                 continue
@@ -567,9 +681,33 @@ def main() -> None:  # pylint: disable=too-many-locals
     )
     parser.add_argument(
         "--workers",
-        type=int,
+        type=_non_negative_int,
         default=6,
-        help="Parallel workers (default: 6)",
+        help=f"Parallel workers, clamped to {MAX_I18N_WORKERS} max (default: 6)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=_non_negative_float,
+        default=DEFAULT_TRANSLATE_TIMEOUT,
+        help=(
+            "Translation request timeout in seconds, when supported by the "
+            f"translator (default: {DEFAULT_TRANSLATE_TIMEOUT:g})"
+        ),
+    )
+    parser.add_argument(
+        "--retries",
+        type=_non_negative_int,
+        default=DEFAULT_TRANSLATE_RETRIES,
+        help=f"Retries after a failed translation attempt (default: {DEFAULT_TRANSLATE_RETRIES})",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=_non_negative_float,
+        default=DEFAULT_TRANSLATE_RETRY_BACKOFF,
+        help=(
+            "Base seconds between retries, multiplied by attempt number "
+            f"(default: {DEFAULT_TRANSLATE_RETRY_BACKOFF:g})"
+        ),
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -623,6 +761,9 @@ def main() -> None:  # pylint: disable=too-many-locals
             code,
             force=args.force,
             force_fields=force_fields,
+            timeout=args.timeout,
+            retries=args.retries,
+            retry_backoff=args.retry_backoff,
         )
 
     if args.dry_run:
@@ -633,15 +774,28 @@ def main() -> None:  # pylint: disable=too-many-locals
             n_fields = len((cached or {}).get("fields", {}))
             print(f"  [{code}] {name}: {status} ({n_fields} fields)")
     else:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        worker_count = _bounded_workers(args.workers, len(target_codes))
+        failures: list[tuple[str, str]] = []
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
             futures = {pool.submit(_process, c): c for c in target_codes}
             for future in as_completed(futures):
-                code, data = future.result()
+                code = futures[future]
+                try:
+                    _, data = future.result()
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    failures.append((code, str(exc)))
+                    print(f"  [{code}] FAILED: {exc}")
+                    continue
                 n_fields = len(data.get("fields", {}))
                 n_aliases = sum(len(v) for v in data.get("fields", {}).values())
                 print(
                     f"  [{code}] {data['language_name']}: {n_fields} fields, {n_aliases} aliases"
                 )
+        if failures:
+            print(f"\nFailed {len(failures)} language(s):")
+            for code, error in failures:
+                print(f"  [{code}] {error}")
+            sys.exit(1)
 
     print("\nDone.")
 
