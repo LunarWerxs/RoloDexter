@@ -15,6 +15,20 @@ Route messy, inconsistent contact data from *any* source to a clean, canonical s
 
 ---
 
+## Packages In This Repository
+
+RoloDexter is maintained as a dual-package repository:
+
+| Ecosystem | Package | Source | Package metadata | Publish target |
+| --------- | ------- | ------ | ---------------- | -------------- |
+| Python | `rolodexter` | [`src/rolodexter`](src/rolodexter) | [`pyproject.toml`](pyproject.toml) | [PyPI](https://pypi.org/project/rolodexter/) |
+| JavaScript / TypeScript | `rolodexter` | [`packages/js/src`](packages/js/src) | [`packages/js/package.json`](packages/js/package.json) | npmjs after first publish |
+
+The Python package remains the canonical implementation and owns the shared
+`patterns.json` alias table. The NPM package lives under `packages/js`, syncs
+that alias table during build, and has its own README, TypeScript sources,
+tests, package metadata, and publish workflow.
+
 ## The Problem
 
 Every CRM, email platform, and CSV export uses different field names for the same data:
@@ -54,6 +68,8 @@ print(result.normalized)
 
 ## Installation
 
+### Python
+
 ```bash
 # Core (phonenumbers + nameparser)
 pip install rolodexter
@@ -61,8 +77,8 @@ pip install rolodexter
 # With fuzzy matching for typo recovery
 pip install rolodexter[fuzzy]
 
-# With on-demand i18n translation (40 languages)
-pip install rolodexter[i18n]
+# With on-demand i18n cache generation dependencies (40 languages)
+pip install rolodexter[i18n-generate]
 
 # Everything
 pip install rolodexter[all]
@@ -71,8 +87,16 @@ pip install rolodexter[all]
 pip install rolodexter[dev]
 ```
 
-JavaScript/TypeScript package source now lives in `packages/js` and is prepared
-for a first NPM release. Until that package is published, build it locally with:
+### JavaScript / TypeScript
+
+After the NPM package is published:
+
+```bash
+npm install rolodexter
+```
+
+The NPM package source lives in `packages/js`. For local development before or
+after publication:
 
 ```bash
 cd packages/js
@@ -106,7 +130,7 @@ match = mapper.identify("Column X", value="jane@test.com")
 # FieldMatch(original='Column X', canonical='email', confidence=0.6, strategy='heuristic')
 ```
 
-### � Per-Caller Field Overrides
+### Per-Caller Field Overrides
 
 For vendor-specific or account-level field names that won't be in the standard alias table:
 
@@ -143,7 +167,10 @@ print(result.normalized["tags"])
 
 ### 🌍 On-Demand i18n (40 Languages)
 
-English ships by default. Generate any of 40 supported language caches with the i18n CLI or API, then pass those languages to `ContactMapper`; runtime loading is cache-only and never translates during mapper construction:
+English ships by default. Install `rolodexter[i18n-generate]` to generate any
+of 40 supported language caches with the i18n CLI or API, then pass those
+languages to `ContactMapper`; runtime loading is cache-only and never
+translates during mapper construction:
 
 ```python
 from rolodexter import ContactMapper
@@ -160,6 +187,9 @@ python -m rolodexter.i18n
 
 # Or specific languages
 python -m rolodexter.i18n --languages es,fr,de
+
+# Bound network behavior during generation
+python -m rolodexter.i18n --languages es,fr --timeout 10 --retries 1 --workers 4
 
 # List supported languages
 python -m rolodexter.i18n --list
@@ -208,6 +238,12 @@ rolodexter map contacts.csv -o clean.csv --region US
 
 # Stream JSON Lines, drop low-confidence guesses, fail loudly
 rolodexter map export.jsonl --min-confidence 0.8 --strict -o out.jsonl
+
+# JSON/CSV output paths are bounded; JSONL output remains streaming
+rolodexter map huge.jsonl --format jsonl --max-materialized-rows 100000
+
+# Keep processing after bad rows, preserving failures in a JSONL quarantine file
+rolodexter map export.jsonl --strict --on-error quarantine -o clean.jsonl
 
 # See exactly how a header resolves
 rolodexter explain "Job Titel" --value CEO
@@ -277,6 +313,7 @@ ContactMapper(
     default_region="US",       # ISO-3166 region for phone parsing/E.164
     strict=False,              # Raise NormalizationError on any warning
     confidence_threshold=0.0,  # Drop matches below this confidence to unmapped
+    header_cache_max_size=4096,# Bound header-resolution cache; None=unbounded
 )
 ```
 
@@ -290,6 +327,8 @@ ContactMapper(
 | `map_stream(iterable, *, ...)`                            | Lazily yield results (constant memory)            |
 | `compile_schema(headers)`                                 | Resolve headers once → reusable `MappingSchema`   |
 | `map_dataframe(df)`                                       | Rename/normalize a pandas DataFrame               |
+| `clear_cache()`                                           | Clear cached header-resolution verdicts           |
+| `cache_info()`                                            | Inspect header cache size/configuration           |
 | `registry`                                                | Access the underlying `PatternRegistry`           |
 
 ### `FieldMatch`
@@ -351,17 +390,29 @@ custom = {
 mapper = ContactMapper(patterns=custom)
 ```
 
-## Architecture
+## Repository Layout
+
+```text
+rolodexter/
+├── pyproject.toml              # Python/PyPI package metadata
+├── src/rolodexter/             # Python package source
+├── tests/                      # Python tests
+├── packages/js/package.json    # JavaScript/NPM package metadata
+├── packages/js/src/            # TypeScript package source
+├── packages/js/test/           # JavaScript package tests
+└── scripts/                    # Cross-language release/parity probes
+```
+
+## Python Package Architecture
 
 ```
-rolodexter/
+src/rolodexter/
 ├── __init__.py      # Public API
 ├── __main__.py      # CLI: rolodexter map / explain / fields
 ├── core.py          # ContactMapper, PatternRegistry, strategies, normalizers
 ├── _phone.py        # E.164 phone parser (wraps libphonenumber)
 ├── i18n.py          # On-demand i18n generator (40 languages, cached)
-├── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
-└── i18n/            # Cached language files (generated on demand)
+└── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
 ```
 
 ## Contributing

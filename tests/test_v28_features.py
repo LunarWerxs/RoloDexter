@@ -305,6 +305,20 @@ class TestCLI:
         assert data[0]["phone"] == "+12025550143"
         assert data[0]["company"] == "Acme"
 
+    def test_map_csv_ignores_surplus_cells(self, tmp_path: Path) -> None:
+        csv_path = tmp_path / "in.csv"
+        csv_path.write_text(
+            "Name,Email\nAda,a@example.com,EXTRA\n",
+            encoding="utf-8",
+        )
+        out_path = tmp_path / "out.json"
+
+        rc = cli_main(["map", str(csv_path), "-o", str(out_path), "--format", "json"])
+
+        assert rc == 0
+        data = json.loads(out_path.read_text("utf-8"))
+        assert data == [{"full_name": "Ada", "email": "a@example.com"}]
+
     def test_map_to_stdout_jsonl(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -383,3 +397,171 @@ class TestCLI:
         data = json.loads(out)
         assert data[0]["first_name"] == "A"
         assert data[1]["last_name"] == "B"
+
+    def test_map_jsonl_skip_bad_row(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        in_path.write_text(
+            '{"fname": "A"}\n{"not json"\n{"surname": "B"}\n',
+            encoding="utf-8",
+        )
+        rc = cli_main(["map", str(in_path), "--format", "json", "--on-error", "skip"])
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert rc == 0
+        assert [row for row in data] == [{"first_name": "A"}, {"last_name": "B"}]
+        assert "skipped row 2" in captured.err
+
+    def test_map_strict_skip_bad_row(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        csv_path = tmp_path / "in.csv"
+        csv_path.write_text(
+            "phone\n(202) 555-0143\ngarbage value here\n",
+            encoding="utf-8",
+        )
+        rc = cli_main(
+            [
+                "map",
+                str(csv_path),
+                "--strict",
+                "--on-error",
+                "skip",
+                "--format",
+                "jsonl",
+            ]
+        )
+        captured = capsys.readouterr()
+        lines = [json.loads(line) for line in captured.out.splitlines() if line]
+        assert rc == 0
+        assert lines == [{"phone": "+12025550143"}]
+        assert "skipped row 3" in captured.err
+
+    def test_map_jsonl_quarantines_bad_row(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        out_path = tmp_path / "out.jsonl"
+        quarantine_path = tmp_path / "bad.jsonl"
+        in_path.write_text(
+            '{"fname": "A"}\n{"not json"\n{"surname": "B"}\n',
+            encoding="utf-8",
+        )
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "-o",
+                str(out_path),
+                "--format",
+                "jsonl",
+                "--on-error",
+                "quarantine",
+                "--quarantine-output",
+                str(quarantine_path),
+            ]
+        )
+        err = capsys.readouterr().err
+        out_rows = [
+            json.loads(line) for line in out_path.read_text("utf-8").splitlines()
+        ]
+        quarantined = [
+            json.loads(line) for line in quarantine_path.read_text("utf-8").splitlines()
+        ]
+        assert rc == 0
+        assert out_rows == [{"first_name": "A"}, {"last_name": "B"}]
+        assert quarantined[0]["row"] == 2
+        assert "invalid JSON" in quarantined[0]["error"]
+        assert "quarantined 1 row" in err
+
+    def test_quarantine_output_requires_quarantine_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        in_path.write_text('{"fname": "A"}\n', encoding="utf-8")
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "--on-error",
+                "skip",
+                "--quarantine-output",
+                str(tmp_path / "bad.jsonl"),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "--quarantine-output requires --on-error quarantine" in err
+
+    def test_json_output_materialization_limit(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        in_path.write_text('{"fname": "A"}\n{"surname": "B"}\n', encoding="utf-8")
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "--format",
+                "json",
+                "--max-materialized-rows",
+                "1",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "materializing more than 1 row" in captured.err
+
+    def test_json_output_materialization_limit_precedes_later_row_errors(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        in_path.write_text(
+            '{"fname": "A"}\n{"surname": "B"}\nnot-json\n', encoding="utf-8"
+        )
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "--format",
+                "json",
+                "--max-materialized-rows",
+                "1",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "materializing more than 1 row" in captured.err
+        assert "row 3" not in captured.err
+
+    def test_jsonl_output_is_not_materialized(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        in_path.write_text('{"fname": "A"}\n{"surname": "B"}\n', encoding="utf-8")
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "--format",
+                "jsonl",
+                "--max-materialized-rows",
+                "1",
+            ]
+        )
+        captured = capsys.readouterr()
+        rows = [json.loads(line) for line in captured.out.splitlines()]
+        assert rc == 0
+        assert rows == [{"first_name": "A"}, {"last_name": "B"}]
+
+    def test_json_input_byte_limit(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.json"
+        in_path.write_text(json.dumps([{"fname": "A"}]), encoding="utf-8")
+        rc = cli_main(["map", str(in_path), "--max-json-input-bytes", "1"])
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "JSON input is" in err
+        assert "--max-json-input-bytes" in err

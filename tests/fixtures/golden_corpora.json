@@ -1,0 +1,59 @@
+{
+  "google_contacts": {
+    "E-mail 1 - Value": "email",
+    "Family Name": "last_name",
+    "Given Name": "first_name",
+    "Organization 1 - Name": "company",
+    "Organization 1 - Title": "job_title",
+    "Phone 1 - Value": "phone"
+  },
+  "hubspot": {
+    "city": "city",
+    "company": "company",
+    "country": "country",
+    "email": "email",
+    "firstname": "first_name",
+    "hs_lead_status": "lead_status",
+    "jobtitle": "job_title",
+    "lastname": "last_name",
+    "lifecyclestage": "lifecycle_stage",
+    "mobilephone": "phone",
+    "phone": "phone",
+    "state": "state",
+    "website": "website",
+    "zip": "postal_code"
+  },
+  "mailchimp": {
+    "BIRTHDAY": "birthday",
+    "COMPANY": "company",
+    "EMAIL": "email",
+    "FNAME": "first_name",
+    "LNAME": "last_name",
+    "PHONE": "phone"
+  },
+  "outlook": {
+    "Business City": "city",
+    "Business Street": "address_line1",
+    "Company": "company",
+    "E-mail Address": "email",
+    "First Name": "first_name",
+    "Home Phone": "home_phone",
+    "Job Title": "job_title",
+    "Last Name": "last_name",
+    "Mobile Phone": "phone"
+  },
+  "salesforce": {
+    "Account.Name": "company",
+    "Company": "company",
+    "Email": "email",
+    "FirstName": "first_name",
+    "LastName": "last_name",
+    "MailingCity": "city",
+    "MailingCountry": "country",
+    "MailingPostalCode": "postal_code",
+    "MailingState": "state",
+    "MobilePhone": "phone",
+    "Phone": "phone",
+    "Title": "job_title"
+  }
+}

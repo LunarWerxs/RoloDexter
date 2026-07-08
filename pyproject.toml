@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rolodexter"
-version = "2.8.1"
+version = "2.9.0"
 description = "The universal contact field mapper — route messy, inconsistent contact data to a clean canonical schema."
 readme = "README.md"
 license = "MIT"
@@ -43,7 +43,8 @@ dependencies = ["phonenumbers>=8.0,<10", "nameparser>=1.1"]
 
 [project.optional-dependencies]
 fuzzy = ["rapidfuzz>=3.0"]
-i18n = ["deep-translator>=1.11", "unidecode>=1.3"]
+i18n = []
+i18n-generate = ["deep-translator>=1.11", "unidecode>=1.3"]
 pandas = ["pandas>=1.5"]
 all = ["rapidfuzz>=3.0", "deep-translator>=1.11", "unidecode>=1.3", "pandas>=1.5"]
 dev = [
@@ -65,6 +66,7 @@ dev = [
 
 [project.scripts]
 rolodexter = "rolodexter.__main__:main"
+rolodexter-i18n = "rolodexter.i18n:main"
 
 [project.urls]
 Homepage = "https://github.com/lunawerx/rolodexter"
@@ -79,7 +81,7 @@ Changelog = "https://github.com/lunawerx/rolodexter/blob/main/CHANGELOG.md"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"rolodexter" = ["patterns.json", "i18n/*.json"]
+"rolodexter" = ["patterns.json"]
 
 # ── Pytest ────────────────────────────────────────────────────────────
 

@@ -11,6 +11,9 @@ normalization is idempotent.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -18,67 +21,13 @@ from hypothesis import strategies as st
 from rolodexter import ContactMapper
 from rolodexter.core import normalize_value
 
-# ── Golden corpora: header → expected canonical field ───────────────────
+# ── Shared golden corpora: header → expected canonical field ─────────────
 
-CORPORA: dict[str, dict[str, str]] = {
-    "hubspot": {
-        "firstname": "first_name",
-        "lastname": "last_name",
-        "email": "email",
-        "phone": "phone",
-        "mobilephone": "phone",
-        "company": "company",
-        "jobtitle": "job_title",
-        "website": "website",
-        "city": "city",
-        "state": "state",
-        "zip": "postal_code",
-        "country": "country",
-        "lifecyclestage": "lifecycle_stage",
-        "hs_lead_status": "lead_status",
-    },
-    "salesforce": {
-        "FirstName": "first_name",
-        "LastName": "last_name",
-        "Email": "email",
-        "Phone": "phone",
-        "MobilePhone": "phone",
-        "Company": "company",
-        "Title": "job_title",
-        "MailingCity": "city",
-        "MailingState": "state",
-        "MailingPostalCode": "postal_code",
-        "MailingCountry": "country",
-        "Account.Name": "company",
-    },
-    "google_contacts": {
-        "Given Name": "first_name",
-        "Family Name": "last_name",
-        "E-mail 1 - Value": "email",
-        "Phone 1 - Value": "phone",
-        "Organization 1 - Name": "company",
-        "Organization 1 - Title": "job_title",
-    },
-    "mailchimp": {
-        "EMAIL": "email",
-        "FNAME": "first_name",
-        "LNAME": "last_name",
-        "PHONE": "phone",
-        "COMPANY": "company",
-        "BIRTHDAY": "birthday",
-    },
-    "outlook": {
-        "First Name": "first_name",
-        "Last Name": "last_name",
-        "E-mail Address": "email",
-        "Mobile Phone": "phone",
-        "Company": "company",
-        "Job Title": "job_title",
-        "Business Street": "address_line1",
-        "Business City": "city",
-        "Home Phone": "home_phone",
-    },
-}
+CORPORA: dict[str, dict[str, str]] = json.loads(
+    (Path(__file__).parent / "fixtures" / "golden_corpora.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 @pytest.fixture(scope="module")

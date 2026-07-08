@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tomllib
 
 from rolodexter import (
     CanonicalField,
@@ -44,6 +45,71 @@ def mapper() -> ContactMapper:
 @pytest.fixture
 def mapper_no_norm() -> ContactMapper:
     return ContactMapper(normalize=False)
+
+
+def test_console_script_entry_points_match_package_bins() -> None:
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+    assert pyproject["project"]["scripts"] == {
+        "rolodexter": "rolodexter.__main__:main",
+        "rolodexter-i18n": "rolodexter.i18n:main",
+    }
+
+
+def test_submodule_public_export_lists_are_explicit() -> None:
+    import rolodexter.core as core
+    import rolodexter.i18n as i18n
+
+    assert core.__all__ == [
+        "DEFAULT_HEADER_CACHE_MAX_SIZE",
+        "EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD",
+        "EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD",
+        "EMBEDDED_PHONE_MAX_TEXT_CHARS",
+        "EXACT_MATCH_CONFIDENCE",
+        "FUZZY_HIGH_CONFIDENCE",
+        "FUZZY_LENGTH_RATIO",
+        "FUZZY_LOW_CONFIDENCE",
+        "FUZZY_MATCH_THRESHOLD",
+        "HEURISTIC_CONFIDENCE",
+        "NORMALIZED_MATCH_CONFIDENCE",
+        "AddressNormalizer",
+        "BooleanNormalizer",
+        "CanonicalField",
+        "ContactMapper",
+        "EmailNormalizer",
+        "ExactMatchStrategy",
+        "FieldMatch",
+        "FuzzyMatchStrategy",
+        "HeuristicMatchStrategy",
+        "ListNormalizer",
+        "MappingResult",
+        "MappingSchema",
+        "MatchStrategy",
+        "NameNormalizer",
+        "NormalizationError",
+        "NormalizedMatchStrategy",
+        "PatternLoadError",
+        "PatternRegistry",
+        "PhoneNormalizer",
+        "PostalCodeNormalizer",
+        "RolodexterError",
+        "StringNormalizer",
+        "normalize_value",
+    ]
+    assert i18n.__all__ == [
+        "DEFAULT_TRANSLATE_RETRIES",
+        "DEFAULT_TRANSLATE_RETRY_BACKOFF",
+        "DEFAULT_TRANSLATE_TIMEOUT",
+        "MAX_I18N_WORKERS",
+        "SUPPORTED_LANGUAGES",
+        "discover_cached",
+        "generate_language",
+        "get_all_cache_dirs",
+        "get_cache_dir",
+        "get_writable_cache_dir",
+        "load_cached",
+        "main",
+    ]
 
 
 @pytest.fixture
@@ -535,8 +601,6 @@ class TestHeuristicMatch:
             ("90210-1234", "postal_code"),
             ("K1A 0B1", "postal_code"),
             ("SW1A 1AA", "postal_code"),
-            ("1990-05-15", "birthday"),
-            ("05/15/1990", "birthday"),
         ],
     )
     def test_value_shape_detection(self, value: str, expected: str) -> None:
@@ -558,6 +622,31 @@ class TestHeuristicMatch:
     def test_plain_text_no_match(self) -> None:
         strat = HeuristicMatchStrategy()
         assert strat.match("col", value="Just some text") is None
+
+    def test_generic_dates_are_not_birthday_without_header_hint(self) -> None:
+        strat = HeuristicMatchStrategy()
+        assert strat.match("Unknown Column", value="1990-05-15") is None
+        assert strat.match("Unknown Column", value="05/15/1990") is None
+
+    @pytest.mark.parametrize("header", ["Birth Date", "Date of Birth", "dayOfBirth"])
+    def test_birth_date_header_hint_allows_date_values(self, header: str) -> None:
+        strat = HeuristicMatchStrategy()
+        m = strat.match(header, value="1990-05-15")
+        assert m is not None
+        assert m.canonical == "birthday"
+
+    def test_bare_numeric_phone_shape_requires_header_hint(self) -> None:
+        strat = HeuristicMatchStrategy()
+        assert strat.match("customer_id", value="2025550143") is None
+        m = strat.match("contact phone", value="2025550143")
+        assert m is not None
+        assert m.canonical == "phone"
+
+    def test_formatted_phone_shape_still_matches_unknown_headers(self) -> None:
+        strat = HeuristicMatchStrategy()
+        m = strat.match("Unknown Column", value="202-555-0143")
+        assert m is not None
+        assert m.canonical == "phone"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3184,15 +3273,20 @@ class TestV23CollisionFixes:
 
 
 class TestV23EUDateHeuristic:
-    """DD.MM.YYYY European date format detected as birthday."""
+    """Date formats are birthday heuristics only with birth-related headers."""
 
-    def test_eu_date_format(self, mapper: ContactMapper) -> None:
+    def test_generic_eu_date_format_stays_unknown(self, mapper: ContactMapper) -> None:
         m = mapper.identify("unknown_col", value="15.03.1990")
-        assert m.canonical == "birthday"
-        assert m.strategy == "heuristic"
+        assert m.canonical == "unknown"
+        assert m.strategy == "none"
 
-    def test_iso_date_format(self, mapper: ContactMapper) -> None:
+    def test_generic_iso_date_format_stays_unknown(self, mapper: ContactMapper) -> None:
         m = mapper.identify("unknown_col", value="1990-03-15")
+        assert m.canonical == "unknown"
+        assert m.strategy == "none"
+
+    def test_birth_date_hint_detects_date_format(self, mapper: ContactMapper) -> None:
+        m = mapper.identify("custom_birth_marker", value="1990-03-15")
         assert m.canonical == "birthday"
         assert m.strategy == "heuristic"
 
@@ -3945,11 +4039,15 @@ class TestI18nLoadMasterFallback:
 class TestPatternRegistryLanguages:
     """Test PatternRegistry with language loading branches."""
 
-    def test_languages_list_with_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_languages_list_with_cached(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Loading a language that has cached data."""
-        from rolodexter.i18n import _write_cache, get_cache_dir
+        from rolodexter.i18n import _write_cache
 
-        cache_dir = get_cache_dir()
+        cache_dir = tmp_path / "i18n-cache"
+        monkeypatch.setattr("rolodexter.i18n.get_cache_dir", lambda: cache_dir)
+        monkeypatch.setattr("rolodexter.i18n.get_all_cache_dirs", lambda: [cache_dir])
         lang_data = {
             "language_code": "test_cov",
             "language_name": "Test Coverage",
@@ -4104,6 +4202,40 @@ class TestI18nGenerateLanguageFull:
 class TestI18nTranslateBatchFallback:
     """Test _translate_batch fallback when batch translation fails."""
 
+    def test_batch_retry_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Transient batch failures are retried within the configured budget."""
+        from rolodexter import i18n
+
+        call_count = {"batch": 0}
+        seen_timeout: list[float] = []
+
+        class RetryTranslator:
+            def __init__(self, **kwargs):
+                seen_timeout.append(kwargs["timeout"])
+
+            def translate_batch(self, phrases):
+                call_count["batch"] += 1
+                if call_count["batch"] == 1:
+                    raise Exception("transient")
+                return [f"translated_{phrase}" for phrase in phrases]
+
+        import types
+
+        fake_dt = types.ModuleType("deep_translator")
+        fake_dt.GoogleTranslator = RetryTranslator  # type: ignore[attr-defined]
+        monkeypatch.setitem(__import__("sys").modules, "deep_translator", fake_dt)
+
+        results = i18n._translate_batch(
+            ["hello", "world"],
+            "es",
+            timeout=3.5,
+            retries=1,
+            retry_backoff=0,
+        )
+        assert call_count["batch"] == 2
+        assert seen_timeout == [3.5]
+        assert results == ["translated_hello", "translated_world"]
+
     def test_fallback_per_phrase(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When batch translate throws, falls back to per-phrase."""
         from rolodexter import i18n
@@ -4130,7 +4262,7 @@ class TestI18nTranslateBatchFallback:
         monkeypatch.setitem(__import__("sys").modules, "deep_translator", fake_dt)
 
         results = i18n._translate_batch(["hello", "world"], "es")
-        assert call_count["batch"] == 1
+        assert call_count["batch"] == 2
         assert call_count["single"] == 2
         assert results == ["translated_hello", "translated_world"]
 
@@ -4158,6 +4290,13 @@ class TestI18nTranslateBatchFallback:
 
         results = i18n._translate_batch(["hello", "world"], "es")
         assert results == [None, None]
+
+    def test_worker_count_clamped(self) -> None:
+        from rolodexter import i18n
+
+        assert i18n._bounded_workers(0, 5) == 1
+        assert i18n._bounded_workers(99, 5) == 5
+        assert i18n._bounded_workers(99, 99) == i18n.MAX_I18N_WORKERS
 
 
 class TestI18nCliDryRun:
@@ -4220,6 +4359,45 @@ class TestI18nCliDryRun:
         assert "Generating 1 language" in captured.out
         assert "[es]" in captured.out
         assert "Spanish" in captured.out
+
+    def test_cli_reports_per_language_failures(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sys
+        import types
+
+        from rolodexter import i18n
+        from rolodexter.i18n import main
+
+        fake_dt = types.ModuleType("deep_translator")
+        fake_dt.GoogleTranslator = type("GoogleTranslator", (), {})  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "deep_translator", fake_dt)
+
+        def fake_generate(code, **_kwargs):
+            if code == "es":
+                raise RuntimeError("network budget exhausted")
+            return {
+                "language_code": code,
+                "language_name": i18n.SUPPORTED_LANGUAGES[code][1],
+                "fields": {"email": ["correo"]},
+            }
+
+        monkeypatch.setattr(i18n, "generate_language", fake_generate)
+
+        old_argv = sys.argv
+        try:
+            sys.argv = ["rolodexter.i18n", "--languages", "es,fr", "--workers", "99"]
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+        finally:
+            sys.argv = old_argv
+        captured = capsys.readouterr()
+        assert excinfo.value.code == 1
+        assert "[fr]" in captured.out
+        assert "[es] FAILED: network budget exhausted" in captured.out
+        assert "Failed 1 language" in captured.out
 
     def test_default_all_languages(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -4290,16 +4468,13 @@ class TestI18nCliDryRun:
 
 
 class TestI18nCacheDirFallback:
-    """Test cache dir fallback when package dir is not writable."""
+    """Test generated i18n cache writes use the user cache."""
 
     def test_user_cache_used_when_pkg_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from rolodexter.i18n import _user_cache_dir, get_cache_dir
 
-        monkeypatch.setattr(
-            "rolodexter.i18n._package_i18n_write_candidate", lambda: None
-        )
         monkeypatch.setattr("rolodexter.i18n.sys.platform", "linux")
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
         result = get_cache_dir()
@@ -4830,6 +5005,35 @@ class TestHeaderResolutionCache:
         # Heuristic (first in pipeline) wins on a value-shaped unknown header.
         r = mapper.map_payload({"weird": "jane@example.com"})
         assert r.normalized.get("email") == "jane@example.com"
+
+    def test_cache_is_bounded_lru(self) -> None:
+        mapper = ContactMapper(header_cache_max_size=2)
+        mapper.map_payload({"FirstName": "Jane"})
+        mapper.map_payload({"LastName": "Doe"})
+        mapper.map_payload({"FirstName": "Jo"})  # refresh LRU position
+        mapper.map_payload({"Email": "jo@example.com"})
+        assert "FirstName" in mapper._header_cache
+        assert "Email" in mapper._header_cache
+        assert "LastName" not in mapper._header_cache
+        assert mapper.cache_info()["size"] == 2
+        assert mapper.cache_info()["max_size"] == 2
+
+    def test_cache_can_be_disabled(self) -> None:
+        mapper = ContactMapper(header_cache_max_size=0)
+        mapper.map_payload({"FirstName": "Jane"})
+        assert mapper.cache_info()["size"] == 0
+        assert mapper._header_cache == {}
+
+    def test_cache_can_be_cleared(self) -> None:
+        mapper = ContactMapper()
+        mapper.map_payload({"FirstName": "Jane"})
+        assert mapper.cache_info()["size"] == 1
+        mapper.clear_cache()
+        assert mapper.cache_info()["size"] == 0
+
+    def test_negative_cache_size_rejected(self) -> None:
+        with pytest.raises(ValueError, match="header_cache_max_size"):
+            ContactMapper(header_cache_max_size=-1)
 
 
 class TestI18nLoadsCacheOnly:

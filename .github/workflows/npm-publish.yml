@@ -1,0 +1,67 @@
+name: Publish to NPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run checks and npm pack without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write  # Supports npm provenance/trusted publishing when configured
+
+jobs:
+  publish:
+    name: Publish JS package
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/rolodexter
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: packages/js/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python parity dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install dependencies
+        working-directory: packages/js
+        run: npm ci
+
+      - name: Type check
+        working-directory: packages/js
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: packages/js
+        run: npm test
+
+      - name: Python/NPM parity probes
+        working-directory: packages/js
+        run: npm run test:parity
+
+      - name: Pack check
+        working-directory: packages/js
+        run: npm pack --dry-run
+
+      - name: Publish to NPM
+        if: ${{ !inputs.dry_run }}
+        working-directory: packages/js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
