@@ -1,0 +1,90 @@
+{
+  "normalize": [
+    {
+      "id": "phone_7digit_us_local",
+      "field": "phone",
+      "value": "555-0143",
+      "default_region": "US",
+      "expected": "+15550143"
+    },
+    {
+      "id": "name_particle_title_suffix",
+      "field": "full_name",
+      "value": "Dr. Jane Van Doe Jr.",
+      "expected": "Dr. Jane van Doe Jr."
+    },
+    {
+      "id": "tags_csv_no_dedupe",
+      "field": "tags",
+      "value": "alpha, beta,,alpha",
+      "expected": ["alpha", "beta", "alpha"]
+    },
+    {
+      "id": "bool_yes_trimmed",
+      "field": "email_opt_out",
+      "value": " YES ",
+      "expected": true
+    },
+    {
+      "id": "bool_zero_string",
+      "field": "email_opt_out",
+      "value": "0",
+      "expected": false
+    },
+    {
+      "id": "address_hyphen_titlecase",
+      "field": "address_line1",
+      "value": " 123 main-st apt 4 ",
+      "expected": "123 Main-st Apt 4"
+    }
+  ],
+  "payloads": [
+    {
+      "id": "list_collision_flat_dedupe",
+      "payload": { "tags": "alpha,beta", "labels": ["beta", "gamma"] },
+      "expected_normalized": { "tags": ["alpha", "beta", "gamma"] }
+    },
+    {
+      "id": "duplicate_names_merge_to_list",
+      "payload": { "fname": "Ada", "first": "Augusta" },
+      "expected_normalized": { "first_name": ["Ada", "Augusta"] }
+    }
+  ],
+  "phones": [
+    {
+      "id": "match_cross_country_no_match",
+      "fn": "is_number_match",
+      "a": "+12025550143",
+      "b": "+442079460958",
+      "default_region": "US",
+      "expected": 1
+    },
+    {
+      "id": "match_local_vs_formatted_exact",
+      "fn": "is_number_match",
+      "a": "2025550143",
+      "b": "(202) 555-0143",
+      "default_region": "US",
+      "expected": 4
+    }
+  ],
+  "identify": [
+    {
+      "id": "fuzzy_confidence_band_low",
+      "header": "Compny",
+      "expected_canonical": "company",
+      "expected_strategy": "fuzzy",
+      "expected_confidence": 0.85
+    }
+  ],
+  "schemas": [
+    {
+      "id": "schema_confidence_threshold_excludes_fuzzy",
+      "headers": ["Compny"],
+      "mapper_options": { "confidence_threshold": 0.99 },
+      "expected_matches": {
+        "Compny": { "canonical": "unknown", "confidence": 0.0, "strategy": "none" }
+      }
+    }
+  ]
+}

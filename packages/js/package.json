@@ -1,0 +1,94 @@
+{
+  "name": "rolodexter",
+  "version": "2.9.1",
+  "description": "Universal contact field mapper for JavaScript and TypeScript.",
+  "type": "module",
+  "license": "MIT",
+  "author": "RoloDexter Contributors",
+  "keywords": [
+    "contact",
+    "mapper",
+    "normalizer",
+    "etl",
+    "crm",
+    "field-mapping",
+    "data-cleaning"
+  ],
+  "homepage": "https://github.com/Lunarwerx/rolodexter#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lunarwerx/rolodexter.git",
+    "directory": "packages/js"
+  },
+  "bugs": {
+    "url": "https://github.com/Lunarwerx/rolodexter/issues"
+  },
+  "bin": {
+    "rolodexter": "dist/src/cli.js",
+    "rolodexter-i18n": "dist/src/i18n.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/public.d.ts",
+      "import": "./dist/src/public.js",
+      "require": "./dist/cjs/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/src/core.d.ts",
+      "import": "./dist/src/core.js",
+      "require": "./dist/cjs/core.cjs"
+    },
+    "./i18n": {
+      "types": "./dist/src/i18n.d.ts",
+      "import": "./dist/src/i18n.js",
+      "require": "./dist/cjs/i18n.cjs"
+    }
+  },
+  "types": "./dist/src/public.d.ts",
+  "files": [
+    "dist/cjs",
+    "dist/src/cli.js",
+    "dist/src/cli.js.map",
+    "dist/src/core.d.ts",
+    "dist/src/core.js",
+    "dist/src/core.js.map",
+    "dist/src/i18n.d.ts",
+    "dist/src/i18n.js",
+    "dist/src/i18n.js.map",
+    "dist/src/i18n/.gitkeep",
+    "dist/src/index.d.ts",
+    "dist/src/index.js",
+    "dist/src/index.js.map",
+    "dist/src/patterns.json",
+    "dist/src/public.d.ts",
+    "dist/src/public.js",
+    "dist/src/public.js.map",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sync:patterns": "node scripts/sync-patterns.mjs",
+    "build": "npm run sync:patterns && tsc -p tsconfig.json && node scripts/build-cjs.mjs && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node scripts/run-tests.mjs",
+    "test:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
+    "prepack": "npm test && npm run test:parity"
+  },
+  "dependencies": {
+    "csv-stringify": "^6.8.0",
+    "fuzzball": "^2.2.6",
+    "libphonenumber-js": "^1.13.7"
+  },
+  "optionalDependencies": {
+    "@vitalets/google-translate-api": "^9.2.1",
+    "unidecode": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3"
+  }
+}

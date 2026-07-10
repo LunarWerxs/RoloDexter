@@ -1,0 +1,150 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rolodexter"
+version = "2.9.1"
+description = "The universal contact field mapper — route messy, inconsistent contact data to a clean canonical schema."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "RoloDexter Contributors" }]
+keywords = [
+    "contact",
+    "mapper",
+    "normalizer",
+    "etl",
+    "crm",
+    "field-mapping",
+    "data-cleaning",
+    "hubspot",
+    "salesforce",
+    "mailchimp",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business",
+    "Typing :: Typed",
+]
+# Upper bound on phonenumbers: it ships new metadata roughly monthly and a
+# major bump can shift parsing behavior; <10 keeps 8.x/9.x while blocking the
+# next, untested major.
+dependencies = ["phonenumbers>=8.0,<10", "nameparser>=1.1"]
+
+[project.optional-dependencies]
+fuzzy = ["rapidfuzz>=3.0"]
+i18n = []
+i18n-generate = ["deep-translator>=1.11", "unidecode>=1.3"]
+pandas = ["pandas>=1.5"]
+all = ["rapidfuzz>=3.0", "deep-translator>=1.11", "unidecode>=1.3", "pandas>=1.5"]
+dev = [
+    "rapidfuzz>=3.0",
+    "deep-translator>=1.11",
+    "unidecode>=1.3",
+    "pandas>=1.5",
+    # Keep mypy's Python 3.10 target compatible with NumPy stubs in CI.
+    "numpy<2.5",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.0",
+    # tomllib is stdlib on 3.11+; the test suite reads pyproject.toml on 3.10.
+    "tomli>=2.0; python_version < '3.11'",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "deptry>=0.23",
+    "vulture>=2.11",
+    "pylint>=3.0",
+]
+
+[project.scripts]
+rolodexter = "rolodexter.__main__:main"
+rolodexter-i18n = "rolodexter.i18n:main"
+
+[project.urls]
+Homepage = "https://github.com/Lunarwerx/rolodexter"
+Repository = "https://github.com/Lunarwerx/rolodexter"
+Documentation = "https://github.com/Lunarwerx/rolodexter#readme"
+Issues = "https://github.com/Lunarwerx/rolodexter/issues"
+Changelog = "https://github.com/Lunarwerx/rolodexter/blob/main/CHANGELOG.md"
+
+# ── Setuptools ────────────────────────────────────────────────────────
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"rolodexter" = ["patterns.json"]
+
+# ── Pytest ────────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short --strict-markers"
+
+# ── Coverage ──────────────────────────────────────────────────────────
+
+[tool.coverage.run]
+source = ["rolodexter"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+
+# ── Ruff ──────────────────────────────────────────────────────────────
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+    "RUF", # ruff-specific
+]
+ignore = ["E501"] # line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["rolodexter"]
+
+# ── Deptry ───────────────────────────────────────────────────────────
+
+[tool.deptry]
+exclude = ["build"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["pytest-cov", "ruff", "mypy", "deptry", "vulture", "pylint"]
+DEP003 = ["rolodexter"]
+
+# ── Mypy ──────────────────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+# nameparser currently ships no type stubs/py.typed marker in some resolver
+# environments. Keep this as a config-level override instead of line-level
+# ignores so newer mypy releases do not fail on unused ignore comments.
+[[tool.mypy.overrides]]
+module = ["nameparser.*"]
+ignore_missing_imports = true
