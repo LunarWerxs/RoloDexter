@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://github.com/LunarWerxs/rolodexter">
+<a href="https://github.com/LunarWerxs/RoloDexter">
   <img src="https://res.cloudinary.com/dicsgc72e/image/upload/v1772425436/ezgif-42b0a21d2af73c08_iwq3aa.gif" alt="RoloDexter, the universal contact field mapper" width="600">
 </a>
 
@@ -349,11 +349,11 @@ The release that created this package: the full four-strategy pipeline, public n
 
 </details>
 
-Full history: [CHANGELOG.md](https://github.com/LunarWerxs/rolodexter/blob/main/CHANGELOG.md)
+Full history: [CHANGELOG.md](https://github.com/LunarWerxs/RoloDexter/blob/main/CHANGELOG.md)
 
 ## 📄 License
 
-[MIT](https://github.com/LunarWerxs/rolodexter/blob/main/LICENSE) © [LunarWerx](https://lunarwerx.com)
+[MIT](https://github.com/LunarWerxs/RoloDexter/blob/main/LICENSE) © [LunarWerx](https://lunarwerx.com)
 
 <div align="center">
 <br/>

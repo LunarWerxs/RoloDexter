@@ -30,10 +30,10 @@ lives. Consequences:
 - `--provenance` validates the `repository.url` in `packages/js/package.json`
   against the repo it is built from. That URL, and the URLs in `pyproject.toml`,
   `README.md`, `packages/js/README.md`, and `SECURITY.md`, were rewritten to
-  `LunarWerxs/rolodexter`. **Do not publish with a stale owner in that field.**
+  `LunarWerxs/RoloDexter`. **Do not publish with a stale owner in that field.**
 - PyPI uses **trusted publishing**, which is pinned on PyPI's side to a specific
   `owner/repo`. The move invalidates it, so the PyPI publisher must be
-  re-pointed at `LunarWerxs/rolodexter` before the next Python release.
+  re-pointed at `LunarWerxs/RoloDexter` before the next Python release.
 
 ### 2.9.0 release (2026-07-08)
 
