@@ -6,12 +6,18 @@ Last checked: 2026-07-18.
 
 - PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.1`.
 - NPM package: <https://www.npmjs.com/package/rolodexter> — latest published
-  `2.9.0`, published from `packages/js` with Sigstore provenance.
+  `2.9.1`, published from `packages/js` with Sigstore provenance.
 - Local versions in `pyproject.toml` and `packages/js/package.json`: `2.9.1`.
 - Python requirement: `>=3.10`; Node requirement: `>=20`.
 
-The registries are out of step: `2.9.1` reached PyPI but never reached npm. See
-"The 2.9.1 npm gap" below.
+Both registries are back in step at `2.9.1`. They were not between 2026-07-10
+and 2026-07-18; see "The 2.9.1 npm gap" below for the cause and the fix.
+
+npm `2.9.1` was published from `main` rather than from the `v2.9.1` tag,
+because the tag predates the owner move and still carries the old
+`Lunarwerx` URLs that `--provenance` would reject. Its provenance therefore
+records the `main` commit, not the tag. The tag is left where it is: it is the
+commit PyPI `2.9.1` was built from, and moving it would misstate that.
 
 ### Repository owner moved (2026-07-18)
 
