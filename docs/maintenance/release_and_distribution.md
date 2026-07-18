@@ -31,9 +31,29 @@ lives. Consequences:
   against the repo it is built from. That URL, and the URLs in `pyproject.toml`,
   `README.md`, `packages/js/README.md`, and `SECURITY.md`, were rewritten to
   `LunarWerxs/RoloDexter`. **Do not publish with a stale owner in that field.**
-- PyPI uses **trusted publishing**, which is pinned on PyPI's side to a specific
-  `owner/repo`. The move invalidates it, so the PyPI publisher must be
-  re-pointed at `LunarWerxs/RoloDexter` before the next Python release.
+- PyPI uses **trusted publishing**, which is pinned on PyPI's side. The move
+  invalidates it. **Confirmed broken**, not assumed: a manual dispatch of
+  `publish.yml` on 2026-07-18 failed the OIDC exchange with
+  `invalid-publisher: valid token, but no corresponding publisher (Publisher
+  with matching claims was not found)`. PyPI binds to `repository_owner_id`,
+  so an owner change can never silently keep working.
+
+  Fix it at <https://pypi.org/manage/project/rolodexter/settings/publishing/>:
+  delete the stale `Lunarwerx/rolodexter` publisher and add one matching the
+  claims GitHub now sends:
+
+  | Field | Value |
+  | --- | --- |
+  | Owner | `LunarWerxs` |
+  | Repository name | `RoloDexter` |
+  | Workflow name | `publish.yml` |
+  | Environment name | `pypi` |
+
+  To verify without cutting a release, dispatch `publish.yml` manually. PyPI
+  refuses to re-upload an existing version, so the run cannot publish anything.
+  A **fixed** publisher gets past the OIDC exchange and then fails on
+  `File already exists`. A **still-broken** one fails earlier, at the exchange,
+  with `invalid-publisher`. The two failures are unambiguous.
 
 ### 2.9.0 release (2026-07-08)
 
