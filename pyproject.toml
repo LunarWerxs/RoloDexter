@@ -71,11 +71,11 @@ rolodexter = "rolodexter.__main__:main"
 rolodexter-i18n = "rolodexter.i18n:main"
 
 [project.urls]
-Homepage = "https://github.com/Lunarwerx/rolodexter"
-Repository = "https://github.com/Lunarwerx/rolodexter"
-Documentation = "https://github.com/Lunarwerx/rolodexter#readme"
-Issues = "https://github.com/Lunarwerx/rolodexter/issues"
-Changelog = "https://github.com/Lunarwerx/rolodexter/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/LunarWerxs/rolodexter"
+Repository = "https://github.com/LunarWerxs/rolodexter"
+Documentation = "https://github.com/LunarWerxs/rolodexter#readme"
+Issues = "https://github.com/LunarWerxs/rolodexter/issues"
+Changelog = "https://github.com/LunarWerxs/rolodexter/blob/main/CHANGELOG.md"
 
 # ── Setuptools ────────────────────────────────────────────────────────
 

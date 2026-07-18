@@ -14,14 +14,14 @@
     "field-mapping",
     "data-cleaning"
   ],
-  "homepage": "https://github.com/Lunarwerx/rolodexter#readme",
+  "homepage": "https://github.com/LunarWerxs/rolodexter#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Lunarwerx/rolodexter.git",
+    "url": "git+https://github.com/LunarWerxs/rolodexter.git",
     "directory": "packages/js"
   },
   "bugs": {
-    "url": "https://github.com/Lunarwerx/rolodexter/issues"
+    "url": "https://github.com/LunarWerxs/rolodexter/issues"
   },
   "bin": {
     "rolodexter": "dist/src/cli.js",

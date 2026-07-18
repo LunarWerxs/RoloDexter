@@ -3,7 +3,7 @@
 ## Reporting a Vulnerability
 
 Please report security issues privately via
-[GitHub Security Advisories](https://github.com/Lunarwerx/rolodexter/security/advisories/new)
+[GitHub Security Advisories](https://github.com/LunarWerxs/rolodexter/security/advisories/new)
 rather than opening a public issue.
 
 We aim to acknowledge reports within 3 business days and to ship a fix or

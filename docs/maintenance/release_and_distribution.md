@@ -1,17 +1,33 @@
 # Release And Distribution Notes
 
-Last checked: 2026-07-08.
+Last checked: 2026-07-18.
 
 ## Current Package Status
 
-RoloDexter ships a Python package on PyPI and a JavaScript/TypeScript package on
-npm, both at `2.9.0` (released 2026-07-08):
-
-- PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.0`.
+- PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.1`.
 - NPM package: <https://www.npmjs.com/package/rolodexter> — latest published
   `2.9.0`, published from `packages/js` with Sigstore provenance.
-- Local versions in `pyproject.toml` and `packages/js/package.json`: `2.9.0`.
+- Local versions in `pyproject.toml` and `packages/js/package.json`: `2.9.1`.
 - Python requirement: `>=3.10`; Node requirement: `>=20`.
+
+The registries are out of step: `2.9.1` reached PyPI but never reached npm. See
+"The 2.9.1 npm gap" below.
+
+### Repository owner moved (2026-07-18)
+
+The repository moved from the `Lunarwerx` **organization** to the `LunarWerxs`
+**user** account, which is where every other public LunarWerx product repo
+lives. Consequences:
+
+- `NPM_TOKEN` is an **environment** secret on the `npm` environment, so it is
+  repo-scoped and survived the move.
+- `--provenance` validates the `repository.url` in `packages/js/package.json`
+  against the repo it is built from. That URL, and the URLs in `pyproject.toml`,
+  `README.md`, `packages/js/README.md`, and `SECURITY.md`, were rewritten to
+  `LunarWerxs/rolodexter`. **Do not publish with a stale owner in that field.**
+- PyPI uses **trusted publishing**, which is pinned on PyPI's side to a specific
+  `owner/repo`. The move invalidates it, so the PyPI publisher must be
+  re-pointed at `LunarWerxs/rolodexter` before the next Python release.
 
 ### 2.9.0 release (2026-07-08)
 
@@ -115,9 +131,75 @@ CI, credentials/trusted publishing, and explicit release approval.
 The CI workflow tests the JavaScript package on Node 20 and Node 24 so the
 declared `>=20` engine floor is covered before release.
 
-The `.github/workflows/npm-publish.yml` workflow is manual and defaults to a
-dry run. Set `dry_run=false` only after the NPM package has token-based
-credentials (`NPM_TOKEN`) or trusted publishing configured for the repository.
+### The 2.9.1 npm gap
+
+`2.9.1` shipped to PyPI and GitHub on 2026-07-10 but sat unpublished on npm
+until 2026-07-18. The cause was structural, not a decision:
+
+- `publish.yml` (PyPI) triggers on `release: [published]`, so cutting the
+  GitHub Release published Python automatically.
+- `npm-publish.yml` triggered on `workflow_dispatch` **only**, and defaulted to
+  `dry_run: true`. Nothing dispatched it, so npm silently stayed at `2.9.0`.
+
+Because the two halves were triggered differently, npm was guaranteed to fall
+behind on every release where someone forgot the manual dispatch. `2.9.0` only
+made it because it was dispatched by hand the day it was cut.
+
+`npm-publish.yml` now also triggers on `release: [published]`, matching
+`publish.yml`, so both registries publish from the same event. The publish step
+is gated on `github.event_name == 'release' || !inputs.dry_run`, which keeps the
+manual dry run as the default for hand-dispatched runs while letting a real
+release publish for real. `workflow_dispatch` is retained for re-runs and
+dry-run pack checks.
+
+## JS Runtime Dependency Weight
+
+Measured 2026-07-18 against the published `rolodexter@2.9.0` with a clean
+`npm i rolodexter --omit=optional`: **19 MB across 7 packages**.
+
+| Package | On disk | Direct? |
+| --- | --- | --- |
+| `libphonenumber-js` | 12 MB | yes |
+| `lodash` | 3.3 MB | no, transitive via `fuzzball` |
+| `rolodexter` | 1.9 MB | n/a |
+| `csv-stringify` | 970 KB | yes |
+| `fuzzball` | 492 KB | yes |
+| `heap`, `setimmediate` | 64 KB | no, transitive via `fuzzball` |
+
+Two things are worth knowing before anyone touches this list.
+
+**`fuzzball` really costs about 3.85 MB, not 492 KB.** It depends on
+`lodash`, `heap`, and `setimmediate`. Worse, the CJS builds already inline it:
+`dist/cjs/index.cjs` contains no `require("fuzzball")` at all, since esbuild
+bundles fuzzball and its lodash tree straight into the output. Its only
+external requires are node builtins, `libphonenumber-js/metadata.max.json`,
+and `unidecode`. So a `require("rolodexter")` consumer receives fuzzball
+inlined in the tarball AND installs 3.85 MB of `node_modules` that is never
+loaded. Only the ESM path (`dist/src/index.js`) imports it from disk.
+
+The Python package already treats this layer as optional: `rapidfuzz` lives in
+the `fuzzy` extra, and `FuzzyMatchStrategy.__init__` in `src/rolodexter/core.py`
+catches the `ImportError`, sets `_available = False`, and `match()` returns
+`None`, leaving the other three strategies running. The JS package makes the
+same layer a hard `dependencies` entry, so every consumer pays for typo
+recovery whether or not they want it.
+
+Moving `fuzzball` to `optionalDependencies` and mirroring the Python guard in
+the JS `FuzzyMatchStrategy` would cut a default install from roughly 19 MB to
+15 MB and make the two packages behave identically. It is not done: it changes
+published behavior, needs test coverage, and interacts with the CJS bundling
+described above.
+
+**`csv-stringify` is used at exactly one call site**, `packages/js/src/cli.ts`
+(the CSV output path), with only `header: true` and `columns`. It has no
+dependencies of its own and is not imported by the library or the CJS bundles,
+so it is only needed when someone runs the CLI. A small internal RFC-4180
+writer would replace it and save 970 KB, at the cost of hand-maintaining quote
+and newline escaping.
+
+`libphonenumber-js` is 12 MB on disk, but its metadata files are only 83 to
+155 KB each; the bulk is shipped source variants, not runtime cost. Leave it
+alone.
 
 ## Dependabot
 

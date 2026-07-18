@@ -1,6 +1,8 @@
 name: Publish to NPM
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -61,7 +63,7 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish to NPM
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'release' || !inputs.dry_run }}
         working-directory: packages/js
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
