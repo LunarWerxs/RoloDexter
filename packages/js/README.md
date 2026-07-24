@@ -160,6 +160,8 @@ mapper.identify("Column X", { value: "jane@test.com" }); // email          heuri
 | `.matched_count` / `.unmatched_count` / `.match_rate` | `number` | Derived from `field_matches` |
 | `.get_match(header)` | `FieldMatch \| null` | How one specific header resolved |
 | `.get_all_phones()` | `string[]` | Every phone-shaped value found, deduped and E.164 |
+| `.get_all_emails()` | `string[]` | Every mapped email value, flattened and deduped |
+| `.get_identity_keys()` | `string[]` | Stable email, phone, and scoped source keys for deduplication |
 | `.explain()` | `string` | Human-readable audit of the whole mapping |
 | `.to_dict()` | `object` | JSON-friendly snapshot |
 
@@ -181,10 +183,31 @@ Warnings:
 | `map_payload(obj)` | Map one record |
 | `map_batch(rows)` | Map an array of records |
 | `map_stream(iterable)` | Map lazily, for files that will not fit in memory |
+| `profile(iterable, { max_rows })` | Aggregate import-readiness diagnostics in constant memory |
 | `compile_schema(headers)` | Resolve a header list **once**, then reuse it across every row |
 | `map_dataframe(df)` | Map a DataFrame-like column store |
 | `identify(header, opts?)` | Resolve a single header without mapping anything |
 | `clear_cache()` / `cache_info()` | Inspect and reset the header cache |
+
+`map_dataframe()` guarantees unique output labels: unmatched source labels are
+reserved before canonical `__N` suffixes are assigned, and duplicate input
+labels are rejected because they cannot be renamed unambiguously. Custom
+`patterns` and `overrides` are validated at construction and raise
+`PatternLoadError` with the invalid section.
+
+`profile()` reports rows and fields seen, aggregate match rate, canonical and
+unmapped counts, strategy usage, and categorized warnings. It accepts every
+normal mapping option and can stop at `max_rows` without consuming the next
+iterator item:
+
+```ts
+const profile = mapper.profile(rows, {
+  max_rows: 1_000,
+  confidence_threshold: 0.8,
+});
+console.log(profile.to_dict());
+console.log(profile.explain());
+```
 
 ## 🎛️ CLI reference
 
@@ -211,6 +234,9 @@ rolodexter fields            List all canonical fields
 | `--quarantine-output <path>` | `<input>.quarantine.jsonl` | Where quarantined rows land |
 | `--max-materialized-rows <n>` | `100000` | Row cap for JSON/CSV output, `0` disables |
 | `--max-json-input-bytes <n>` | `52428800` | Read cap for non-streaming JSON input, `0` disables |
+
+For safety, the quarantine destination must differ from both the input and the
+mapped output path.
 
 ```bash
 # Mailchimp, Salesforce, Google CSV, and an unnamed column, all in one file
@@ -326,6 +352,18 @@ ContactMapper().map_payload({"fname": "jane", "mobile": "(202) 555-0143"}).norma
 ```
 
 ## 📜 Changelog
+
+<details>
+<summary><strong>v2.10.0</strong> · 2026-07-23 · import diagnostics and identity helpers</summary>
+
+<br/>
+
+- **Streaming import profiler**: summarize match readiness, unmapped headers, strategy usage, and warnings without materializing the input.
+- **Identity helpers**: flatten email collisions and generate stable email, phone, and service-scoped source keys.
+- **Safer DataFrame and CLI output**: prevent ambiguous column labels, quarantine overwrites, and concurrent temporary-file collisions.
+- **Validated custom registries**: malformed pattern and override data now fails early with actionable errors.
+
+</details>
 
 <details>
 <summary><strong>v2.9.1</strong> · 2026-07-09 · internal hardening, no public API change</summary>

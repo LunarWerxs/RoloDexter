@@ -134,9 +134,20 @@ for (const item of input.objects ?? []) {
         match_rate: result.match_rate,
         dict: result.to_dict(),
         explain: result.explain(),
+        all_emails: result.get_all_emails(),
         all_phones: result.get_all_phones(),
+        identity_keys: result.get_identity_keys(),
         match_fname: simplify(result.get_match("fname")),
         match_missing: simplify(result.get_match("missing")),
+      };
+    }
+    if (item.kind === "profile_helpers") {
+      const profile = new r.ContactMapper().profile(item.rows, item.options ?? {});
+      return {
+        dict: profile.to_dict(),
+        explain: profile.explain(),
+        match_rate: profile.match_rate,
+        warning_count: profile.warning_count,
       };
     }
     if (item.kind === "schema_helpers") {

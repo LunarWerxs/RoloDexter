@@ -1,13 +1,14 @@
 # Release And Distribution Notes
 
-Last checked: 2026-07-18.
+Last checked: 2026-07-23.
 
 ## Current Package Status
 
 - PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.1`.
 - NPM package: <https://www.npmjs.com/package/rolodexter> — latest published
   `2.9.1`, published from `packages/js` with Sigstore provenance.
-- Local versions in `pyproject.toml` and `packages/js/package.json`: `2.9.1`.
+- Local release-candidate versions in `pyproject.toml` and
+  `packages/js/package.json`: `2.10.0`.
 - Python requirement: `>=3.10`; Node requirement: `>=20`.
 
 Both registries are back in step at `2.9.1`. They were not between 2026-07-10
@@ -32,15 +33,12 @@ lives. Consequences:
   `README.md`, `packages/js/README.md`, and `SECURITY.md`, were rewritten to
   `LunarWerxs/RoloDexter`. **Do not publish with a stale owner in that field.**
 - PyPI uses **trusted publishing**, which is pinned on PyPI's side. The move
-  invalidates it. **Confirmed broken**, not assumed: a manual dispatch of
-  `publish.yml` on 2026-07-18 failed the OIDC exchange with
-  `invalid-publisher: valid token, but no corresponding publisher (Publisher
-  with matching claims was not found)`. PyPI binds to `repository_owner_id`,
-  so an owner change can never silently keep working.
-
-  Fix it at <https://pypi.org/manage/project/rolodexter/settings/publishing/>:
-  delete the stale `Lunarwerx/rolodexter` publisher and add one matching the
-  claims GitHub now sends:
+  initially invalidated it: a manual dispatch of `publish.yml` on 2026-07-18
+  failed the OIDC exchange with `invalid-publisher`. The publisher was
+  reconfigured for the new owner and verified on 2026-07-23: a safe
+  existing-version dispatch completed the OIDC exchange and reached PyPI,
+  where it stopped only because the `2.9.1` wheel already exists. The active
+  publisher matches these claims:
 
   | Field | Value |
   | --- | --- |
@@ -49,11 +47,8 @@ lives. Consequences:
   | Workflow name | `publish.yml` |
   | Environment name | `pypi` |
 
-  To verify without cutting a release, dispatch `publish.yml` manually. PyPI
-  refuses to re-upload an existing version, so the run cannot publish anything.
-  A **fixed** publisher gets past the OIDC exchange and then fails on
-  `File already exists`. A **still-broken** one fails earlier, at the exchange,
-  with `invalid-publisher`. The two failures are unambiguous.
+  The verification run is
+  <https://github.com/LunarWerxs/RoloDexter/actions/runs/30067677802>.
 
 ### 2.9.0 release (2026-07-08)
 

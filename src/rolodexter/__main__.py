@@ -238,6 +238,13 @@ def _default_quarantine_path(args: argparse.Namespace) -> str:
     return f"{base}.quarantine.jsonl"
 
 
+def _same_path(left: str, right: str) -> bool:
+    """Return whether two path spellings resolve to the same filesystem path."""
+    return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(
+        str(Path(right).resolve())
+    )
+
+
 def _write_quarantine_record(
     failure: _RowFailure,
     out: IO[str],
@@ -365,6 +372,16 @@ def _cmd_map(args: argparse.Namespace) -> int:
     stats = _MapStats()
     max_materialized_rows = _optional_limit(args.max_materialized_rows)
     max_json_bytes = _optional_limit(args.max_json_input_bytes)
+    quarantine_path = (
+        _default_quarantine_path(args) if args.on_error == "quarantine" else None
+    )
+    if quarantine_path is not None:
+        if _same_path(quarantine_path, args.input):
+            raise ValueError("quarantine output must differ from the input path")
+        if args.output and _same_path(quarantine_path, args.output):
+            raise ValueError(
+                "quarantine output must differ from the mapped output path"
+            )
 
     with contextlib.ExitStack() as stack:
         out: IO[str] = (
@@ -373,9 +390,7 @@ def _cmd_map(args: argparse.Namespace) -> int:
             else sys.stdout
         )
         quarantine_out: IO[str] | None = None
-        quarantine_path: str | None = None
-        if args.on_error == "quarantine":
-            quarantine_path = _default_quarantine_path(args)
+        if quarantine_path is not None:
             quarantine_out = stack.enter_context(_atomic_output(quarantine_path))
 
         results = _map_row_items(

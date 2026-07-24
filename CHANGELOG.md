@@ -5,6 +5,49 @@ All notable changes to **rolodexter** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.10.0] — 2026-07-23
+
+Minor release: streaming import diagnostics and cross-import identity helpers,
+plus correctness and safety hardening for pattern registries, DataFrames, and
+CLI output.
+
+### Added
+
+- **Streaming import profiler.** `ContactMapper.profile()` now provides
+  constant-memory, batch-level readiness diagnostics in Python and JavaScript:
+  aggregate match rate, canonical and unmapped counts, strategy usage, and
+  categorized warnings. Optional `max_rows` previews do not consume the next
+  iterator item.
+- **Deduplication identity helpers.** `MappingResult.get_all_emails()` flattens
+  email collisions, while `get_identity_keys()` emits normalized, prefixed
+  email, phone, and service-scoped source identifiers for matching contacts
+  across imports.
+
+### Fixed
+
+- **Collision-safe DataFrame output.** Python and JavaScript DataFrame adapters
+  now reserve unmatched source labels when assigning canonical `__N` suffixes,
+  preventing duplicate output columns from hiding contact data. Duplicate input
+  labels are rejected with an actionable error because they cannot be renamed
+  unambiguously.
+- **Safe quarantine destinations.** Both CLIs reject quarantine paths that
+  resolve to the input or mapped output path, preventing accidental overwrite
+  and eliminating a dual-writer collision in streaming JavaScript output.
+- **Validated custom pattern registries.** Malformed field, expansion, and
+  override data now raises `PatternLoadError` at construction rather than
+  leaking low-level exceptions or silently treating a string as individual
+  aliases.
+- **Unique JavaScript atomic temp files.** CLI writes now use exclusive,
+  randomized temporary names so concurrent processes cannot share a temp file.
+
+### Testing
+
+- CI now enforces dependency hygiene, high-confidence dead-code detection, and
+  pylint error checks in addition to Ruff, mypy, tests, parity probes, and
+  package checks.
+
 ## [2.9.1] — 2026-07-09
 
 Patch release: internal hardening with no public API changes.

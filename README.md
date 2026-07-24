@@ -214,6 +214,10 @@ import csv
 with open("contacts.csv") as fh:
     for result in mapper.map_stream(csv.DictReader(fh)):
         save(result.normalized)
+
+# Preview import readiness without retaining mapped rows:
+profile = mapper.profile(contacts, max_rows=1_000)
+print(profile.explain())
 ```
 
 ### 🐼 DataFrames
@@ -280,6 +284,9 @@ print(result.match_rate)        # 0.857
 print(result.matched_count)     # 6
 print(result.unmatched_count)   # 1
 print(result.get_all_phones())  # ['+16502530000']
+print(result.get_all_emails())  # ['jane@example.com']
+print(result.get_identity_keys())
+# ['email:jane@example.com', 'phone:+16502530000', 'source:hubspot:123']
 print(result.to_dict())         # Full JSON-serializable report
 ```
 
@@ -322,11 +329,17 @@ ContactMapper(
 | `map_payload(payload, *, depth, ...)`                     | Normalize an entire dict → `MappingResult`        |
 | `map_batch(payloads, *, ...)`                             | Process a list of payloads → `list[MappingResult]`|
 | `map_stream(iterable, *, ...)`                            | Lazily yield results (constant memory)            |
+| `profile(iterable, *, max_rows, ...)`                     | Aggregate import-readiness diagnostics            |
 | `compile_schema(headers)`                                 | Resolve headers once → reusable `MappingSchema`   |
 | `map_dataframe(df)`                                       | Rename/normalize a pandas DataFrame               |
 | `clear_cache()`                                           | Clear cached header-resolution verdicts           |
 | `cache_info()`                                            | Inspect header cache size/configuration           |
 | `registry`                                                | Access the underlying `PatternRegistry`           |
+
+`map_dataframe()` guarantees unique output labels. It skips reserved
+`<canonical>__N` names when an unmatched source column already uses one, and
+rejects duplicate input labels because they cannot be renamed without
+ambiguity.
 
 ### `FieldMatch`
 
@@ -353,8 +366,25 @@ FieldMatch(
 | `warnings`          | `tuple[str, ...]`        | Non-fatal issues (failed E.164, dropped matches)  |
 | `get_match(header)` | `FieldMatch \| None`     | O(1) lookup of the match for an input header       |
 | `get_all_phones()`  | `list[str]`              | All phone values across all phone-adjacent fields |
+| `get_all_emails()`  | `list[str]`              | All email values, flattened and deduplicated      |
+| `get_identity_keys()` | `list[str]`            | Stable email/phone/source keys for deduplication  |
 | `explain()`         | `str`                    | Human-readable resolution + warnings summary      |
 | `to_dict()`         | `dict`                   | Full JSON-serializable report                     |
+
+### `MappingProfile`
+
+`ContactMapper.profile()` consumes any iterable in constant memory and reports
+rows and fields seen, aggregate match rate, canonical-field counts, unmapped
+header counts, strategy usage, and categorized warnings. Use `max_rows` for a
+bounded preview; the next iterator item is left untouched.
+
+```python
+profile = mapper.profile(rows, max_rows=1_000, confidence_threshold=0.8)
+profile.match_rate
+profile.warning_counts
+profile.to_dict()   # JSON-ready
+profile.explain()   # compact report for logs or a CLI
+```
 
 ### `CanonicalField`
 
@@ -386,6 +416,11 @@ custom = {
 
 mapper = ContactMapper(patterns=custom)
 ```
+
+Custom pattern data is validated when the registry is constructed. `fields`
+must be an object whose values are lists of non-empty aliases; malformed files
+raise `PatternLoadError` with the failing section instead of partially building
+an index.
 
 ## Repository Layout
 

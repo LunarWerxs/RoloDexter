@@ -32,6 +32,7 @@ import {
   is_valid,
   ListNormalizer,
   load_cached,
+  MappingProfile,
   MappingResult,
   MappingSchema,
   MatchStrategy,
@@ -161,7 +162,24 @@ test("pattern registry loads the synced Python truth table", () => {
   );
   assert.throws(
     () => new PatternRegistry({ patterns: [] as never }),
-    { name: "AttributeError", message: "'list' object has no attribute 'get'" },
+    { name: "PatternLoadError", message: "Invalid custom patterns: top level must be an object" },
+  );
+  for (const patterns of [
+    { version: null },
+    { fields: null },
+    { fields: { custom: "alias" } },
+    { fields: { custom: [""] } },
+    { expansion: { form_prefixes: "billing_" } },
+    { expansion: { form_fields: { email: "" } } },
+  ]) {
+    assert.throws(
+      () => new PatternRegistry({ patterns: patterns as never }),
+      { name: "PatternLoadError", message: /Invalid custom patterns/ },
+    );
+  }
+  assert.throws(
+    () => new PatternRegistry({ overrides: { "": "email" } }),
+    { name: "PatternLoadError", message: /Invalid overrides/ },
   );
   assert.throws(
     () => new PatternRegistry({ languages: 123 as never }),
@@ -193,7 +211,7 @@ test("CanonicalField members expose Python enum-like values", () => {
 
 test("root version exports mirror Python package shape", () => {
   assert.equal(__version__, version);
-  assert.equal(__version__, "2.9.1");
+  assert.equal(__version__, "2.10.0");
   assert.deepEqual(__all__, [
     "SUPPORTED_LANGUAGES",
     "AddressNormalizer",
@@ -206,6 +224,7 @@ test("root version exports mirror Python package shape", () => {
     "FuzzyMatchStrategy",
     "HeuristicMatchStrategy",
     "ListNormalizer",
+    "MappingProfile",
     "MappingResult",
     "MappingSchema",
     "MatchStrategy",
@@ -275,6 +294,7 @@ test("core subpath exposes the explicit Python core surface", async () => {
     "FuzzyMatchStrategy",
     "HeuristicMatchStrategy",
     "ListNormalizer",
+    "MappingProfile",
     "MappingResult",
     "MappingSchema",
     "MatchStrategy",
@@ -552,7 +572,7 @@ test("CommonJS consumers can require root and i18n subpath", () => {
   );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "2.9.1 Ada function false false function function false");
+  assert.equal(result.stdout.trim(), "2.10.0 Ada function false false function function false");
 });
 
 test("generate_language can build and cache an i18n pack", async () => {
@@ -683,7 +703,7 @@ test("mapper runtime argument and shape errors mirror Python", () => {
   );
   assert.throws(
     () => new ContactMapper({ patterns: [] as never }),
-    { name: "AttributeError", message: "'list' object has no attribute 'get'" },
+    { name: "PatternLoadError", message: "Invalid custom patterns: top level must be an object" },
   );
 
   const schema = mapper.compile_schema([1, true, null, ["x"]]);
@@ -1104,6 +1124,77 @@ test("map_batch and map_stream agree", () => {
   assert.deepEqual(mapper.map_batch(generatedRows()).map((result) => result.normalized), [
     { first_name: "A" },
     { last_name: "B" },
+  ]);
+});
+
+test("profile summarizes mapping readiness without materializing or overconsuming", () => {
+  function* rows(): Generator<Record<string, unknown>> {
+    yield { fname: "Ada", email: "ADA@EXAMPLE.COM" };
+    yield { "First Name": "Grace", Mystery: "???" };
+    yield { phone: "not a phone" };
+  }
+  const iterator = rows();
+
+  const profile = new ContactMapper().profile(iterator, { max_rows: 2 });
+
+  assert.ok(profile instanceof MappingProfile);
+  assert.equal(profile.rows_seen, 2);
+  assert.equal(profile.fields_seen, 4);
+  assert.equal(profile.matched_count, 3);
+  assert.equal(profile.unmatched_count, 1);
+  assert.equal(profile.match_rate, 0.75);
+  assert.deepEqual(profile.canonical_counts, { first_name: 2, email: 1 });
+  assert.deepEqual(profile.unmapped_counts, { Mystery: 1 });
+  assert.deepEqual(profile.strategy_counts, { exact: 2, normalized: 1, none: 1 });
+  assert.deepEqual(iterator.next().value, { phone: "not a phone" });
+
+  const warningProfile = new ContactMapper().profile([{ phone: "not a phone" }]);
+  assert.equal(warningProfile.warning_count, 1);
+  assert.deepEqual(warningProfile.warning_counts, { phone_normalization: 1 });
+  assert.equal(warningProfile.to_dict().match_rate, 1);
+  assert.match(warningProfile.explain(), /phone_normalization: 1/);
+
+  assert.throws(
+    () => new ContactMapper().profile([], { max_rows: -1 }),
+    { name: "ValueError", message: /non-negative/ },
+  );
+  assert.throws(
+    () => new ContactMapper().profile([], { max_rows: 1.5 }),
+    { name: "TypeError", message: /integer or None/ },
+  );
+});
+
+test("mapping results expose email and identity helpers for deduplication", () => {
+  const result = new MappingResult(
+    {
+      email: [" A@EXAMPLE.COM ", "a@example.com"],
+      phone: ["+12025550143", "+12025550143"],
+      source_service: "HubSpot",
+      source_id: [" 42 ", "42"],
+    },
+    {},
+    [],
+  );
+
+  assert.deepEqual(result.get_all_emails(), [" A@EXAMPLE.COM ", "a@example.com"]);
+  assert.deepEqual(result.get_identity_keys(), [
+    "email:a@example.com",
+    "phone:+12025550143",
+    "source:hubspot:42",
+  ]);
+
+  const multipleServices = new MappingResult(
+    {
+      source_service: ["HubSpot", "Salesforce"],
+      source_id: ["42", "99", "orphan"],
+    },
+    {},
+    [],
+  );
+  assert.deepEqual(multipleServices.get_identity_keys(), [
+    "source:hubspot:42",
+    "source:salesforce:99",
+    "source_id:orphan",
   ]);
 });
 
@@ -1813,6 +1904,59 @@ test("map_dataframe accepts DataFrame-like adapters with columns and rename", ()
   assert.deepEqual(frame.columns, ["fname", "mobile", "Whatever"]);
 });
 
+test("map_dataframe preserves unmatched suffix columns and rejects duplicate labels", () => {
+  class FakeFrame {
+    [key: string]: unknown;
+
+    constructor(
+      public columns: string[],
+      public data: Record<string, unknown[]>,
+    ) {}
+
+    rename(args: { columns: Record<string, string> } | Record<string, string>): FakeFrame {
+      const names = ((args as { columns?: Record<string, string> }).columns ?? args) as Record<string, string>;
+      return new FakeFrame(
+        this.columns.map((column) => names[column] ?? column),
+        Object.fromEntries(
+          this.columns.map((column) => [names[column] ?? column, [...(this.data[column] ?? [])]]),
+        ),
+      );
+    }
+
+    get(column: string): unknown[] {
+      return this.data[column] ?? [];
+    }
+
+    set(column: string, values: unknown): void {
+      this.data[column] = Array.isArray(values) ? values : [values];
+    }
+  }
+
+  const mapper = new ContactMapper({
+    patterns: { fields: { custom: ["source_a", "source_b"] } },
+  });
+  const mapped = mapper.map_dataframe(
+    new FakeFrame(
+      ["source_a", "source_b", "custom__2"],
+      { source_a: ["one"], source_b: ["two"], custom__2: ["keep"] },
+    ),
+    { normalize: false },
+  ) as FakeFrame;
+
+  assert.deepEqual(mapped.columns, ["custom", "custom__3", "custom__2"]);
+  assert.deepEqual(mapped.data, {
+    custom: ["one"],
+    custom__3: ["two"],
+    custom__2: ["keep"],
+  });
+  assert.throws(
+    () => new ContactMapper().map_dataframe(
+      new FakeFrame(["fname", "fname"], { fname: ["Ada"] }),
+    ),
+    { name: "ValueError", message: /unique input column labels/ },
+  );
+});
+
 test("map_dataframe honors normalize, strict, and threshold options", () => {
   const mapper = new ContactMapper();
   class TinyFrame {
@@ -2097,6 +2241,49 @@ test("CLI can quarantine bad JSONL rows", () => {
     const bad = JSON.parse(readFileSync(quarantine, "utf8").trim()) as { row: number; error: string };
     assert.equal(bad.row, 2);
     assert.equal(bad.error, "invalid JSON: Expecting value");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI quarantine paths cannot overwrite input or mapped output", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rolodexter-js-cli-"));
+  try {
+    const input = join(dir, "contacts.jsonl");
+    const output = join(dir, "out.jsonl");
+    const originalInput = '{"fname":"Jane"}\nnot json\n';
+    writeFileSync(input, originalInput, "utf8");
+    writeFileSync(output, "existing\n", "utf8");
+
+    const inputCollision = runCli([
+      "map",
+      input,
+      "--format",
+      "jsonl",
+      "--on-error",
+      "quarantine",
+      "--quarantine-output",
+      input,
+    ]);
+    assert.equal(inputCollision.status, 1);
+    assert.match(inputCollision.stderr, /quarantine output must differ from the input path/);
+    assert.equal(readFileSync(input, "utf8"), originalInput);
+
+    const outputCollision = runCli([
+      "map",
+      input,
+      "-o",
+      output,
+      "--format",
+      "jsonl",
+      "--on-error",
+      "quarantine",
+      "--quarantine-output",
+      output,
+    ]);
+    assert.equal(outputCollision.status, 1);
+    assert.match(outputCollision.stderr, /quarantine output must differ from the mapped output path/);
+    assert.equal(readFileSync(output, "utf8"), "existing\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

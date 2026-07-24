@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rolodexter"
-version = "2.9.1"
+version = "2.10.0"
 description = "The universal contact field mapper — route messy, inconsistent contact data to a clean canonical schema."
 readme = "README.md"
 license = "MIT"
@@ -131,7 +131,7 @@ known-first-party = ["rolodexter"]
 exclude = ["build"]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["pytest-cov", "ruff", "mypy", "deptry", "vulture", "pylint"]
+DEP002 = ["pytest-cov", "ruff", "mypy", "deptry", "vulture", "pylint", "numpy"]
 DEP003 = ["rolodexter"]
 
 # ── Mypy ──────────────────────────────────────────────────────────────

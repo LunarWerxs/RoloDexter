@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createReadStream, createWriteStream, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { createReadStream, createWriteStream, existsSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { WriteStream } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -946,9 +947,9 @@ function writeAtomic(path: string | undefined, text: string): void {
     writeStdout(text);
     return;
   }
-  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(temp, text, "utf8");
+    writeFileSync(temp, text, { encoding: "utf8", flag: "wx" });
     renameSync(temp, path);
   } catch (error) {
     try {
@@ -1002,8 +1003,8 @@ function createTextWriter(path: string | undefined): TextWriter {
     };
   }
 
-  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  const stream = createWriteStream(temp, { encoding: "utf8" });
+  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+  const stream = createWriteStream(temp, { encoding: "utf8", flags: "wx" });
   stream.on("error", () => {
     // Python's atomic context cleanup reports the original row error only.
   });
@@ -1056,6 +1057,20 @@ function defaultQuarantinePath(args: MapArgs): string {
   return args.quarantineOutput || `${args.output || args.input}.quarantine.jsonl`;
 }
 
+function comparablePath(path: string): string {
+  let absolute = resolve(path);
+  try {
+    absolute = realpathSync.native(absolute);
+  } catch {
+    try {
+      absolute = join(realpathSync.native(dirname(absolute)), basename(absolute));
+    } catch {
+      // A missing parent will be reported when the writer is opened.
+    }
+  }
+  return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+}
+
 async function handleFailure(
   failure: RowFailure,
   args: MapArgs,
@@ -1105,6 +1120,17 @@ async function commandMap(argv: string[]): Promise<number> {
   if (!existsSync(args.input)) {
     throw new Error(fileNotFoundMessage(args.input));
   }
+  const quarantinePath = args.onError === "quarantine" ? defaultQuarantinePath(args) : undefined;
+  if (quarantinePath && comparablePath(quarantinePath) === comparablePath(args.input)) {
+    throw new Error("quarantine output must differ from the input path");
+  }
+  if (
+    quarantinePath &&
+    args.output &&
+    comparablePath(quarantinePath) === comparablePath(args.output)
+  ) {
+    throw new Error("quarantine output must differ from the mapped output path");
+  }
   const items = readRows(args.input, inputFormat, args.maxJsonInputBytes);
   const results: ReturnType<ContactMapper["map_payload"]>[] = [];
   const quarantine: RowFailure[] = [];
@@ -1112,7 +1138,6 @@ async function commandMap(argv: string[]): Promise<number> {
   let count = 0;
   const streamJsonl = outputFormat === "jsonl";
   const outputWriter = streamJsonl ? createTextWriter(args.output) : undefined;
-  const quarantinePath = args.onError === "quarantine" ? defaultQuarantinePath(args) : undefined;
   const quarantineWriter = streamJsonl && quarantinePath ? createTextWriter(quarantinePath) : undefined;
 
   try {

@@ -258,6 +258,10 @@ export interface MapPayloadOptions {
   confidence_threshold?: number;
 }
 
+export interface ProfileOptions extends Omit<MapPayloadOptions, "service"> {
+  max_rows?: number | null;
+}
+
 export interface CompileSchemaOptions {
   default_region?: string | null;
   strict?: boolean;
@@ -1204,21 +1208,88 @@ function normalizeAlias(alias: string): string {
   return alias.toLowerCase().trim();
 }
 
+function validatePatternData(data: unknown, source: string): PatternData {
+  const fail = (detail: string): never => {
+    throw new PatternLoadError(`Invalid ${source}: ${detail}`);
+  };
+  const validateStringArray = (value: unknown, name: string): void => {
+    if (
+      !Array.isArray(value) ||
+      value.some((item) => typeof item !== "string" || item.trim().length === 0)
+    ) {
+      fail(`${name} must be a list of non-empty strings`);
+    }
+  };
+
+  if (!isPlainObject(data)) {
+    fail("top level must be an object");
+  }
+  const root = data as Record<string, unknown>;
+  if (root.version !== undefined && typeof root.version !== "string") {
+    fail("'version' must be a string");
+  }
+
+  const fields = root.fields === undefined ? {} : root.fields;
+  if (!isPlainObject(fields)) {
+    fail("'fields' must be an object");
+  }
+  const fieldRecord = fields as Record<string, unknown>;
+  for (const [canonical, aliases] of Object.entries(fieldRecord)) {
+    if (!canonical.trim()) {
+      fail("field names must be non-empty strings");
+    }
+    validateStringArray(aliases, `aliases for field ${pyRepr(canonical)}`);
+  }
+
+  const expansion = root.expansion;
+  if (expansion !== undefined && expansion !== null) {
+    if (!isPlainObject(expansion)) {
+      fail("'expansion' must be an object");
+    }
+    const expansionRecord = expansion as Record<string, unknown>;
+    for (const key of ["form_prefixes", "social_suffixes", "social_fields"]) {
+      if (expansionRecord[key] !== undefined) {
+        validateStringArray(expansionRecord[key], `'expansion.${key}'`);
+      }
+    }
+    const formFields = expansionRecord.form_fields;
+    if (formFields !== undefined) {
+      if (
+        !isPlainObject(formFields) ||
+        Object.entries(formFields).some(
+          ([key, value]) =>
+            !key.trim() || typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        fail(
+          "'expansion.form_fields' must be an object of non-empty string keys and values",
+        );
+      }
+    }
+  }
+
+  return root as PatternData;
+}
+
 function loadDefaultPatterns(): PatternData {
+  let data: unknown;
   try {
     const path = fileURLToPath(new URL("./patterns.json", moduleUrl));
-    return JSON.parse(readFileSync(path, "utf8")) as PatternData;
+    data = JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
     throw new PatternLoadError(`Failed to load bundled patterns: ${String(error)}`);
   }
+  return validatePatternData(data, "bundled patterns");
 }
 
 function loadPatternFile(path: string): PatternData {
+  let data: unknown;
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as PatternData;
+    data = JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
     throw new PatternLoadError(`Failed to load patterns from ${path}: ${String(error)}`);
   }
+  return validatePatternData(data, `patterns file ${pyRepr(path)}`);
 }
 
 function packageI18nDir(): string | undefined {
@@ -1822,10 +1893,11 @@ export class PatternRegistry {
     }
     const patternsPath = options.patterns_path;
     const patterns = options.patterns;
-    if (patterns !== null && patterns !== undefined && !isPlainObject(patterns)) {
-      throw attributeError(`'${pythonTypeName(patterns)}' object has no attribute 'get'`);
-    }
-    this.#data = patterns ?? (patternsPath ? loadPatternFile(patternsPath) : loadDefaultPatterns());
+    this.#data = patterns !== null && patterns !== undefined
+      ? validatePatternData(patterns, "custom patterns")
+      : patternsPath
+        ? loadPatternFile(patternsPath)
+        : loadDefaultPatterns();
     this.#languages = options.languages;
     this.#buildIndexes();
     this.#applyOverrides(options.overrides ?? undefined);
@@ -1938,7 +2010,15 @@ export class PatternRegistry {
     if (!overrides) {
       return;
     }
+    if (!isPlainObject(overrides)) {
+      throw new PatternLoadError("Invalid overrides: expected an object");
+    }
     for (const [alias, canonical] of Object.entries(overrides)) {
+      if (!alias.trim() || typeof canonical !== "string" || !canonical.trim()) {
+        throw new PatternLoadError(
+          "Invalid overrides: aliases and canonical fields must be non-empty strings",
+        );
+      }
       const key = normalizeAlias(alias);
       this.#reverseIndex.set(key, canonical);
       if (!this.#aliasSet.has(key)) {
@@ -1946,6 +2026,93 @@ export class PatternRegistry {
         this.#aliases.push(key);
       }
     }
+  }
+}
+
+export class MappingProfile {
+  readonly rows_seen: number;
+  readonly fields_seen: number;
+  readonly matched_count: number;
+  readonly unmatched_count: number;
+  readonly canonical_counts: Record<string, number>;
+  readonly unmapped_counts: Record<string, number>;
+  readonly strategy_counts: Record<string, number>;
+  readonly warning_counts: Record<string, number>;
+
+  constructor(
+    rows_seen: number,
+    fields_seen: number,
+    matched_count: number,
+    unmatched_count: number,
+    canonical_counts: Record<string, number>,
+    unmapped_counts: Record<string, number>,
+    strategy_counts: Record<string, number>,
+    warning_counts: Record<string, number>,
+  ) {
+    this.rows_seen = rows_seen;
+    this.fields_seen = fields_seen;
+    this.matched_count = matched_count;
+    this.unmatched_count = unmatched_count;
+    this.canonical_counts = canonical_counts;
+    this.unmapped_counts = unmapped_counts;
+    this.strategy_counts = strategy_counts;
+    this.warning_counts = warning_counts;
+    lockPythonFrozenFields(this, [
+      "rows_seen",
+      "fields_seen",
+      "matched_count",
+      "unmatched_count",
+      "canonical_counts",
+      "unmapped_counts",
+      "strategy_counts",
+      "warning_counts",
+    ]);
+  }
+
+  get match_rate(): number {
+    return this.fields_seen === 0 ? 0 : this.matched_count / this.fields_seen;
+  }
+
+  get warning_count(): number {
+    return Object.values(this.warning_counts).reduce((total, count) => total + count, 0);
+  }
+
+  to_dict(): Record<string, unknown> {
+    return {
+      rows_seen: this.rows_seen,
+      fields_seen: this.fields_seen,
+      matched: this.matched_count,
+      unmatched: this.unmatched_count,
+      match_rate: Number(this.match_rate.toFixed(4)),
+      warning_count: this.warning_count,
+      canonical_counts: { ...this.canonical_counts },
+      unmapped_counts: { ...this.unmapped_counts },
+      strategy_counts: { ...this.strategy_counts },
+      warning_counts: { ...this.warning_counts },
+    };
+  }
+
+  explain(): string {
+    const lines = [
+      `Profile: ${this.rows_seen} row(s), ${this.fields_seen} field(s), ${this.matched_count} matched, ${this.unmatched_count} unmatched (match rate ${Math.round(this.match_rate * 100)}%), ${this.warning_count} warning(s)`,
+    ];
+    const section = (title: string, values: Record<string, number>): void => {
+      const entries = Object.entries(values).sort(
+        ([leftKey, leftCount], [rightKey, rightCount]) =>
+          (rightCount - leftCount) || leftKey.localeCompare(rightKey),
+      );
+      if (entries.length === 0) {
+        return;
+      }
+      lines.push(`${title}:`);
+      for (const [key, count] of entries) {
+        lines.push(`  ${key}: ${count}`);
+      }
+    };
+    section("Canonical fields", this.canonical_counts);
+    section("Unmapped headers", this.unmapped_counts);
+    section("Warnings", this.warning_counts);
+    return lines.join("\n");
   }
 }
 
@@ -2030,6 +2197,66 @@ export class MappingResult {
       }
     }
     return [...new Set(phones)];
+  }
+
+  get_all_emails(): string[] {
+    const value = this.normalized.email;
+    const emails = Array.isArray(value) ? value : [value];
+    const result: string[] = [];
+    for (const email of emails) {
+      if (email == null) {
+        continue;
+      }
+      const text = pyString(email);
+      if (!result.includes(text)) {
+        result.push(text);
+      }
+    }
+    return result;
+  }
+
+  get_identity_keys(): string[] {
+    const keys: string[] = [];
+    const add = (key: string): void => {
+      if (key && !keys.includes(key)) {
+        keys.push(key);
+      }
+    };
+
+    for (const email of this.get_all_emails()) {
+      const text = email.trim().toLowerCase();
+      if (text) {
+        add(`email:${text}`);
+      }
+    }
+    for (const phone of this.get_all_phones()) {
+      const text = phone.trim();
+      if (text) {
+        add(`phone:${text}`);
+      }
+    }
+
+    const rawIds = this.normalized.source_id;
+    const sourceIds = Array.isArray(rawIds) ? rawIds : [rawIds];
+    const rawService = this.normalized.source_service;
+    const services = Array.isArray(rawService) ? rawService : [rawService];
+    const normalizedServices = services.map((value) =>
+      value == null ? "" : pyString(value).trim().toLowerCase()
+    );
+    for (const [index, sourceId] of sourceIds.entries()) {
+      if (sourceId == null) {
+        continue;
+      }
+      const text = pyString(sourceId).trim();
+      if (text) {
+        const service = normalizedServices.length === 1
+          ? normalizedServices[0]
+          : (normalizedServices[index] ?? "");
+        const prefix = service ? `source:${service}` : "source_id";
+        add(`${prefix}:${text}`);
+      }
+    }
+    return keys;
   }
 
   to_dict(): Record<string, unknown> {
@@ -2178,6 +2405,7 @@ const CONTACT_MAPPER_OPTION_KEYS = new Set([
 
 const IDENTIFY_OPTION_KEYS = new Set(["value", "service", "default_region"]);
 const MAP_PAYLOAD_OPTION_KEYS = new Set(["depth", "service", "default_region", "extract_embedded_phones", "strict", "confidence_threshold"]);
+const PROFILE_OPTION_KEYS = new Set(["max_rows", "depth", "default_region", "extract_embedded_phones", "strict", "confidence_threshold"]);
 const COMPILE_SCHEMA_OPTION_KEYS = new Set(["default_region", "strict", "confidence_threshold"]);
 const MAP_DATAFRAME_OPTION_KEYS = new Set(["default_region", "normalize", "strict", "confidence_threshold"]);
 
@@ -3338,6 +3566,82 @@ export class ContactMapper {
     }
   }
 
+  profile(payloads: Iterable<Record<string, unknown>>, options: ProfileOptions = {}): MappingProfile {
+    assertPythonMethodOptions("ContactMapper.profile", "payloads", arguments.length, options);
+    assertPythonOptionsKeys("ContactMapper.profile", options, PROFILE_OPTION_KEYS);
+    const opts = options ?? {};
+    const maxRows = opts.max_rows;
+    if (
+      maxRows !== null &&
+      maxRows !== undefined &&
+      (typeof maxRows !== "number" || !Number.isInteger(maxRows))
+    ) {
+      throw new TypeError("max_rows must be an integer or None");
+    }
+    if (maxRows !== null && maxRows !== undefined && maxRows < 0) {
+      throw valueError("max_rows must be non-negative or None");
+    }
+
+    const canonicalCounts = new Map<string, number>();
+    const unmappedCounts = new Map<string, number>();
+    const strategyCounts = new Map<string, number>();
+    const warningCounts = new Map<string, number>();
+    const increment = (counts: Map<string, number>, key: string): void => {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    };
+    let rowsSeen = 0;
+    let matchedCount = 0;
+    let unmatchedCount = 0;
+    const iterator = payloads[Symbol.iterator]();
+
+    while (maxRows === null || maxRows === undefined || rowsSeen < maxRows) {
+      const next = iterator.next();
+      if (next.done) {
+        break;
+      }
+      const result = this.map_payload(next.value, {
+        depth: opts.depth,
+        default_region: opts.default_region,
+        extract_embedded_phones: opts.extract_embedded_phones,
+        strict: opts.strict,
+        confidence_threshold: opts.confidence_threshold,
+      });
+      rowsSeen += 1;
+      for (const match of result.field_matches) {
+        increment(strategyCounts, match.strategy);
+        if (isMatched(match)) {
+          matchedCount += 1;
+          increment(canonicalCounts, match.canonical);
+        } else {
+          unmatchedCount += 1;
+          increment(unmappedCounts, match.original);
+        }
+      }
+      for (const warning of result.warnings) {
+        let category = "other";
+        if (warning.includes("dropped low-confidence match")) {
+          category = "low_confidence";
+        } else if (warning.includes("could not be normalized to E.164")) {
+          category = "phone_normalization";
+        } else if (warning.includes("embedded phone")) {
+          category = "embedded_phone_limit";
+        }
+        increment(warningCounts, category);
+      }
+    }
+
+    return new MappingProfile(
+      rowsSeen,
+      matchedCount + unmatchedCount,
+      matchedCount,
+      unmatchedCount,
+      Object.fromEntries(canonicalCounts),
+      Object.fromEntries(unmappedCounts),
+      Object.fromEntries(strategyCounts),
+      Object.fromEntries(warningCounts),
+    );
+  }
+
   compile_schema(headers: Iterable<unknown>, options: CompileSchemaOptions = {}): MappingSchema {
     assertPythonMethodOptions("ContactMapper.compile_schema", "headers", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.compile_schema", options, COMPILE_SCHEMA_OPTION_KEYS);
@@ -3394,17 +3698,33 @@ export class ContactMapper {
       strict: isStrict,
       confidence_threshold: threshold,
     });
+    if (new Set(columns).size !== columns.length) {
+      throw valueError(
+        "map_dataframe requires unique input column labels; duplicate labels cannot be renamed without ambiguity",
+      );
+    }
     const rename = new Map<string, string>();
-    const seenCanonical = new Map<string, number>();
+    const usedNames = new Set(
+      columns.filter((column) => {
+        const match = schema.matches.get(column);
+        return !match || !isMatched(match);
+      }),
+    );
+    const nextSuffix = new Map<string, number>();
     for (const column of columns) {
       const match = schema.matches.get(column);
       if (!match || !isMatched(match)) {
         continue;
       }
-      const current = seenCanonical.get(match.canonical) ?? 0;
-      seenCanonical.set(match.canonical, current + 1);
-      const newName = current === 0 ? match.canonical : `${match.canonical}__${current + 1}`;
-      if (current > 0) {
+      let suffix = nextSuffix.get(match.canonical) ?? 1;
+      let newName = suffix === 1 ? match.canonical : `${match.canonical}__${suffix}`;
+      while (usedNames.has(newName)) {
+        suffix += 1;
+        newName = `${match.canonical}__${suffix}`;
+      }
+      nextSuffix.set(match.canonical, suffix + 1);
+      usedNames.add(newName);
+      if (newName !== match.canonical) {
         emitRolodexterWarning(
           `map_dataframe: column ${pyRepr(column)} also maps to ${pyRepr(match.canonical)}; renamed to ${pyRepr(newName)} to avoid a collision`,
         );
@@ -3671,6 +3991,7 @@ export const __all__ = [
   "FuzzyMatchStrategy",
   "HeuristicMatchStrategy",
   "ListNormalizer",
+  "MappingProfile",
   "MappingResult",
   "MappingSchema",
   "MatchStrategy",
@@ -3699,5 +4020,5 @@ export const __all__ = [
   "parse",
 ] as const;
 
-export const version = "2.9.1";
+export const version = "2.10.0";
 export const __version__ = version;

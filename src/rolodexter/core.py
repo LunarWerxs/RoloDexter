@@ -15,7 +15,7 @@ import re
 import threading
 from abc import ABC, abstractmethod
 from bisect import bisect_left, bisect_right
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, unique
@@ -183,6 +183,7 @@ __all__ = [
     "FuzzyMatchStrategy",
     "HeuristicMatchStrategy",
     "ListNormalizer",
+    "MappingProfile",
     "MappingResult",
     "MappingSchema",
     "MatchStrategy",
@@ -335,6 +336,70 @@ class MappingResult:
                 result.append(p)
         return result
 
+    def get_all_emails(self) -> list[str]:
+        """Return every email value from ``normalized``, deduplicated.
+
+        Email collisions are represented as a list by the mapper. This helper
+        provides the same flat, order-preserving convenience as
+        :meth:`get_all_phones`.
+        """
+        value = self.normalized.get("email")
+        emails = value if isinstance(value, list) else [value]
+        result: list[str] = []
+        for email in emails:
+            if email is None:
+                continue
+            text = str(email)
+            if text not in result:
+                result.append(text)
+        return result
+
+    def get_identity_keys(self) -> list[str]:
+        """Return stable, prefixed identifiers suitable for deduplication.
+
+        Keys are emitted in deterministic order from normalized emails,
+        phones, and source IDs. Prefixes keep unlike identifiers in separate
+        namespaces, while ``source_service`` scopes vendor IDs when available.
+        Empty values are ignored and duplicates are removed.
+        """
+        keys: list[str] = []
+
+        def add(key: str) -> None:
+            if key and key not in keys:
+                keys.append(key)
+
+        for email in self.get_all_emails():
+            text = email.strip().lower()
+            if text:
+                add(f"email:{text}")
+        for phone in self.get_all_phones():
+            text = phone.strip()
+            if text:
+                add(f"phone:{text}")
+
+        raw_ids = self.normalized.get("source_id")
+        source_ids = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+        raw_service = self.normalized.get("source_service")
+        services = raw_service if isinstance(raw_service, list) else [raw_service]
+        normalized_services = [
+            str(value).strip().lower() if value is not None else ""
+            for value in services
+        ]
+        for index, source_id in enumerate(source_ids):
+            if source_id is None:
+                continue
+            text = str(source_id).strip()
+            if text:
+                if len(normalized_services) == 1:
+                    service = normalized_services[0]
+                elif index < len(normalized_services):
+                    service = normalized_services[index]
+                else:
+                    service = ""
+                prefix = f"source:{service}" if service else "source_id"
+                add(f"{prefix}:{text}")
+        return keys
+
     def to_dict(self) -> dict[str, Any]:
         # Single pass over field_matches: count and serialize together.
         matched = 0
@@ -361,6 +426,67 @@ class MappingResult:
             "warnings": list(self.warnings),
             "details": details,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class MappingProfile:
+    """Aggregate mapping diagnostics for a batch or stream of contacts."""
+
+    rows_seen: int
+    fields_seen: int
+    matched_count: int
+    unmatched_count: int
+    canonical_counts: dict[str, int]
+    unmapped_counts: dict[str, int]
+    strategy_counts: dict[str, int]
+    warning_counts: dict[str, int]
+
+    @property
+    def match_rate(self) -> float:
+        """Fraction of mapping decisions that resolved to a canonical field."""
+        return self.matched_count / self.fields_seen if self.fields_seen else 0.0
+
+    @property
+    def warning_count(self) -> int:
+        """Total warnings observed across the profiled rows."""
+        return sum(self.warning_counts.values())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable profile report."""
+        return {
+            "rows_seen": self.rows_seen,
+            "fields_seen": self.fields_seen,
+            "matched": self.matched_count,
+            "unmatched": self.unmatched_count,
+            "match_rate": round(self.match_rate, 4),
+            "warning_count": self.warning_count,
+            "canonical_counts": dict(self.canonical_counts),
+            "unmapped_counts": dict(self.unmapped_counts),
+            "strategy_counts": dict(self.strategy_counts),
+            "warning_counts": dict(self.warning_counts),
+        }
+
+    def explain(self) -> str:
+        """Return a compact human-readable import-readiness report."""
+        lines = [
+            f"Profile: {self.rows_seen} row(s), {self.fields_seen} field(s), "
+            f"{self.matched_count} matched, {self.unmatched_count} unmatched "
+            f"(match rate {self.match_rate:.0%}), {self.warning_count} warning(s)"
+        ]
+
+        def section(title: str, values: dict[str, int]) -> None:
+            if not values:
+                return
+            lines.append(f"{title}:")
+            for key, count in sorted(
+                values.items(), key=lambda item: (-item[1], item[0])
+            ):
+                lines.append(f"  {key}: {count}")
+
+        section("Canonical fields", self.canonical_counts)
+        section("Unmapped headers", self.unmapped_counts)
+        section("Warnings", self.warning_counts)
+        return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -753,7 +879,7 @@ class PatternRegistry:
         overrides: dict[str, str] | None = None,
     ) -> None:
         if patterns is not None:
-            self._data = patterns
+            self._data = self._validate_data(patterns, source="custom patterns")
         elif patterns_path is not None:
             self._data = self._load_from_path(patterns_path)
         else:
@@ -774,20 +900,80 @@ class PatternRegistry:
     def _load_from_path(path: str) -> dict[str, Any]:
         try:
             with open(path, encoding="utf-8") as fh:
-                return cast(dict[str, Any], json.load(fh))
+                data = json.load(fh)
         except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
             raise PatternLoadError(
                 f"Failed to load patterns from {path}: {exc}"
             ) from exc
+        return PatternRegistry._validate_data(data, source=f"patterns file {path!r}")
 
     @staticmethod
     def _load_default() -> dict[str, Any]:
         try:
             pkg = resources.files("rolodexter")
             text = pkg.joinpath("patterns.json").read_text(encoding="utf-8")
-            return cast(dict[str, Any], json.loads(text))
+            data = json.loads(text)
         except Exception as exc:
             raise PatternLoadError(f"Failed to load bundled patterns: {exc}") from exc
+        return PatternRegistry._validate_data(data, source="bundled patterns")
+
+    @staticmethod
+    def _validate_data(data: Any, *, source: str) -> dict[str, Any]:
+        """Validate a pattern registry before building indexes from it.
+
+        Custom registries are part of the public API, so malformed data should
+        fail once with an actionable :class:`PatternLoadError` instead of
+        leaking an ``AttributeError`` midway through index construction (or,
+        worse, treating a string as a sequence of one-character aliases).
+        """
+
+        def fail(detail: str) -> None:
+            raise PatternLoadError(f"Invalid {source}: {detail}")
+
+        def string_list(value: Any, name: str) -> None:
+            if not isinstance(value, list) or any(
+                not isinstance(item, str) or not item.strip() for item in value
+            ):
+                fail(f"{name} must be a list of non-empty strings")
+
+        if not isinstance(data, dict):
+            fail("top level must be an object")
+
+        if "version" in data and not isinstance(data["version"], str):
+            fail("'version' must be a string")
+
+        fields = data.get("fields", {})
+        if not isinstance(fields, dict):
+            fail("'fields' must be an object")
+        for canonical, aliases in fields.items():
+            if not isinstance(canonical, str) or not canonical.strip():
+                fail("field names must be non-empty strings")
+            string_list(aliases, f"aliases for field {canonical!r}")
+
+        expansion = data.get("expansion")
+        if expansion is not None:
+            if not isinstance(expansion, dict):
+                fail("'expansion' must be an object")
+            for key in ("form_prefixes", "social_suffixes", "social_fields"):
+                if key in expansion:
+                    string_list(expansion[key], f"'expansion.{key}'")
+            if "form_fields" in expansion:
+                form_fields = expansion["form_fields"]
+                if not isinstance(form_fields, dict) or any(
+                    not isinstance(key, str)
+                    or not key.strip()
+                    or not isinstance(value, str)
+                    or not value.strip()
+                    for key, value in (
+                        form_fields.items() if isinstance(form_fields, dict) else ()
+                    )
+                ):
+                    fail(
+                        "'expansion.form_fields' must be an object of "
+                        "non-empty string keys and values"
+                    )
+
+        return cast(dict[str, Any], data)
 
     def _add_alias(self, key: str, canonical: str) -> None:
         """Register *key* → *canonical* (first-write-wins on reverse_index)
@@ -871,7 +1057,19 @@ class PatternRegistry:
         """
         if not overrides:
             return
+        if not isinstance(overrides, dict):
+            raise PatternLoadError("Invalid overrides: expected an object")
         for alias, canonical in overrides.items():
+            if (
+                not isinstance(alias, str)
+                or not alias.strip()
+                or not isinstance(canonical, str)
+                or not canonical.strip()
+            ):
+                raise PatternLoadError(
+                    "Invalid overrides: aliases and canonical fields must be "
+                    "non-empty strings"
+                )
             key = alias.lower().strip()
             self._reverse_index[key] = canonical  # highest priority
             if key not in self._alias_set:
@@ -2038,6 +2236,83 @@ class ContactMapper:
                 confidence_threshold=confidence_threshold,
             )
 
+    def profile(
+        self,
+        payloads: Iterable[dict[str, Any]],
+        *,
+        max_rows: int | None = None,
+        depth: int = 1,
+        default_region: str | None = None,
+        extract_embedded_phones: bool = False,
+        strict: bool | None = None,
+        confidence_threshold: float | None = None,
+    ) -> MappingProfile:
+        """Summarize mapping quality across a batch or stream.
+
+        The profiler keeps counters rather than materializing mapped rows, so
+        memory use stays bounded for large imports. ``max_rows`` can limit a
+        preview without consuming an additional item from an input iterator.
+        Existing mapping semantics and options are reused unchanged.
+        """
+        if max_rows is not None:
+            if not isinstance(max_rows, int) or isinstance(max_rows, bool):
+                raise TypeError("max_rows must be an integer or None")
+            if max_rows < 0:
+                raise ValueError("max_rows must be non-negative or None")
+
+        canonical_counts: Counter[str] = Counter()
+        unmapped_counts: Counter[str] = Counter()
+        strategy_counts: Counter[str] = Counter()
+        warning_counts: Counter[str] = Counter()
+        rows_seen = 0
+        matched_count = 0
+        unmatched_count = 0
+        iterator = iter(payloads)
+
+        while max_rows is None or rows_seen < max_rows:
+            try:
+                payload = next(iterator)
+            except StopIteration:
+                break
+            result = self.map_payload(
+                payload,
+                depth=depth,
+                default_region=default_region,
+                extract_embedded_phones=extract_embedded_phones,
+                strict=strict,
+                confidence_threshold=confidence_threshold,
+            )
+            rows_seen += 1
+            for match in result.field_matches:
+                strategy_counts[match.strategy] += 1
+                if match.is_matched:
+                    matched_count += 1
+                    canonical_counts[match.canonical] += 1
+                else:
+                    unmatched_count += 1
+                    unmapped_counts[match.original] += 1
+            for warning in result.warnings:
+                if "dropped low-confidence match" in warning:
+                    category = "low_confidence"
+                elif "could not be normalized to E.164" in warning:
+                    category = "phone_normalization"
+                elif "embedded phone" in warning:
+                    category = "embedded_phone_limit"
+                else:
+                    category = "other"
+                warning_counts[category] += 1
+
+        return MappingProfile(
+            rows_seen=rows_seen,
+            fields_seen=matched_count + unmatched_count,
+            matched_count=matched_count,
+            unmatched_count=unmatched_count,
+            canonical_counts=dict(canonical_counts),
+            unmapped_counts=dict(unmapped_counts),
+            strategy_counts=dict(strategy_counts),
+            warning_counts=dict(warning_counts),
+        )
+
     def compile_schema(
         self,
         headers: Iterable[str],
@@ -2136,16 +2411,36 @@ class ContactMapper:
             confidence_threshold=threshold,
         )
 
+        columns = list(df.columns)
+        if len(columns) != len(set(columns)):
+            raise ValueError(
+                "map_dataframe requires unique input column labels; duplicate "
+                "labels cannot be renamed without ambiguity"
+            )
+
         rename: dict[Any, str] = {}
-        seen: dict[str, int] = {}
-        for col in df.columns:
+        # Unmatched labels remain in the output. Reserve them before assigning
+        # canonical names so a generated ``<canonical>__N`` label cannot
+        # collide with an untouched source column and silently hide data.
+        used_names: set[Any] = {
+            col
+            for col in columns
+            if (match := schema.matches.get(str(col))) is None or not match.is_matched
+        }
+        next_suffix: dict[str, int] = {}
+        for col in columns:
             match = schema.matches.get(str(col))
             if match is None or not match.is_matched:
                 continue
             canonical = match.canonical
-            if canonical in seen:
-                seen[canonical] += 1
-                new_name = f"{canonical}__{seen[canonical]}"
+            suffix = next_suffix.get(canonical, 1)
+            new_name = canonical if suffix == 1 else f"{canonical}__{suffix}"
+            while new_name in used_names:
+                suffix += 1
+                new_name = f"{canonical}__{suffix}"
+            next_suffix[canonical] = suffix + 1
+            used_names.add(new_name)
+            if new_name != canonical:
                 logger.warning(
                     "map_dataframe: column %r also maps to %r; renamed to %r "
                     "to avoid a collision",
@@ -2153,9 +2448,6 @@ class ContactMapper:
                     canonical,
                     new_name,
                 )
-            else:
-                seen[canonical] = 1
-                new_name = canonical
             rename[col] = new_name
 
         out = df.rename(columns=rename)

@@ -46,6 +46,7 @@ from .core import (
     FuzzyMatchStrategy,
     HeuristicMatchStrategy,
     ListNormalizer,
+    MappingProfile,
     MappingResult,
     MappingSchema,
     MatchStrategy,
@@ -81,7 +82,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
-    "SUPPORTED_LANGUAGES",
+    "SUPPORTED_LANGUAGES",  # pylint: disable=undefined-all-variable
     "AddressNormalizer",
     "BooleanNormalizer",
     "CanonicalField",
@@ -94,6 +95,7 @@ __all__ = [
     "FuzzyMatchStrategy",
     "HeuristicMatchStrategy",
     "ListNormalizer",
+    "MappingProfile",
     "MappingResult",
     "MappingSchema",
     # Strategies
@@ -118,7 +120,7 @@ __all__ = [
     "format_e164",
     "format_international",
     "format_national",
-    "generate_language",
+    "generate_language",  # pylint: disable=undefined-all-variable
     "is_number_match",
     "is_valid",
     "normalize_value",

@@ -15,6 +15,7 @@ export {
   FuzzyMatchStrategy,
   HeuristicMatchStrategy,
   ListNormalizer,
+  MappingProfile,
   MappingResult,
   MappingSchema,
   MatchStrategy,

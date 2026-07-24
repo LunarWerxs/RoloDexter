@@ -94,7 +94,24 @@ CASES: dict[str, Any] = {
         {
             "id": "mapping_result_helpers",
             "kind": "mapping_result_helpers",
-            "payload": {"fname": "Ada", "mobile": "(202) 555-0143", "Mystery": "???"},
+            "payload": {
+                "fname": "Ada",
+                "email": "ADA@EXAMPLE.COM",
+                "mobile": "(202) 555-0143",
+                "source_service": "HubSpot",
+                "source_id": "42",
+                "Mystery": "???",
+            },
+        },
+        {
+            "id": "profile_helpers",
+            "kind": "profile_helpers",
+            "rows": [
+                {"fname": "Ada", "email": "ADA@EXAMPLE.COM"},
+                {"First Name": "Grace", "Mystery": "???"},
+                {"phone": "not a phone"},
+            ],
+            "options": {"max_rows": 2},
         },
         {
             "id": "schema_helpers",
@@ -263,10 +280,25 @@ def python_results() -> dict[str, Any]:
                     "match_rate": result.match_rate,
                     "dict": result.to_dict(),
                     "explain": result.explain(),
+                    "all_emails": result.get_all_emails(),
                     "all_phones": result.get_all_phones(),
+                    "identity_keys": result.get_identity_keys(),
                     "match_fname": simplify(result.get_match("fname")),
                     "match_missing": simplify(result.get_match("missing")),
                 }
+        elif item["kind"] == "profile_helpers":
+
+            def fn(item: dict[str, Any] = item) -> dict[str, Any]:
+                profile = r.ContactMapper().profile(
+                    item["rows"], **item.get("options", {})
+                )
+                return {
+                    "dict": profile.to_dict(),
+                    "explain": profile.explain(),
+                    "match_rate": profile.match_rate,
+                    "warning_count": profile.warning_count,
+                }
+
         elif item["kind"] == "schema_helpers":
             def fn(item: dict[str, Any] = item) -> dict[str, Any]:
                 schema = r.ContactMapper(**item.get("mapper_options", {})).compile_schema(

@@ -86,6 +86,7 @@ def test_submodule_public_export_lists_are_explicit() -> None:
         "FuzzyMatchStrategy",
         "HeuristicMatchStrategy",
         "ListNormalizer",
+        "MappingProfile",
         "MappingResult",
         "MappingSchema",
         "MatchStrategy",
@@ -155,6 +156,28 @@ class TestLoading:
         reg = PatternRegistry(patterns=custom)
         assert reg.exact_lookup("fname") == "first_name"
         assert reg.exact_lookup("given") == "first_name"
+
+    @pytest.mark.parametrize(
+        "patterns",
+        [
+            [],
+            {"version": None},
+            {"fields": None},
+            {"fields": {"custom": "alias"}},
+            {"fields": {"custom": [""]}},
+            {"expansion": {"form_prefixes": "billing_"}},
+            {"expansion": {"form_fields": {"email": ""}}},
+        ],
+    )
+    def test_malformed_custom_patterns_raise_actionable_error(
+        self, patterns: object
+    ) -> None:
+        with pytest.raises(PatternLoadError, match="Invalid custom patterns"):
+            PatternRegistry(patterns=patterns)  # type: ignore[arg-type]
+
+    def test_malformed_overrides_raise_actionable_error(self) -> None:
+        with pytest.raises(PatternLoadError, match="Invalid overrides"):
+            PatternRegistry(overrides={"": "email"})
 
     def test_bad_path_raises(self) -> None:
         with pytest.raises(PatternLoadError):

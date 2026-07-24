@@ -18,6 +18,8 @@ import pytest
 from rolodexter import (
     CanonicalField,
     ContactMapper,
+    MappingProfile,
+    MappingResult,
     MappingSchema,
     NormalizationError,
 )
@@ -151,6 +153,90 @@ class TestMapStream:
         assert batch[0].normalized["phone"] == stream[0].normalized["phone"]
 
 
+# ── Batch profiling and identity helpers ────────────────────────────────
+
+
+class TestMappingProfile:
+    def test_profile_summarizes_stream_without_overconsuming(self) -> None:
+        rows = iter(
+            [
+                {"fname": "Ada", "email": "ADA@EXAMPLE.COM"},
+                {"First Name": "Grace", "Mystery": "???"},
+                {"phone": "not a phone"},
+            ]
+        )
+
+        profile = ContactMapper().profile(rows, max_rows=2)
+
+        assert isinstance(profile, MappingProfile)
+        assert profile.rows_seen == 2
+        assert profile.fields_seen == 4
+        assert profile.matched_count == 3
+        assert profile.unmatched_count == 1
+        assert profile.match_rate == 0.75
+        assert profile.canonical_counts == {"first_name": 2, "email": 1}
+        assert profile.unmapped_counts == {"Mystery": 1}
+        assert profile.strategy_counts == {"exact": 2, "normalized": 1, "none": 1}
+        assert next(rows) == {"phone": "not a phone"}
+
+    def test_profile_groups_warning_categories_and_serializes(self) -> None:
+        profile = ContactMapper().profile([{"phone": "not a phone"}])
+
+        assert profile.warning_count == 1
+        assert profile.warning_counts == {"phone_normalization": 1}
+        report = profile.to_dict()
+        assert report["rows_seen"] == 1
+        assert report["match_rate"] == 1.0
+        assert "phone_normalization: 1" in profile.explain()
+
+    def test_profile_rejects_invalid_limits(self) -> None:
+        mapper = ContactMapper()
+        with pytest.raises(ValueError, match="non-negative"):
+            mapper.profile([], max_rows=-1)
+        with pytest.raises(TypeError, match="integer or None"):
+            mapper.profile([], max_rows=1.5)  # type: ignore[arg-type]
+
+
+class TestIdentityHelpers:
+    def test_emails_and_identity_keys_are_flat_deduplicated_and_scoped(self) -> None:
+        result = MappingResult(
+            normalized={
+                "email": [" A@EXAMPLE.COM ", "a@example.com"],
+                "phone": ["+12025550143", "+12025550143"],
+                "source_service": "HubSpot",
+                "source_id": [" 42 ", "42"],
+            },
+            unmapped={},
+            field_matches=(),
+        )
+
+        assert result.get_all_emails() == [
+            " A@EXAMPLE.COM ",
+            "a@example.com",
+        ]
+        assert result.get_identity_keys() == [
+            "email:a@example.com",
+            "phone:+12025550143",
+            "source:hubspot:42",
+        ]
+
+    def test_multiple_source_services_are_paired_by_position(self) -> None:
+        result = MappingResult(
+            normalized={
+                "source_service": ["HubSpot", "Salesforce"],
+                "source_id": ["42", "99", "orphan"],
+            },
+            unmapped={},
+            field_matches=(),
+        )
+
+        assert result.get_identity_keys() == [
+            "source:hubspot:42",
+            "source:salesforce:99",
+            "source_id:orphan",
+        ]
+
+
 class TestCompileSchema:
     def test_column_map(self) -> None:
         schema = ContactMapper().compile_schema(
@@ -211,6 +297,35 @@ class TestMapDataframe:
         cols = list(out.columns)
         assert "phone" in cols
         assert any(c.startswith("phone__") for c in cols)
+
+    def test_collision_suffix_does_not_hide_unmatched_column(self) -> None:
+        pd = pytest.importorskip("pandas")
+        mapper = ContactMapper(
+            patterns={"fields": {"custom": ["source_a", "source_b"]}}
+        )
+        df = pd.DataFrame(
+            {
+                "source_a": ["one"],
+                "source_b": ["two"],
+                "custom__2": ["keep"],
+            }
+        )
+
+        out = mapper.map_dataframe(df, normalize=False)
+
+        assert list(out.columns) == ["custom", "custom__3", "custom__2"]
+        assert out.iloc[0].to_dict() == {
+            "custom": "one",
+            "custom__3": "two",
+            "custom__2": "keep",
+        }
+
+    def test_duplicate_input_labels_are_rejected(self) -> None:
+        pd = pytest.importorskip("pandas")
+        df = pd.DataFrame([["Ada", "Grace"]], columns=["fname", "fname"])
+
+        with pytest.raises(ValueError, match="unique input column labels"):
+            ContactMapper().map_dataframe(df)
 
     def test_confidence_threshold_preserves_low_confidence_columns(self) -> None:
         pd = pytest.importorskip("pandas")
@@ -371,6 +486,63 @@ class TestCLI:
         assert rc == 1
         assert "error" in err.lower()
         assert out_path.read_text("utf-8") == original
+
+    def test_quarantine_cannot_overwrite_input(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        original = '{"fname":"A"}\nnot-json\n'
+        in_path.write_text(original, encoding="utf-8")
+
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "--format",
+                "jsonl",
+                "--on-error",
+                "quarantine",
+                "--quarantine-output",
+                str(in_path),
+            ]
+        )
+
+        assert rc == 1
+        assert (
+            "quarantine output must differ from the input path"
+            in capsys.readouterr().err
+        )
+        assert in_path.read_text("utf-8") == original
+
+    def test_quarantine_cannot_overwrite_mapped_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        in_path = tmp_path / "in.jsonl"
+        out_path = tmp_path / "out.jsonl"
+        in_path.write_text('{"fname":"A"}\n', encoding="utf-8")
+        out_path.write_text("existing\n", encoding="utf-8")
+
+        rc = cli_main(
+            [
+                "map",
+                str(in_path),
+                "-o",
+                str(out_path),
+                "--format",
+                "jsonl",
+                "--on-error",
+                "quarantine",
+                "--quarantine-output",
+                str(out_path),
+            ]
+        )
+
+        assert rc == 1
+        assert (
+            "quarantine output must differ from the mapped output path"
+            in capsys.readouterr().err
+        )
+        assert out_path.read_text("utf-8") == "existing\n"
 
     def test_map_json_input_to_csv_scalarizes_lists(self, tmp_path: Path) -> None:
         # JSON array input -> CSV output; the tags list must collapse to one cell.

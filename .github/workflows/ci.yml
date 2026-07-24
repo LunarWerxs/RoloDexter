@@ -41,6 +41,13 @@ jobs:
       - name: Type check (mypy)
         run: mypy src/
 
+      - name: Additional static analysis
+        if: matrix.python-version == '3.12'
+        run: |
+          deptry .
+          vulture src scripts --min-confidence 80
+          pylint --errors-only src/rolodexter
+
       - name: Test (pytest + coverage)
         run: pytest --cov=rolodexter --cov-report=xml --cov-report=term-missing
 
