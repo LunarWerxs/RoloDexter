@@ -8,6 +8,7 @@ Route messy, inconsistent contact data from *any* source to a clean, canonical s
 
 [![CI](https://img.shields.io/github/actions/workflow/status/LunarWerxs/RoloDexter/ci.yml?label=CI)](https://github.com/LunarWerxs/RoloDexter/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/rolodexter)](https://pypi.org/project/rolodexter/)
+[![npm](https://img.shields.io/npm/v/rolodexter)](https://www.npmjs.com/package/rolodexter)
 [![Python](https://img.shields.io/pypi/pyversions/rolodexter)](https://pypi.org/project/rolodexter/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
