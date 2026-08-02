@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoloDexter — The universal contact field mapper</title>
+<meta name="description" content="Route messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. 600+ aliases, 62 canonical fields, confidence scores, and E.164 phone normalization. Python and TypeScript.">
+<link rel="icon" href="assets/icon-256.png" type="image/png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RoloDexter">
+<link rel="canonical" href="https://rolodexter.lunarwerx.com/">
+<meta property="og:url" content="https://rolodexter.lunarwerx.com/">
+<meta property="og:title" content="RoloDexter — The universal contact field mapper">
+<meta property="og:description" content="Every CRM names the same field differently. RoloDexter maps them all to one canonical schema, with confidence scores and value normalization. Python and TypeScript, MIT-licensed.">
+<meta property="og:image" content="https://rolodexter.lunarwerx.com/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="RoloDexter — the universal contact field mapper">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="RoloDexter — The universal contact field mapper">
+<meta name="twitter:description" content="Every CRM names the same field differently. RoloDexter maps them all to one canonical schema. Python and TypeScript, MIT-licensed.">
+<meta name="twitter:image" content="https://rolodexter.lunarwerx.com/assets/og-image.png">
+<style>
+
+  /* ---------- Reset & base ---------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+  body { margin: 0; }
+  img { max-width: 100%; display: block; }
+  a { color: inherit; }
+
+  :root{
+    /* ---- color tokens ---- */
+    --bg:        #150E1D;
+    --surface:   #1E1428;
+    --surface-2: #261B33;
+    --border:    #382A47;
+    --ink:       #F5F0FA;
+    --muted:     #A99BB8;
+    --faint:     #7A6C8A;
+    --plum:      #B681D0;
+    --plum-dim:  #8E5BA6;
+    --glass:     #7EC8E8;
+    --amber:     #E0AC4C;
+    --green:     #6ED2A0;
+
+    /* ---- type tokens ---- */
+    --font-display: -apple-system, "Segoe UI Semibold", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-body: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+
+    --container: 1120px;
+  }
+
+  html, body { background: var(--bg); color: var(--ink); }
+
+  body{
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 12% -10%, rgba(182,129,208,0.16), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 8%, rgba(126,200,232,0.10), transparent 55%),
+      linear-gradient(var(--bg), var(--bg));
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 800; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+  p { margin: 0; }
+
+  .container { width: 100%; max-width: var(--container); margin-inline: auto; padding-inline: 24px; }
+  section { position: relative; }
+  ::selection { background: var(--plum-dim); color: #fff; }
+  :focus-visible { outline: 2px solid var(--plum); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---------- Eyebrow ---------- */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--plum);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 8px; height: 8px;
+    background: var(--plum);
+    border-radius: 1px;
+    box-shadow: 0 0 8px rgba(182,129,208,0.8);
+    flex: none;
+  }
+
+  code.cls {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Header / nav ---------- */
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(21,14,29,0.84);
+    backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding-block: 14px; gap: 20px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 1.05rem; letter-spacing: -0.01em; text-decoration: none;
+  }
+  .brand img { height: 30px; width: auto; }
+  .brand-name { font-family: var(--font-mono); font-weight: 600; letter-spacing: -0.02em; }
+  .brand-name .dim { color: var(--muted); font-weight: 500; }
+
+  .nav-links { display: flex; align-items: center; gap: 28px; list-style: none; margin: 0; padding: 0; }
+  .nav-links a { text-decoration: none; color: var(--muted); font-size: 0.92rem; transition: color .15s ease; }
+  .nav-links a:hover { color: var(--ink); }
+
+  .nav-cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--plum-dim); color: #fff;
+    padding: 9px 16px; border-radius: 8px;
+    font-size: 0.88rem; font-weight: 700; text-decoration: none;
+    border: 1px solid rgba(255,255,255,0.12);
+    transition: background .15s ease, transform .15s ease;
+    white-space: nowrap;
+  }
+  .nav-cta:hover { background: var(--plum); transform: translateY(-1px); }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 700; text-decoration: none;
+    padding: 14px 24px; border-radius: 10px;
+    font-size: 1rem; line-height: 1;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+    border: 1px solid transparent;
+  }
+  .btn svg { flex: none; }
+  .btn-primary { background: var(--plum-dim); color: #fff; box-shadow: 0 8px 24px -8px rgba(142,91,166,0.6); }
+  .btn-primary:hover { background: var(--plum); transform: translateY(-2px); box-shadow: 0 12px 28px -8px rgba(182,129,208,0.65); }
+  .btn-ghost { background: rgba(255,255,255,0.03); color: var(--ink); border-color: var(--border); }
+  .btn-ghost:hover { background: rgba(255,255,255,0.07); border-color: #4d3a5f; transform: translateY(-2px); }
+
+  /* ---------- Hero ---------- */
+  .hero { padding-top: 88px; padding-bottom: 72px; }
+  .hero-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,500px); gap: 56px; align-items: center; }
+  .hero h1 { font-size: clamp(2.1rem, 4.6vw, 3.3rem); line-height: 1.08; margin-bottom: 22px; }
+  .hero h1 .accent { color: var(--plum); }
+  .hero-sub { color: var(--muted); font-size: 1.14rem; max-width: 54ch; margin-bottom: 30px; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 30px; }
+  .hero-meta { display: flex; flex-wrap: wrap; gap: 10px 22px; color: var(--faint); font-size: 0.86rem; font-family: var(--font-mono); }
+  .hero-meta span { display: inline-flex; align-items: center; gap: 7px; }
+  .hero-meta svg { flex: none; opacity: .8; }
+
+  /* ---------- Code windows ---------- */
+  .code-window {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.7);
+  }
+  .code-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 11px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .term-dot { width: 11px; height: 11px; border-radius: 50%; }
+  .term-dot.r { background: #E5645B; }
+  .term-dot.y { background: #E0AC4C; }
+  .term-dot.g { background: #4CB874; }
+  .code-filename { margin-inline: auto; font-family: var(--font-mono); font-size: 0.78rem; color: var(--faint); transform: translateX(-18px); }
+  .copy-btn {
+    font-family: var(--font-mono); font-size: 0.76rem;
+    color: var(--muted);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .copy-btn:hover { color: var(--ink); border-color: #4d3a5f; background: rgba(255,255,255,0.08); }
+  .copy-btn svg { flex: none; }
+  .code-body { margin: 0; padding: 20px 22px 24px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.7; }
+  .code-body code { white-space: pre; }
+  .tok-punc { color: var(--faint); }
+  .tok-key { color: var(--glass); }
+  .tok-str { color: var(--amber); }
+  .tok-fn  { color: var(--plum); }
+  .tok-com { color: var(--faint); font-style: italic; }
+  .tok-out { color: var(--green); }
+
+  /* ---------- Section shells ---------- */
+  .section { padding-block: 88px; }
+  .section-head { max-width: 660px; margin-bottom: 48px; }
+  .section-head h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin-bottom: 14px; }
+  .section-head p { color: var(--muted); font-size: 1.05rem; }
+  .divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border) 20%, var(--border) 80%, transparent); border: none; margin: 0; }
+
+  /* ---------- The mess table ---------- */
+  .mess-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+  table.mess { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 640px; }
+  table.mess th, table.mess td { padding: 13px 18px; text-align: left; border-bottom: 1px solid var(--border); }
+  table.mess tr:last-child td { border-bottom: none; }
+  table.mess thead th { color: var(--faint); font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; background: var(--surface-2); }
+  table.mess tbody th { font-weight: 600; color: var(--ink); }
+  table.mess td { font-family: var(--font-mono); color: var(--amber); }
+  table.mess tr.canon { background: rgba(182,129,208,0.09); }
+  table.mess tr.canon th { color: var(--plum); }
+  table.mess tr.canon td { color: var(--plum); font-weight: 700; }
+
+  /* ---------- Cards ---------- */
+  .feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px; }
+  .feature-grid.three { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px 24px;
+    transition: border-color .15s ease, transform .15s ease, background .15s ease;
+  }
+  .card:hover { border-color: #4d3a5f; transform: translateY(-3px); background: var(--surface-2); }
+  .card-icon {
+    width: 42px; height: 42px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 16px;
+    background: rgba(182,129,208,0.15);
+    color: var(--plum);
+    font-family: var(--font-mono);
+    font-weight: 700;
+  }
+  .card.glassy .card-icon { background: rgba(126,200,232,0.14); color: var(--glass); }
+  .card h3 { font-size: 1.04rem; margin-bottom: 9px; }
+  .card h3 code { font-family: var(--font-mono); font-size: 0.92em; color: var(--plum); }
+  .card p { color: var(--muted); font-size: 0.94rem; }
+  .card .strat { display: block; margin-top: 12px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--faint); }
+
+  /* ---------- Split section ---------- */
+  .split .container { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 56px; align-items: center; }
+  .split-copy h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); margin-bottom: 16px; }
+  .split-copy p { color: var(--muted); margin-bottom: 16px; }
+  .split-copy ul { margin: 0 0 8px; padding-left: 0; list-style: none; display: grid; gap: 12px; }
+  .split-copy li { display: flex; gap: 10px; color: var(--muted); font-size: 0.95rem; align-items: flex-start; }
+  .split-copy li svg { flex: none; margin-top: 4px; color: var(--plum); }
+  .split-copy li b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Callout ---------- */
+  .note {
+    margin-top: 26px;
+    display: flex; gap: 14px; align-items: flex-start;
+    background: rgba(126,200,232,0.07);
+    border: 1px solid rgba(126,200,232,0.22);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .note svg { flex: none; color: var(--glass); margin-top: 2px; }
+  .note p { color: var(--muted); font-size: 0.94rem; }
+  .note b { color: var(--ink); }
+
+  /* ---------- Canonical field cloud ---------- */
+  .fields { display: flex; flex-wrap: wrap; gap: 8px; }
+  .fields span {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px;
+  }
+  .fields span.hot { color: var(--plum); border-color: rgba(182,129,208,0.45); background: rgba(182,129,208,0.09); }
+
+  /* ---------- Final CTA ---------- */
+  .cta-final { text-align: center; padding-block: 96px; }
+  .cta-final h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin-bottom: 18px; }
+  .cta-final p { color: var(--muted); font-size: 1.08rem; max-width: 54ch; margin: 0 auto 34px; }
+  .cta-final .hero-actions { justify-content: center; }
+
+  /* ---------- Footer ---------- */
+  .site-footer { border-top: 1px solid var(--border); padding-block: 44px; }
+  .footer-grid { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .footer-logo img { height: 22px; width: auto; }
+  .footer-links { display: flex; gap: 26px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+  .footer-links a { color: var(--muted); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px; }
+  .footer-links a:hover { color: var(--ink); }
+  .footer-links img { width: 17px; height: 17px; filter: invert(1) brightness(1.6); }
+  .footer-meta { color: var(--faint); font-size: 0.82rem; font-family: var(--font-mono); margin-top: 22px; text-align: center; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1080px){
+    .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 980px){
+    .hero-grid { grid-template-columns: 1fr; }
+    .hero { padding-top: 40px; }
+    .feature-grid.three { grid-template-columns: repeat(2, 1fr); }
+    .split .container { grid-template-columns: 1fr; }
+    .split-copy { order: 1; }
+    .split .code-window { order: 2; }
+  }
+  @media (max-width: 680px){
+    .nav-links { display: none; }
+    .feature-grid, .feature-grid.three { grid-template-columns: 1fr; }
+    .section { padding-block: 60px; }
+    .hero { padding-bottom: 50px; }
+    .footer-grid { flex-direction: column; align-items: flex-start; }
+    .code-body { font-size: 0.76rem; }
+  }
+</style>
+<style>
+/* Back to the parent studio: a bare arrow at the top left of the page.
+   Deliberately not in the header and deliberately unstyled beyond a hover
+   fade. Colour is inherited so it picks up whatever each site already uses.
+   `fixed`, not `absolute`: every one of these sites has a position:sticky nav
+   with a background, and an absolute arrow at the top left would sit under it. */
+/* A full-header-height band with the icon centred in it, so the arrow sits on
+   the header's centreline by construction. --lw-bar is that header's measured
+   height; the sites run 59 to 72px, so no shared constant fits. */
+:root{--lw-bar:72px}
+a.lw-parent{position:fixed;top:0;left:.55rem;z-index:1000;display:inline-flex;align-items:center;justify-content:center;width:1.9rem;height:var(--lw-bar,64px);color:inherit;opacity:.45;text-decoration:none;-webkit-tap-highlight-color:transparent;transition:opacity .15s ease}
+a.lw-parent:hover,a.lw-parent:focus-visible{opacity:1}
+a.lw-parent svg{display:block}
+/* The arrow is out of the flow now, so the header's first item would slide
+   under it wherever the nav column starts at the viewport edge. */
+.lw-home-group{padding-left:2.75rem}
+@media (prefers-reduced-motion:reduce){a.lw-parent{transition:none}}
+/* The tooltip. Replaces the native `title`, which waits ~1s, cannot be styled,
+   and draws outside the page. Below the arrow, not beside it: the arrow is at
+   the left margin and a panel opening rightward runs into the viewport edge. */
+a.lw-parent .lw-tip{position:absolute;top:calc(100% - .5rem);left:0;transform:translateY(-3px);display:flex;flex-direction:column;gap:.1rem;padding:.4rem .58rem;border-radius:.5rem;border:1px solid rgba(255,255,255,.14);background:rgba(9,11,17,.97);box-shadow:0 12px 30px -14px rgba(0,0,0,.9);color:#e9ecf3;font-family:inherit;line-height:1.3;text-align:left;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease,transform .12s ease,visibility 0s linear .12s}
+a.lw-parent .lw-tip>span:first-child{font-size:.78rem;font-weight:600}
+a.lw-parent .lw-tip>span:last-child{font-size:.72rem;font-weight:400;opacity:.6}
+/* Caret, drawn off the panel so it cannot be clipped by the arrow's own box. */
+a.lw-parent .lw-tip::before{content:"";position:absolute;bottom:100%;left:.5rem;border:4px solid transparent;border-bottom-color:rgba(9,11,17,.97)}
+a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s}
+/* A finger has no hover: the panel would appear on tap and then follow the
+   reader to the next page, which is worse than not having it. */
+@media (hover:none){a.lw-parent .lw-tip{display:none}}
+@media (prefers-reduced-motion:reduce){a.lw-parent .lw-tip{transition:opacity .12s ease,visibility 0s linear .12s;transform:none}a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{transform:none}}
+</style>
+    <!-- ARGUS Analytics Pixel (Connections, analytics.connections.icu).
+         The key is a PUBLIC ingest key and is meant to ship in client JS.
+         Honours DNT and Sec-GPC by itself, and is grant-by-default outside the
+         EU/EEA/UK/CH (the pixel is stamped per-visitor at the edge). localhost
+         is skipped so a local preview cannot inflate the numbers. -->
+    <script>
+        (function (w, d, k) {
+            function warn(msg, err) {
+                try {
+                    if (w.console && typeof w.console.warn === 'function') {
+                        if (err) { w.console.warn(msg, err); } else { w.console.warn(msg); }
+                    }
+                } catch (e0) { }
+            }
+            try {
+                var key = (typeof k === 'string') ? k.replace(/^\s+|\s+$/g, '') : '';
+                if (!key || key === 'ak_YOUR_SITE_KEY') {
+                    warn('[ARGUS] missing or placeholder pixel key; pixel not installed');
+                    return;
+                }
+                if (d.getElementById('argus-pixel')) { return; }
+                var host = w.location.hostname;
+                if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.local')) { return; }
+                var P = w.ArgusPixel = w.ArgusPixel || {};
+                P.key = key;
+                var j = d.createElement('script');
+                j.async = true;
+                j.id = 'argus-pixel';
+                j.type = 'text/javascript';
+                // ?v= is the cache-bust lever: the pixel is served max-age=3600
+                // from ONE origin shared by every tracked site, so bump this when
+                // a pixel change has to reach existing readers now.
+                j.src = 'https://analytics.connections.icu/pixel.js?v=2';
+                j.onerror = function () { warn('[ARGUS] pixel.js failed to load (check CSP script-src / network / ad-blocker)'); };
+                var mount = d.head || d.getElementsByTagName('head')[0] || d.documentElement || d.body;
+                if (!mount) { warn('[ARGUS] no DOM mount point for pixel; skipping'); return; }
+                mount.appendChild(j);
+            } catch (e) {
+                warn('[ARGUS] pixel install failed', e);
+            }
+        })(window, document, 'ak_35bcd27f9c3b5d9bc43eeb3ea06c64b731ae');
+    </script>
+    <!-- End ARGUS Analytics Pixel -->
+</head>
+<body>
+<a class="lw-parent" href="https://lunarwerx.com/" aria-label="Back to LunarWerx Studios, the parent studio"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg><span class="lw-tip" aria-hidden="true"><span>LunarWerx Studios</span><span>Every app we build, in one place</span></span></a>
+
+<header class="site-header">
+  <nav class="nav container" aria-label="Primary">
+    <span class="lw-home-group"><a class="brand" href="#top">
+      <img src="assets/icon-256.png" alt="" height="30">
+      <span class="brand-name">rolodexter</span>
+    </a></span>
+    <ul class="nav-links">
+      <li><a href="#problem">The problem</a></li>
+      <li><a href="#pipeline">How it matches</a></li>
+      <li><a href="#normalize">Normalization</a></li>
+      <li><a href="#scale">At scale</a></li>
+      <li><a href="https://github.com/LunarWerxs/RoloDexter">Source</a></li>
+    </ul>
+    <a class="nav-cta" href="https://pypi.org/project/rolodexter/">Get it on PyPI</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero container" aria-labelledby="hero-heading">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">rolodexter · v2.10.0 · python + typescript</p>
+        <h1 id="hero-heading">Every export names the same field differently. <span class="accent">Map them all to one schema.</span></h1>
+        <p class="hero-sub">Point RoloDexter at a CRM payload, a form post, or a CSV nobody has looked at since 2019, and get back clean canonical fields with a confidence score on every match.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://pypi.org/project/rolodexter/">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19.5h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            pip install rolodexter
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/LunarWerxs/RoloDexter">
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.15c-3.2.7-3.88-1.36-3.88-1.36-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.64 1.59.24 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.7 5.4-5.27 5.69.42.36.78 1.07.78 2.16v3.2c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+            View on GitHub
+          </a>
+        </div>
+        <div class="hero-meta">
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.6-9.5-9C1 8.5 2.5 5 6 5c2 0 3.5 1.2 4 2 .5-.8 2-2 4-2 3.5 0 5 3.5 3.5 7-2.5 4.4-9.5 9-9.5 9Z" stroke="currentColor" stroke-width="1.6"/></svg> Free &amp; MIT-licensed</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> 600+ aliases</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 9h18" stroke="currentColor" stroke-width="1.6"/></svg> 62 canonical fields</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 0 9 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M17 3h4v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> 40 languages, on demand</span>
+        </div>
+      </div>
+
+      <div class="code-window">
+        <div class="code-bar">
+          <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+          <span class="code-filename">import.py</span>
+        </div>
+        <pre class="code-body"><code><span class="tok-key">from</span> rolodexter <span class="tok-key">import</span> ContactMapper
+
+mapper <span class="tok-punc">=</span> <span class="tok-fn">ContactMapper</span><span class="tok-punc">()</span>
+
+result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><span class="tok-fn">map_payload</span><span class="tok-punc">({</span>
+    <span class="tok-str">"fname"</span><span class="tok-punc">:</span> <span class="tok-str">"jane"</span><span class="tok-punc">,</span>
+    <span class="tok-str">"surname"</span><span class="tok-punc">:</span> <span class="tok-str">"doe"</span><span class="tok-punc">,</span>
+    <span class="tok-str">"mobile"</span><span class="tok-punc">:</span> <span class="tok-str">"+1-650-253-0000"</span><span class="tok-punc">,</span>
+    <span class="tok-str">"employer"</span><span class="tok-punc">:</span> <span class="tok-str">"Tech Corp"</span><span class="tok-punc">,</span>
+    <span class="tok-str">"Column 1"</span><span class="tok-punc">:</span> <span class="tok-str">"jane.doe@example.com"</span><span class="tok-punc">,</span>
+<span class="tok-punc">})</span>
+
+<span class="tok-com"># result.normalized</span>
+<span class="tok-out">{
+  "first_name": "Jane",
+  "last_name":  "Doe",
+  "phone":      "+16502530000",
+  "company":    "Tech Corp",
+  "email":      "jane.doe@example.com"
+}</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ THE PROBLEM ============ -->
+  <section class="section" id="problem" aria-labelledby="problem-heading">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">// the problem</p>
+        <h2 id="problem-heading">Nobody agrees on what to call a phone number.</h2>
+        <p>Every CRM, email platform, and CSV export invents its own names for the same five pieces of information. Writing the mapping by hand works right up until the next integration.</p>
+      </div>
+
+      <div class="mess-wrap">
+        <table class="mess">
+          <thead>
+            <tr><th scope="col">Service</th><th scope="col">First name</th><th scope="col">Phone</th><th scope="col">Company</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">HubSpot</th><td>firstname</td><td>mobilephone</td><td>company</td></tr>
+            <tr><th scope="row">Salesforce</th><td>FirstName</td><td>MobilePhone</td><td>Company</td></tr>
+            <tr><th scope="row">Mailchimp</th><td>FNAME</td><td>PHONE</td><td>COMPANY</td></tr>
+            <tr><th scope="row">Google CSV</th><td>Given Name</td><td>Phone 1 - Value</td><td>Organization 1 - Name</td></tr>
+            <tr><th scope="row">Random CSV</th><td>Column A</td><td>Column B</td><td>Column C</td></tr>
+            <tr class="canon"><th scope="row">RoloDexter</th><td>first_name</td><td>phone</td><td>company</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" stroke="currentColor" stroke-width="1.6"/></svg>
+        <p><b>Even <code class="cls">Column A</code> is recoverable.</b> When a header carries no meaning at all, RoloDexter reads the value's shape instead, and an email address in an unnamed column still lands on <code class="cls">email</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ PIPELINE ============ -->
+  <section class="section" id="pipeline" aria-labelledby="pipeline-heading">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">// four-layer matching</p>
+        <h2 id="pipeline-heading">Four strategies, tried in order of certainty.</h2>
+        <p>Every field walks the chain until something matches, and the strategy that caught it sets the confidence you get back.</p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="card">
+          <div class="card-icon">1</div>
+          <h3>Exact</h3>
+          <p>An O(1) lookup against 600+ known aliases across 62 canonical fields. This is where most real payloads land.</p>
+          <span class="strat">confidence 1.0</span>
+        </div>
+        <div class="card">
+          <div class="card-icon">2</div>
+          <h3>Normalized</h3>
+          <p>Handles <code class="cls">CamelCase</code>, <code class="cls">dot.path</code>, spaces to underscores, and the rest of the casing zoo.</p>
+          <span class="strat">high confidence</span>
+        </div>
+        <div class="card glassy">
+          <div class="card-icon">3</div>
+          <h3>Fuzzy</h3>
+          <p>Typos survive. <code class="cls">phne_nmbr</code> still resolves to <code class="cls">phone</code>, and you can see that it was a guess.</p>
+          <span class="strat">confidence 0.85</span>
+        </div>
+        <div class="card glassy">
+          <div class="card-icon">4</div>
+          <h3>Heuristic</h3>
+          <p>No usable header? It reads the data instead, detecting emails, phones, URLs, and postal codes by shape.</p>
+          <span class="strat">confidence 0.6</span>
+        </div>
+      </div>
+
+      <div class="note">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
+        <p><b>Nothing is silent.</b> Non-fatal issues come back as warnings rather than disappearing, and strict mode turns a low-confidence guess or an unparseable value into a loud failure instead of a quietly wrong row.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ NORMALIZATION ============ -->
+  <section class="section split" id="normalize" aria-labelledby="normalize-heading">
+    <div class="container">
+      <div class="split-copy">
+        <p class="eyebrow">// value normalization</p>
+        <h2 id="normalize-heading">Matching the field is only half of it.</h2>
+        <p>The value gets cleaned too, so what comes out the other side is ready to store rather than ready for another round of regexes.</p>
+        <ul>
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Phones</b> to E.164 via libphonenumber, and phone numbers buried inside a free-text field can be extracted on their own.</span>
+          </li>
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Names</b> title-cased with particle awareness, so <code class="cls">jane van der berg</code> becomes <code class="cls">Jane van der Berg</code>, not <code class="cls">Jane Van Der Berg</code>.</span>
+          </li>
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Emails</b> lowercased and trimmed. <b>Addresses</b> collapsed and title-cased. <b>Tags</b> coerced to a real list.</span>
+          </li>
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Your own names too.</b> Per-caller overrides map a vendor's <code class="cls">MMERGE6</code> or <code class="cls">cf_lead_score</code> onto a canonical field without patching the alias table.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="code-window">
+        <div class="code-bar">
+          <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+          <span class="code-filename">why it chose that</span>
+        </div>
+        <pre class="code-body"><code>mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span class="tok-punc">(</span><span class="tok-str">"fname"</span><span class="tok-punc">)</span>
+<span class="tok-out">FieldMatch(canonical='first_name',
+           confidence=1.0, strategy='exact')</span>
+
+mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span class="tok-punc">(</span><span class="tok-str">"phne"</span><span class="tok-punc">)</span>
+<span class="tok-out">FieldMatch(canonical='phone',
+           confidence=0.85, strategy='fuzzy')</span>
+
+mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span class="tok-punc">(</span><span class="tok-str">"Column X"</span><span class="tok-punc">,</span>
+                value<span class="tok-punc">=</span><span class="tok-str">"jane@test.com"</span><span class="tok-punc">)</span>
+<span class="tok-out">FieldMatch(canonical='email',
+           confidence=0.6, strategy='heuristic')</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ AT SCALE ============ -->
+  <section class="section" id="scale" aria-labelledby="scale-heading">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">// at scale</p>
+        <h2 id="scale-heading">One contact, or the whole export.</h2>
+        <p>The same mapper handles a single webhook payload and a multi-gigabyte CSV, from a script, a notebook, or a terminal.</p>
+      </div>
+
+      <div class="feature-grid three">
+        <div class="card">
+          <div class="card-icon">≫</div>
+          <h3>Batch and streaming</h3>
+          <p>Map a list in one call, or stream a huge CSV or JSONL export in constant memory. There is a preview mode that reports import readiness without retaining a single mapped row.</p>
+        </div>
+        <div class="card glassy">
+          <div class="card-icon">🐼</div>
+          <h3>DataFrames</h3>
+          <p>Hand it a DataFrame and get the columns renamed to canonical fields with values normalized. Columns it does not recognise are kept, not dropped.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">▶</div>
+          <h3>Command line</h3>
+          <p>Map a CSV, JSON, or JSONL export straight from a shell, quarantine bad rows to a JSONL file instead of stopping, and ask it to explain exactly how one header resolved.</p>
+        </div>
+        <div class="card glassy">
+          <div class="card-icon">◇</div>
+          <h3>Compile once</h3>
+          <p>Resolve a source's headers into a mapping profile a single time, then reuse it for every row that follows.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🌍</div>
+          <h3>40 languages</h3>
+          <p>Alias tables for 40 languages generate on demand and cache locally, with bounded network behaviour while they build.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">TS</div>
+          <h3>Python and TypeScript</h3>
+          <p>The Python package is the canonical implementation and owns the shared alias table. The npm package syncs that same table at build time, so both ecosystems agree.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ CANONICAL FIELDS ============ -->
+  <section class="section" aria-labelledby="fields-heading">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">// the schema</p>
+        <h2 id="fields-heading">62 canonical fields, and one honest <code class="cls">unknown</code>.</h2>
+        <p>Exposed as a string enum, so it drops straight into JSON without a conversion step.</p>
+      </div>
+      <div class="fields">
+        <span class="hot">first_name</span><span class="hot">last_name</span><span>full_name</span><span>middle_name</span><span>nickname</span><span>prefix</span><span>suffix</span><span class="hot">email</span><span class="hot">phone</span><span>home_phone</span><span>work_phone</span><span>fax</span><span>whatsapp</span><span>website</span><span class="hot">company</span><span>job_title</span><span>department</span><span>industry</span><span>address_line1</span><span>address_line2</span><span>city</span><span>state</span><span>postal_code</span><span>country</span><span>full_address</span><span>linkedin</span><span>twitter</span><span>facebook</span><span>instagram</span><span>github</span><span>youtube</span><span>tiktok</span><span>discord</span><span>telegram</span><span>lead_status</span><span>lifecycle_stage</span><span>email_opt_out</span><span>tags</span><span>source</span><span>utm_parameters</span><span>score</span><span>owner</span><span>birthday</span><span>age</span><span>created_at</span><span>updated_at</span><span>last_contacted</span><span>revenue</span><span>currency</span><span>message</span><span>subject</span><span>company_size</span><span>notes</span><span>metadata</span><span>gender</span><span>timezone</span><span>language_preference</span><span>referrer_url</span><span>source_id</span><span>source_service</span><span>subscribed</span><span>verified</span><span>unknown</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section class="cta-final container">
+    <p class="eyebrow" style="justify-content:center;">// pick your ecosystem</p>
+    <h2>Stop writing the same field map again.</h2>
+    <p>Install it, hand it the payload nobody wants to look at, and read what comes back.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://pypi.org/project/rolodexter/">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19.5h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        pip install rolodexter
+      </a>
+      <a class="btn btn-ghost" href="https://www.npmjs.com/package/rolodexter">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19.5h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        npm install rolodexter
+      </a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <a class="footer-logo" href="https://lunarwerx.com" aria-label="LunarWerx Studios">
+        <img src="assets/lw_logo_white.png" alt="LunarWerx Studios">
+      </a>
+      <ul class="footer-links">
+        <li><a href="https://github.com/LunarWerxs/RoloDexter"><img src="assets/github_mark.png" alt="">GitHub</a></li>
+        <li><a href="https://pypi.org/project/rolodexter/">PyPI</a></li>
+        <li><a href="https://www.npmjs.com/package/rolodexter">npm</a></li>
+        <li><a href="https://github.com/LunarWerxs/RoloDexter/blob/main/LICENSE">MIT License</a></li>
+        <li><a href="https://lunarwerx.com">lunarwerx.com</a></li>
+      </ul>
+    </div>
+    <p class="footer-meta">Free, open-source software. Not affiliated with any CRM or email platform named above.</p>
+  </div>
+</footer>
+
+</body>
+</html>
