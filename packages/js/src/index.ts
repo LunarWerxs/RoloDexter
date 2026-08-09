@@ -4791,5 +4791,9 @@ export const __all__ = [
   "parse",
 ] as const;
 
-export const version = "2.10.0";
+// Kept in step with packages/js/package.json by
+// scripts/check_release_versions.py, which the publish workflows run before
+// building. This literal silently shipped 2.10.0 inside the 2.11.0 package
+// because nothing compared the two.
+export const version = "2.11.1";
 export const __version__ = version;

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-08-09
+
+### Fixed
+
+- **`rolodexter --version` in the NPM package reported the wrong number.**
+  `packages/js/src/index.ts` hardcoded the version it exports as `version` /
+  `__version__` and prints from the CLI, and nothing compared that literal to
+  `package.json`, so 2.11.0 shipped to NPM announcing itself as 2.10.0. The
+  library itself was unaffected. `scripts/check_release_versions.py` now checks
+  the literal too, and the JS test reads the expected value from `package.json`
+  instead of pinning it, so an assertion can no longer agree with a stale
+  source. The Python package reads its version from `importlib.metadata` and was
+  never affected.
+
 ## [2.11.0] - 2026-08-09
 
 Minor release: a pre-flight `profile` command, reproducible-import tooling

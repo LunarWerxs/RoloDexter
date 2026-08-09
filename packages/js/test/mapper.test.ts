@@ -4,6 +4,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+
+// Read from package.json rather than pinned, so a version bump cannot leave
+// the assertion agreeing with a stale literal in the source (which is exactly
+// how 2.10.0 shipped inside the 2.11.0 package). Tests execute compiled from
+// dist/test/, so the package root is two levels up, not one.
+const VERSION_FROM_PACKAGE_JSON = (
+  JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 import { fileURLToPath } from "node:url";
 
 import {
@@ -214,7 +224,7 @@ test("CanonicalField members expose Python enum-like values", () => {
 
 test("root version exports mirror Python package shape", () => {
   assert.equal(__version__, version);
-  assert.equal(__version__, "2.10.0");
+  assert.equal(__version__, VERSION_FROM_PACKAGE_JSON);
   assert.deepEqual(__all__, [
     "SUPPORTED_LANGUAGES",
     "AddressNormalizer",
@@ -582,7 +592,7 @@ test("CommonJS consumers can require root and i18n subpath", () => {
   );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "2.10.0 Ada function false false function function false");
+  assert.equal(result.stdout.trim(), `${VERSION_FROM_PACKAGE_JSON} Ada function false false function function false`);
 });
 
 test("i18n language codes are validated before they become a file path", () => {
