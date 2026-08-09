@@ -13,12 +13,24 @@ import { stringify as stringifyCsv } from "csv-stringify/sync";
 import {
   CanonicalField,
   ContactMapper,
+  MappingResult,
+  MappingSchema,
   NormalizationError,
   RolodexterError,
+  __version__,
 } from "./index.js";
 
 const DEFAULT_MAX_MATERIALIZED_ROWS = 100_000;
 const DEFAULT_MAX_JSON_INPUT_BYTES = 50 * 1024 * 1024;
+// Matches below this are reported for review. Exact (1.0) and normalized
+// (0.95) matches are header-derived and reliable; fuzzy (0.85/0.70) and
+// value-shape heuristics (0.60) are guesses worth a human glance.
+const REVIEW_CONFIDENCE = 0.95;
+const MAX_SUMMARY_COLUMNS = 20;
+// Exit code when rows failed but the run was allowed to continue. Distinct
+// from 1 (the run itself failed) so a caller can tell "nothing was produced"
+// from "output written, but some rows did not make it".
+const EXIT_PARTIAL = 2;
 const CLI_EOL = process.platform === "win32" ? "\r\n" : "\n";
 
 let brokenPipeExiting = false;
@@ -80,6 +92,11 @@ interface MapArgs {
   quarantineOutput?: string;
   maxMaterializedRows: number | null;
   maxJsonInputBytes: number | null;
+  keepUnmapped: boolean;
+  dedupe: boolean;
+  override?: string[];
+  schemaOut?: string;
+  schemaIn?: string;
 }
 
 interface ExplainArgs {
@@ -87,6 +104,21 @@ interface ExplainArgs {
   value?: string;
   region: string;
   languages?: string;
+  override?: string[];
+}
+
+interface ProfileArgs {
+  input: string;
+  inFormat: Format;
+  region: string;
+  languages?: string;
+  override?: string[];
+  maxRows: number;
+  minConfidence: number;
+  embeddedPhones: boolean;
+  noNormalize: boolean;
+  json: boolean;
+  maxJsonInputBytes: number | null;
 }
 
 class CliUsageError extends Error {
@@ -121,36 +153,31 @@ function logStderr(text = ""): void {
 
 function usage(): string {
   return [
-    "usage: rolodexter [-h] {map,explain,fields} ...",
+    "usage: rolodexter [-h] [--version] {map,explain,profile,fields} ...",
     "",
     "Map messy contact data to a clean canonical schema.",
     "",
     "positional arguments:",
-    "  {map,explain,fields}",
+    "  {map,explain,profile,fields}",
     "    map                 Map a CSV/JSON/JSONL file to canonical fields",
     "    explain             Show how a single header resolves",
+    "    profile             Report how well a file maps, without writing any",
+    "                        output",
     "    fields              List all canonical fields",
     "",
     "options:",
     "  -h, --help            show this help message and exit",
+    "  --version             show program's version number and exit",
   ].join("\n");
 }
 
 function rootUsageLine(): string {
-  return "usage: rolodexter [-h] {map,explain,fields} ...";
+  return "usage: rolodexter [-h] [--version] {map,explain,profile,fields} ...";
 }
 
 function mapUsage(): string {
   return [
-    "usage: rolodexter map [-h] [-o OUTPUT] [--format {auto,csv,json,jsonl}]",
-    "                      [--in-format {auto,csv,json,jsonl}] [--region REGION]",
-    "                      [--languages LANGUAGES] [--strict]",
-    "                      [--min-confidence MIN_CONFIDENCE] [--no-normalize]",
-    "                      [--embedded-phones] [--on-error {fail,skip,quarantine}]",
-    "                      [--quarantine-output QUARANTINE_OUTPUT]",
-    "                      [--max-materialized-rows MAX_MATERIALIZED_ROWS]",
-    "                      [--max-json-input-bytes MAX_JSON_INPUT_BYTES]",
-    "                      input",
+    mapUsageLine(),
     "",
     "positional arguments:",
     "  input                 Input file (.csv, .json, or .jsonl)",
@@ -187,6 +214,18 @@ function mapUsage(): string {
   "  --max-json-input-bytes MAX_JSON_INPUT_BYTES",
     "                        Maximum bytes to read with non-streaming JSON input;",
     "                        use 0 to disable (default: 52428800)",
+    "  --keep-unmapped       Carry columns that could not be mapped through to the",
+    "                        output under their original header (default: drop",
+    "                        them)",
+    "  --dedupe              Drop later rows that share an identity key (email,",
+    "                        phone or source id) with an earlier row",
+    "  --override HEADER=FIELD",
+    "                        Force a column to a canonical field, e.g. --override",
+    "                        MMERGE3=full_address (repeatable)",
+    "  --schema-out PATH     Write the resolved header plan to a JSON file for",
+    "                        reuse",
+    "  --schema-in PATH      Replay a plan saved by --schema-out so columns route",
+    "                        identically to that run",
   ].join("\n");
 }
 
@@ -200,15 +239,15 @@ function mapUsageLine(): string {
     "                      [--quarantine-output QUARANTINE_OUTPUT]",
     "                      [--max-materialized-rows MAX_MATERIALIZED_ROWS]",
     "                      [--max-json-input-bytes MAX_JSON_INPUT_BYTES]",
+    "                      [--keep-unmapped] [--dedupe] [--override HEADER=FIELD]",
+    "                      [--schema-out PATH] [--schema-in PATH]",
     "                      input",
   ].join("\n");
 }
 
 function explainUsage(): string {
   return [
-    "usage: rolodexter explain [-h] [--value VALUE] [--region REGION]",
-    "                          [--languages LANGUAGES]",
-    "                          header",
+    explainUsageLine(),
     "",
     "positional arguments:",
     "  header                The column header to resolve",
@@ -219,14 +258,60 @@ function explainUsage(): string {
     "  --region REGION       Default phone region",
     "  --languages LANGUAGES",
     "                        Comma-separated i18n language codes (cached)",
+    "  --override HEADER=FIELD",
+    "                        Force a column to a canonical field (repeatable)",
   ].join("\n");
 }
 
 function explainUsageLine(): string {
   return [
     "usage: rolodexter explain [-h] [--value VALUE] [--region REGION]",
-    "                          [--languages LANGUAGES]",
+    "                          [--languages LANGUAGES] [--override HEADER=FIELD]",
     "                          header",
+  ].join("\n");
+}
+
+function profileUsage(): string {
+  return [
+    profileUsageLine(),
+    "",
+    "positional arguments:",
+    "  input                 Input file (.csv, .json, or .jsonl)",
+    "",
+    "options:",
+    "  -h, --help            show this help message and exit",
+    "  --in-format {auto,csv,json,jsonl}",
+    "                        Input format (default: infer from the input file",
+    "                        extension)",
+    "  --region REGION       Default phone region (ISO-3166 alpha-2)",
+    "  --languages LANGUAGES",
+    "                        Comma-separated i18n language codes (cached)",
+    "  --override HEADER=FIELD",
+    "                        Force a column to a canonical field (repeatable)",
+    "  --max-rows MAX_ROWS   Profile at most this many rows; 0 means all (default:",
+    "                        0)",
+    "  --min-confidence MIN_CONFIDENCE",
+    "                        Treat matches below this confidence as unmapped",
+    "                        (0.0-1.0)",
+    "  --embedded-phones     Also count phone numbers embedded in free-text values",
+    "  --no-normalize        Skip value normalization: much faster on a large",
+    "                        export, but drops the phone/email/date warning counts",
+    "  --json                Emit the profile as JSON",
+    "  --max-json-input-bytes MAX_JSON_INPUT_BYTES",
+    "                        Maximum bytes to read with non-streaming JSON input; 0",
+    "                        disables",
+  ].join("\n");
+}
+
+function profileUsageLine(): string {
+  return [
+    "usage: rolodexter profile [-h] [--in-format {auto,csv,json,jsonl}]",
+    "                          [--region REGION] [--languages LANGUAGES]",
+    "                          [--override HEADER=FIELD] [--max-rows MAX_ROWS]",
+    "                          [--min-confidence MIN_CONFIDENCE]",
+    "                          [--embedded-phones] [--no-normalize] [--json]",
+    "                          [--max-json-input-bytes MAX_JSON_INPUT_BYTES]",
+    "                          input",
   ].join("\n");
 }
 
@@ -309,13 +394,70 @@ function resolvedHelpOption(arg: string, usageText: string, prog: string): boole
   }
   const equalsAt = arg.indexOf("=");
   const raw = equalsAt === -1 ? arg : arg.slice(0, equalsAt);
-  if (!"--help".startsWith(raw)) {
+  if (!"--help".startsWith(raw) || raw === "--") {
     return false;
   }
   if (equalsAt !== -1) {
     throw usageError(usageText, prog, `argument --help: ignored explicit argument ${pyRepr(arg.slice(equalsAt + 1))}`);
   }
   return true;
+}
+
+function resolvedVersionOption(arg: string, usageText: string, prog: string): boolean {
+  if (!arg.startsWith("--") || arg === "--") {
+    return false;
+  }
+  const equalsAt = arg.indexOf("=");
+  const raw = equalsAt === -1 ? arg : arg.slice(0, equalsAt);
+  if (!"--version".startsWith(raw) || raw === "--") {
+    return false;
+  }
+  if (equalsAt !== -1) {
+    throw usageError(usageText, prog, `argument --version: ignored explicit argument ${pyRepr(arg.slice(equalsAt + 1))}`);
+  }
+  return true;
+}
+
+function parseOverrides(raw: string[] | undefined): Record<string, string> | undefined {
+  if (!raw || raw.length === 0) {
+    return undefined;
+  }
+  const overrides: Record<string, string> = {};
+  const valid = new Set(Object.values(CanonicalField).map((field) => field.value));
+  for (const entry of raw) {
+    const equalsAt = entry.indexOf("=");
+    const hasSeparator = equalsAt !== -1;
+    const header = (hasSeparator ? entry.slice(0, equalsAt) : entry).trim();
+    const canonical = (hasSeparator ? entry.slice(equalsAt + 1) : "").trim();
+    if (!hasSeparator || !header || !canonical) {
+      throw new Error(`--override expects HEADER=canonical_field, got ${pyRepr(entry)}`);
+    }
+    if (!valid.has(canonical)) {
+      throw new Error(`--override ${pyRepr(entry)}: ${pyRepr(canonical)} is not a canonical field (run 'rolodexter fields' to list them)`);
+    }
+    overrides[header] = canonical;
+  }
+  return overrides;
+}
+
+interface BuildMapperArgs {
+  region: string;
+  languages?: string;
+  normalize?: boolean;
+  strict?: boolean;
+  minConfidence?: number;
+  override?: string[];
+}
+
+function buildMapper(args: BuildMapperArgs): ContactMapper {
+  return new ContactMapper({
+    default_region: args.region,
+    languages: parseLanguages(args.languages),
+    normalize: args.normalize ?? true,
+    strict: args.strict ?? false,
+    confidence_threshold: args.minConfidence ?? 0,
+    overrides: parseOverrides(args.override),
+  });
 }
 
 function rejectExplicitFlagValue(option: string, value: string | undefined, usageText: string, prog: string): void {
@@ -379,11 +521,11 @@ function takeResolvedValue(argv: string[], index: number, option: string, value:
   return [next, index + 1];
 }
 
-function validateFormat(value: string, option: string): Format {
+function validateFormat(value: string, option: string, usageText: string, prog: string): Format {
   if (["auto", "csv", "json", "jsonl"].includes(value)) {
     return value as Format;
   }
-  throw usageError(mapUsageLine(), "rolodexter map", `argument ${option}: invalid choice: ${pyRepr(value)} (choose from auto, csv, json, jsonl)`);
+  throw usageError(usageText, prog, `argument ${option}: invalid choice: ${pyRepr(value)} (choose from auto, csv, json, jsonl)`);
 }
 
 function validateOnError(value: string): OnError {
@@ -410,6 +552,11 @@ function parseMapArgs(argv: string[]): MapArgs {
     "--quarantine-output",
     "--max-materialized-rows",
     "--max-json-input-bytes",
+    "--keep-unmapped",
+    "--dedupe",
+    "--override",
+    "--schema-out",
+    "--schema-in",
     "--help",
   ];
   const args: MapArgs = {
@@ -424,6 +571,8 @@ function parseMapArgs(argv: string[]): MapArgs {
     onError: "fail",
     maxMaterializedRows: DEFAULT_MAX_MATERIALIZED_ROWS,
     maxJsonInputBytes: DEFAULT_MAX_JSON_INPUT_BYTES,
+    keepUnmapped: false,
+    dedupe: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -445,11 +594,11 @@ function parseMapArgs(argv: string[]): MapArgs {
       args.output = arg.slice(2);
     } else if (option === "--format") {
       const [value, next] = takeResolvedValue(argv, i, "--format", inlineValue, mapUsageLine(), "rolodexter map");
-      args.format = validateFormat(value, "--format");
+      args.format = validateFormat(value, "--format", mapUsageLine(), "rolodexter map");
       i = next;
     } else if (option === "--in-format") {
       const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, mapUsageLine(), "rolodexter map");
-      args.inFormat = validateFormat(value, "--in-format");
+      args.inFormat = validateFormat(value, "--in-format", mapUsageLine(), "rolodexter map");
       i = next;
     } else if (option === "--region") {
       const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, mapUsageLine(), "rolodexter map");
@@ -487,6 +636,24 @@ function parseMapArgs(argv: string[]): MapArgs {
     } else if (option === "--max-json-input-bytes") {
       const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, mapUsageLine(), "rolodexter map");
       args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", mapUsageLine(), "rolodexter map"));
+      i = next;
+    } else if (option === "--keep-unmapped") {
+      rejectExplicitFlagValue("--keep-unmapped", inlineValue, mapUsageLine(), "rolodexter map");
+      args.keepUnmapped = true;
+    } else if (option === "--dedupe") {
+      rejectExplicitFlagValue("--dedupe", inlineValue, mapUsageLine(), "rolodexter map");
+      args.dedupe = true;
+    } else if (option === "--override") {
+      const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, mapUsageLine(), "rolodexter map");
+      (args.override ??= []).push(value);
+      i = next;
+    } else if (option === "--schema-out") {
+      const [value, next] = takeResolvedValue(argv, i, "--schema-out", inlineValue, mapUsageLine(), "rolodexter map");
+      args.schemaOut = value;
+      i = next;
+    } else if (option === "--schema-in") {
+      const [value, next] = takeResolvedValue(argv, i, "--schema-in", inlineValue, mapUsageLine(), "rolodexter map");
+      args.schemaIn = value;
       i = next;
     } else if (option === "--help" || arg === "-h") {
       rejectExplicitFlagValue("--help", inlineValue, mapUsageLine(), "rolodexter map");
@@ -530,7 +697,7 @@ function parseMapArgs(argv: string[]): MapArgs {
 function parseExplainArgs(argv: string[]): ExplainArgs {
   const positional: string[] = [];
   const unknownShortOptions: string[] = [];
-  const knownOptions = ["--value", "--region", "--languages", "--help"];
+  const knownOptions = ["--value", "--region", "--languages", "--override", "--help"];
   const args: ExplainArgs = { header: "", region: "US" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i] ?? "";
@@ -552,6 +719,10 @@ function parseExplainArgs(argv: string[]): ExplainArgs {
     } else if (option === "--languages") {
       const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, explainUsageLine(), "rolodexter explain");
       args.languages = value;
+      i = next;
+    } else if (option === "--override") {
+      const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, explainUsageLine(), "rolodexter explain");
+      (args.override ??= []).push(value);
       i = next;
     } else if (option === "--help" || arg === "-h") {
       rejectExplicitFlagValue("--help", inlineValue, explainUsageLine(), "rolodexter explain");
@@ -576,6 +747,106 @@ function parseExplainArgs(argv: string[]): ExplainArgs {
     throw usageError(explainUsageLine(), "rolodexter explain", `unrecognized arguments: ${positional.slice(1).join(" ")}`);
   }
   args.header = positional[0] ?? "";
+  return args;
+}
+
+function parseProfileArgs(argv: string[]): ProfileArgs {
+  const positional: string[] = [];
+  const unknownShortOptions: string[] = [];
+  const knownOptions = [
+    "--in-format",
+    "--region",
+    "--languages",
+    "--override",
+    "--max-rows",
+    "--min-confidence",
+    "--embedded-phones",
+    "--no-normalize",
+    "--json",
+    "--max-json-input-bytes",
+    "--help",
+  ];
+  const args: ProfileArgs = {
+    input: "",
+    inFormat: "auto",
+    region: "US",
+    maxRows: 0,
+    minConfidence: 0,
+    embeddedPhones: false,
+    noNormalize: false,
+    json: false,
+    maxJsonInputBytes: DEFAULT_MAX_JSON_INPUT_BYTES,
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i] ?? "";
+    if (arg === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    const resolved = optionToken(arg, knownOptions, profileUsageLine(), "rolodexter profile");
+    const option = resolved?.option ?? arg;
+    const inlineValue = resolved?.value;
+    if (option === "--in-format") {
+      const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.inFormat = validateFormat(value, "--in-format", profileUsageLine(), "rolodexter profile");
+      i = next;
+    } else if (option === "--region") {
+      const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.region = value;
+      i = next;
+    } else if (option === "--languages") {
+      const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.languages = value;
+      i = next;
+    } else if (option === "--override") {
+      const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, profileUsageLine(), "rolodexter profile");
+      (args.override ??= []).push(value);
+      i = next;
+    } else if (option === "--max-rows") {
+      const [value, next] = takeResolvedValue(argv, i, "--max-rows", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.maxRows = asNonNegativeInt(value, "--max-rows", profileUsageLine(), "rolodexter profile");
+      i = next;
+    } else if (option === "--min-confidence") {
+      const [value, next] = takeResolvedValue(argv, i, "--min-confidence", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.minConfidence = asFloat(value, "--min-confidence", profileUsageLine(), "rolodexter profile");
+      i = next;
+    } else if (option === "--embedded-phones") {
+      rejectExplicitFlagValue("--embedded-phones", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.embeddedPhones = true;
+    } else if (option === "--no-normalize") {
+      rejectExplicitFlagValue("--no-normalize", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.noNormalize = true;
+    } else if (option === "--json") {
+      rejectExplicitFlagValue("--json", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.json = true;
+    } else if (option === "--max-json-input-bytes") {
+      const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, profileUsageLine(), "rolodexter profile");
+      args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", profileUsageLine(), "rolodexter profile"));
+      i = next;
+    } else if (option === "--help" || arg === "-h") {
+      rejectExplicitFlagValue("--help", inlineValue, profileUsageLine(), "rolodexter profile");
+      throw new CliHelpError(profileUsage());
+    } else if (arg.startsWith("-")) {
+      if (/^-[^-]/.test(arg) && positional.length === 0) {
+        unknownShortOptions.push(arg);
+        continue;
+      }
+      throw usageError(profileUsageLine(), "rolodexter profile", `unrecognized arguments: ${arg}`);
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length === 0) {
+    throw usageError(profileUsageLine(), "rolodexter profile", "the following arguments are required: input");
+  }
+  if (unknownShortOptions.length > 0) {
+    throw usageError(rootUsageLine(), "rolodexter", `unrecognized arguments: ${unknownShortOptions.join(" ")}`);
+  }
+  if (positional.length > 1) {
+    throw usageError(profileUsageLine(), "rolodexter profile", `unrecognized arguments: ${positional.slice(1).join(" ")}`);
+  }
+  args.input = positional[0] ?? "";
   return args;
 }
 
@@ -639,6 +910,55 @@ function parsePythonCsv(text: string): string[][] {
 
 function csvRecordLineSpan(record: string[]): number {
   return Math.max(1, record.reduce((total, field) => total + (field.match(/\n/g)?.length ?? 0), 0));
+}
+
+/**
+ * Return unique header names, suffixing repeats, plus how many were renamed.
+ *
+ * A CSV reader that keeps only the last value for a repeated column name
+ * silently loses the first one before the mapper ever sees it. Renaming the
+ * repeats to `Email__2` keeps both values and lets the mapper's own
+ * collision handling merge them into a list, which is the documented
+ * behavior for two headers that mean the same field.
+ */
+function dedupeHeaders(rawHeaders: string[]): [string[], number] {
+  const seen = new Map<string, number>();
+  const out: string[] = [];
+  let renamed = 0;
+  rawHeaders.forEach((header, index) => {
+    let name = (header ?? "").trim() || `column_${index + 1}`;
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    if (count > 1) {
+      name = `${name}__${count}`;
+      renamed += 1;
+    }
+    out.push(name);
+  });
+  return [out, renamed];
+}
+
+/**
+ * True if the first CSV row looks like a contact rather than column names.
+ *
+ * Row 1 is treated as data when at least one cell parses as an email, a
+ * phone number or a URL - things that are values, never column names.
+ */
+function looksLikeDataNotHeaders(headers: string[], mapper: ContactMapper): boolean {
+  if (headers.length === 0) {
+    return false;
+  }
+  for (const header of headers) {
+    const cell = (header ?? "").trim();
+    if (!cell) {
+      continue;
+    }
+    const match = mapper.identify("__header_probe__", { value: cell });
+    if (match.strategy === "heuristic" && ["email", "phone", "website"].includes(match.canonical)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 const JSON_NAN_SENTINEL = "\u0000rolodexter.nan\u0000";
@@ -713,10 +1033,19 @@ function parsePythonJson(raw: string): unknown {
   return revivePythonJsonConstants(JSON.parse(replacePythonJsonConstants(raw)) as unknown);
 }
 
-async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null): AsyncGenerator<InputRow | RowFailure> {
+async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
   if (format === "csv") {
     const records = parsePythonCsv(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
-    const headers = (records.shift() ?? []).map(String);
+    const rawHeaders = (records.shift() ?? []).map(String);
+    const [headers, renamed] = dedupeHeaders(rawHeaders);
+    if (renamed > 0) {
+      logStderr(`warning: ${renamed} duplicate column name(s) in ${path} were renamed with a __N suffix so no column is lost`);
+    }
+    if (mapper && looksLikeDataNotHeaders(rawHeaders, mapper)) {
+      logStderr(
+        `warning: the first row of ${path} looks like DATA, not column names - it has been consumed as the header row and that record will not appear in the output. Add a header row, or re-export with one.`,
+      );
+    }
     let lineNumber = 1;
     for (const record of records) {
       lineNumber += csvRecordLineSpan(record);
@@ -725,7 +1054,7 @@ async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonB
       }
       const data: Record<string, unknown> = {};
       for (const [index, header] of headers.entries()) {
-        data[header] = index < record.length ? record[index] : null;
+        data[header] = index < record.length ? record[index] : "";
       }
       yield { kind: "row", rowNumber: lineNumber, data };
     }
@@ -905,13 +1234,37 @@ function jsonLocation(raw: string, offset: number): string {
   return `: line ${line} column ${column} (char ${bounded})`;
 }
 
+/**
+ * Return the dict written for one mapped row.
+ *
+ * `MappingResult.unmapped` holds every column the mapper could not place.
+ * `--keep-unmapped` passes those columns through untouched under their
+ * original header. A canonical field always wins its own name; an unmapped
+ * column that happens to collide keeps its data under a suffixed key.
+ */
+function rowPayload(result: MappingResult, keepUnmapped: boolean): Record<string, unknown> {
+  if (!keepUnmapped || Object.keys(result.unmapped).length === 0) {
+    return result.normalized;
+  }
+  const merged: Record<string, unknown> = { ...result.normalized };
+  for (const [key, value] of Object.entries(result.unmapped)) {
+    let target = Object.prototype.hasOwnProperty.call(merged, key) ? `${key}__unmapped` : key;
+    while (Object.prototype.hasOwnProperty.call(merged, target)) {
+      target += "_";
+    }
+    merged[target] = value;
+  }
+  return merged;
+}
+
 function formatRows(
-  results: ReturnType<ContactMapper["map_payload"]>[],
+  results: MappingResult[],
   format: Exclude<Format, "auto">,
   maxRows: number | null,
   outputPath: string | undefined,
+  keepUnmapped: boolean,
 ): string {
-  const rows = results.map((result) => result.normalized);
+  const rows = results.map((result) => rowPayload(result, keepUnmapped));
   if (format === "jsonl") {
     return rows.map((row) => pythonCompactJson(row)).join("\n") + (rows.length ? "\n" : "");
   }
@@ -1071,30 +1424,105 @@ function comparablePath(path: string): string {
   return process.platform === "win32" ? absolute.toLowerCase() : absolute;
 }
 
+/**
+ * Opens the quarantine file on the FIRST failure, not before.
+ *
+ * A stream opened up front would still create - and, via the atomic
+ * rename, truncate - whatever was at that path even on a run with zero
+ * failures. Since the default path is derived from the input or output
+ * name, a clean re-run would silently destroy the previous run's rejects.
+ */
+class LazyQuarantineWriter {
+  readonly #path: string;
+  #writer: TextWriter | undefined;
+
+  constructor(path: string) {
+    this.#path = path;
+  }
+
+  async write(failure: RowFailure): Promise<void> {
+    if (!this.#writer) {
+      this.#writer = createTextWriter(this.#path);
+    }
+    await this.#writer.write(`${pythonCompactJson({
+      row: failure.rowNumber,
+      error: failure.error,
+      raw: failure.raw,
+    })}\n`);
+  }
+
+  async close(): Promise<void> {
+    await closeTextWriter(this.#writer);
+  }
+
+  async abort(): Promise<void> {
+    await abortTextWriter(this.#writer);
+  }
+}
+
 async function handleFailure(
   failure: RowFailure,
   args: MapArgs,
-  quarantine: RowFailure[],
-  quarantineWriter: TextWriter | undefined,
+  quarantineWriter: LazyQuarantineWriter | undefined,
 ): Promise<number> {
   if (args.onError === "fail") {
     throw new Error(`row ${failure.rowNumber}: ${failure.error}`);
   }
-  if (args.onError === "quarantine") {
-    logStderr(`warning: quarantined row ${failure.rowNumber}: ${failure.error}`);
-    if (quarantineWriter) {
-      await quarantineWriter.write(`${pythonCompactJson({
-        row: failure.rowNumber,
-        error: failure.error,
-        raw: failure.raw,
-      })}\n`);
-    } else {
-      quarantine.push(failure);
-    }
-  } else {
+  if (args.onError === "skip") {
     logStderr(`warning: skipped row ${failure.rowNumber}: ${failure.error}`);
+    return 1;
   }
+  if (!quarantineWriter) {
+    throw new Error("--on-error quarantine requires a quarantine output");
+  }
+  await quarantineWriter.write(failure);
+  logStderr(`warning: quarantined row ${failure.rowNumber}: ${failure.error}`);
   return 1;
+}
+
+interface MapStats {
+  failed: number;
+  duplicates: number;
+  droppedHeaders: Map<string, number>;
+  lowConfidence: Map<string, number>;
+}
+
+/** Record which columns were dropped or matched only weakly. */
+function noteResult(stats: MapStats, result: MappingResult): void {
+  for (const match of result.field_matches) {
+    if (!match.is_matched) {
+      stats.droppedHeaders.set(match.original, (stats.droppedHeaders.get(match.original) ?? 0) + 1);
+    } else if (match.confidence < REVIEW_CONFIDENCE) {
+      const key = `${match.original} -> ${match.canonical}`;
+      stats.lowConfidence.set(key, (stats.lowConfidence.get(key) ?? 0) + 1);
+    }
+  }
+}
+
+/** Print a one-line-per-column stderr summary, capped so it stays readable. */
+function summarizeColumns(label: string, counts: Map<string, number>, hint: string): void {
+  if (counts.size === 0) {
+    return;
+  }
+  const ordered = [...counts.entries()].sort((left, right) => (right[1] - left[1]) || left[0].localeCompare(right[0]));
+  const shown = ordered.slice(0, MAX_SUMMARY_COLUMNS);
+  logStderr(`warning: ${label} (${ordered.length} column(s)); ${hint}`);
+  for (const [name, count] of shown) {
+    logStderr(`  ${name}  [${count} row(s)]`);
+  }
+  if (ordered.length > shown.length) {
+    logStderr(`  ... and ${ordered.length - shown.length} more`);
+  }
+}
+
+/** Return the first row's header names without consuming the whole file. */
+async function peekHeaders(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null): Promise<string[]> {
+  for await (const item of readRows(path, format, maxJsonBytes)) {
+    if (item.kind === "row") {
+      return Object.keys(item.data);
+    }
+  }
+  return [];
 }
 
 async function commandMap(argv: string[]): Promise<number> {
@@ -1108,18 +1536,39 @@ async function commandMap(argv: string[]): Promise<number> {
     }
     throw error;
   }
-  const mapper = new ContactMapper({
-    default_region: args.region,
-    languages: parseLanguages(args.languages),
+
+  if (args.output && comparablePath(args.output) === comparablePath(args.input)) {
+    // The transform is lossy in both directions: original formatting is
+    // rewritten, and any column the mapper cannot place is dropped unless
+    // --keep-unmapped is set. Overwriting the source export in place would
+    // destroy the only copy, with no undo.
+    throw new Error(
+      "output must differ from the input path; mapping a file onto itself would destroy the original export",
+    );
+  }
+
+  const mapper = buildMapper({
+    region: args.region,
+    languages: args.languages,
     normalize: args.normalize,
     strict: args.strict,
-    confidence_threshold: args.minConfidence,
+    minConfidence: args.minConfidence,
+    override: args.override,
   });
   const inputFormat = detectFormat(args.input, args.inFormat);
   const outputFormat = args.output ? detectFormat(args.output, args.format) : args.format === "auto" ? "json" : args.format;
   if (!existsSync(args.input)) {
     throw new Error(fileNotFoundMessage(args.input));
   }
+
+  if (args.schemaIn) {
+    if (!existsSync(args.schemaIn)) {
+      throw new Error(fileNotFoundMessage(args.schemaIn));
+    }
+    const data = parsePythonJson(readFileSync(args.schemaIn, "utf8"));
+    MappingSchema.from_dict(data as Record<string, unknown>, mapper);
+  }
+
   const quarantinePath = args.onError === "quarantine" ? defaultQuarantinePath(args) : undefined;
   if (quarantinePath && comparablePath(quarantinePath) === comparablePath(args.input)) {
     throw new Error("quarantine output must differ from the input path");
@@ -1131,74 +1580,105 @@ async function commandMap(argv: string[]): Promise<number> {
   ) {
     throw new Error("quarantine output must differ from the mapped output path");
   }
-  const items = readRows(args.input, inputFormat, args.maxJsonInputBytes);
-  const results: ReturnType<ContactMapper["map_payload"]>[] = [];
-  const quarantine: RowFailure[] = [];
-  let failed = 0;
+
+  const stats: MapStats = { failed: 0, duplicates: 0, droppedHeaders: new Map(), lowConfidence: new Map() };
+  const seenKeys = new Set<string>();
+  const items = readRows(args.input, inputFormat, args.maxJsonInputBytes, mapper);
+  const results: MappingResult[] = [];
   let count = 0;
   const streamJsonl = outputFormat === "jsonl";
   const outputWriter = streamJsonl ? createTextWriter(args.output) : undefined;
-  const quarantineWriter = streamJsonl && quarantinePath ? createTextWriter(quarantinePath) : undefined;
+  const quarantineWriter = quarantinePath ? new LazyQuarantineWriter(quarantinePath) : undefined;
 
   try {
     for await (const item of items) {
       if (item.kind === "failure") {
-        failed += await handleFailure(item, args, quarantine, quarantineWriter);
+        stats.failed += await handleFailure(item, args, quarantineWriter);
         continue;
       }
-      if (!streamJsonl && args.maxMaterializedRows !== null && results.length >= args.maxMaterializedRows) {
-        throw new Error(`${outputFormat.toUpperCase()} output requires materializing more than ${args.maxMaterializedRows} row(s); use --format jsonl for streaming output or raise --max-materialized-rows`);
-      }
+      let result: MappingResult;
       try {
-        const result = mapper.map_payload(item.data, { extract_embedded_phones: args.embeddedPhones });
-        if (streamJsonl) {
-          await outputWriter?.write(`${pythonCompactJson(result.normalized)}\n`);
-          count += 1;
-        } else {
-          results.push(result);
-        }
+        result = mapper.map_payload(item.data, { extract_embedded_phones: args.embeddedPhones });
       } catch (error) {
-        failed += await handleFailure({
+        stats.failed += await handleFailure({
           kind: "failure",
           rowNumber: item.rowNumber,
           error: (error as Error).message,
           raw: item.data,
-        }, args, quarantine, quarantineWriter);
+        }, args, quarantineWriter);
+        continue;
+      }
+
+      noteResult(stats, result);
+      if (args.dedupe) {
+        const keys = result.get_identity_keys();
+        if (keys.length > 0 && keys.some((key) => seenKeys.has(key))) {
+          stats.duplicates += 1;
+          continue;
+        }
+        for (const key of keys) {
+          seenKeys.add(key);
+        }
+      }
+
+      if (streamJsonl) {
+        await outputWriter?.write(`${pythonCompactJson(rowPayload(result, args.keepUnmapped))}\n`);
+        count += 1;
+      } else {
+        if (args.maxMaterializedRows !== null && results.length >= args.maxMaterializedRows) {
+          throw new Error(`${outputFormat.toUpperCase()} output requires materializing more than ${args.maxMaterializedRows} row(s); use --format jsonl for streaming output or raise --max-materialized-rows`);
+        }
+        results.push(result);
       }
     }
 
     if (streamJsonl) {
       await closeTextWriter(outputWriter);
-      await closeTextWriter(quarantineWriter);
+      await quarantineWriter?.close();
     } else {
-      const output = formatRows(results, outputFormat, args.maxMaterializedRows, args.output);
+      const output = formatRows(results, outputFormat, args.maxMaterializedRows, args.output, args.keepUnmapped);
       writeAtomic(args.output, output);
-      if (args.onError === "quarantine" && quarantinePath) {
-        const quarantineText = quarantine.map((failure) => pythonCompactJson({
-          row: failure.rowNumber,
-          error: failure.error,
-          raw: failure.raw,
-        })).join("\n");
-        writeAtomic(quarantinePath, quarantineText ? `${quarantineText}\n` : "");
-      }
+      await quarantineWriter?.close();
       count = results.length;
     }
   } catch (error) {
     await abortTextWriter(outputWriter);
-    await abortTextWriter(quarantineWriter);
+    await quarantineWriter?.abort();
     throw error;
   }
 
+  if (args.schemaOut) {
+    const headers = await peekHeaders(args.input, inputFormat, args.maxJsonInputBytes);
+    const schema = mapper.compile_schema(headers);
+    writeAtomic(args.schemaOut, `${pythonPrettyJson(schema.to_dict())}\n`);
+  }
+
+  if (!args.keepUnmapped) {
+    summarizeColumns(
+      "dropped unmapped column(s) from the output",
+      stats.droppedHeaders,
+      "pass --keep-unmapped to carry them through",
+    );
+  }
+  summarizeColumns(
+    "low-confidence column mapping(s)",
+    stats.lowConfidence,
+    "review these, then pin them with --override HEADER=field or raise --min-confidence",
+  );
+
   let message = `Mapped ${count} row(s) -> ${args.output || "stdout"} (${outputFormat})`;
-  if (failed) {
+  if (stats.duplicates) {
+    message += `; dropped ${stats.duplicates} duplicate row(s)`;
+  }
+  if (stats.failed) {
     if (args.onError === "quarantine") {
-      message += `; quarantined ${failed} row(s) -> ${quarantinePath}`;
+      message += `; quarantined ${stats.failed} row(s) -> ${quarantinePath}`;
     } else {
-      message += `; skipped ${failed} row(s)`;
+      message += `; skipped ${stats.failed} row(s)`;
     }
   }
   logStderr(message);
-  return 0;
+  return stats.failed ? EXIT_PARTIAL : 0;
 }
 
 function commandExplain(argv: string[]): number {
@@ -1212,15 +1692,62 @@ function commandExplain(argv: string[]): number {
     }
     throw error;
   }
-  const mapper = new ContactMapper({
-    default_region: args.region,
-    languages: parseLanguages(args.languages),
-  });
+  const mapper = buildMapper({ region: args.region, languages: args.languages, override: args.override });
   const match = mapper.identify(args.header, { value: args.value });
   logStdout(`${inspect(args.header)} -> ${match.canonical} [${match.strategy}, conf=${match.confidence.toFixed(2)}]`);
   if (args.value !== undefined) {
     logStdout();
     logStdout(mapper.map_payload({ [args.header]: args.value }).explain());
+  }
+  return 0;
+}
+
+async function commandProfile(argv: string[]): Promise<number> {
+  let args: ProfileArgs;
+  try {
+    args = parseProfileArgs(argv);
+  } catch (error) {
+    if (error instanceof CliHelpError) {
+      logStdout(error.text);
+      return 0;
+    }
+    throw error;
+  }
+  const mapper = buildMapper({
+    region: args.region,
+    languages: args.languages,
+    normalize: !args.noNormalize,
+    minConfidence: args.minConfidence,
+    override: args.override,
+  });
+  const inputFormat = detectFormat(args.input, args.inFormat);
+  if (!existsSync(args.input)) {
+    throw new Error(fileNotFoundMessage(args.input));
+  }
+
+  // Note: unlike `map`, --max-json-input-bytes is intentionally not applied
+  // here - it mirrors the Python CLI, whose profile command parses the flag
+  // but never wires it into the read.
+  const maxRows = optionalLimit(args.maxRows);
+  const rows: Record<string, unknown>[] = [];
+  for await (const item of readRows(args.input, inputFormat, DEFAULT_MAX_JSON_INPUT_BYTES, mapper)) {
+    if (item.kind === "failure") {
+      throw new Error(`row ${item.rowNumber}: ${item.error}`);
+    }
+    rows.push(item.data);
+    if (maxRows !== null && rows.length >= maxRows) {
+      break;
+    }
+  }
+
+  const profile = mapper.profile(rows, {
+    max_rows: maxRows,
+    extract_embedded_phones: args.embeddedPhones,
+  });
+  if (args.json) {
+    writeStdout(`${pythonPrettyJson(profile.to_dict())}\n`);
+  } else {
+    logStdout(profile.explain());
   }
   return 0;
 }
@@ -1251,6 +1778,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     logStdout(usage());
     return 0;
   }
+  if (command && resolvedVersionOption(command, rootUsageLine(), "rolodexter")) {
+    logStdout(`rolodexter ${__version__}`);
+    return 0;
+  }
   if (!command) {
     throw usageError(rootUsageLine(), "rolodexter", "the following arguments are required: command");
   }
@@ -1260,10 +1791,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "explain") {
     return commandExplain(rest);
   }
+  if (command === "profile") {
+    return commandProfile(rest);
+  }
   if (command === "fields") {
     return commandFields(rest);
   }
-  throw usageError(rootUsageLine(), "rolodexter", `argument command: invalid choice: ${inspect(command)} (choose from map, explain, fields)`);
+  throw usageError(rootUsageLine(), "rolodexter", `argument command: invalid choice: ${inspect(command)} (choose from map, explain, profile, fields)`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

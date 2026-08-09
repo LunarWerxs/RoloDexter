@@ -21,20 +21,8 @@ Quick start::
 
 from __future__ import annotations
 
-from ._phone import (
-    MatchType,
-    NumberType,
-    PhoneNumber,
-    PhoneNumberMatch,
-    PhoneNumberMatcher,
-    format_e164,
-    format_international,
-    format_national,
-    is_number_match,
-    is_valid,
-    number_type,
-    parse,
-)
+from typing import TYPE_CHECKING
+
 from .core import (
     AddressNormalizer,
     BooleanNormalizer,
@@ -73,12 +61,62 @@ except PackageNotFoundError:  # pragma: no cover - running from a source tree
     __version__ = "0.0.0+unknown"
 
 
+if TYPE_CHECKING:  # pragma: no cover - import shape for type checkers only
+    from ._phone import (
+        MatchType,
+        NumberType,
+        PhoneNumber,
+        PhoneNumberMatch,
+        PhoneNumberMatcher,
+        format_e164,
+        format_international,
+        format_national,
+        is_number_match,
+        is_valid,
+        number_type,
+        parse,
+    )
+    from .i18n import SUPPORTED_LANGUAGES, generate_language
+
+# Names served lazily from ``._phone``.  Importing that module pulls in
+# ``phonenumbers``, whose country metadata costs roughly 200 ms — a price every
+# consumer of ``import rolodexter`` used to pay even when they never touched a
+# phone number (``rolodexter fields`` included).  ``core`` already imports
+# ``_phone`` lazily inside the functions that need it; this keeps the package
+# entry point consistent with that, with no change to the public API.
+_PHONE_EXPORTS = frozenset(
+    {
+        "MatchType",
+        "NumberType",
+        "PhoneNumber",
+        "PhoneNumberMatch",
+        "PhoneNumberMatcher",
+        "format_e164",
+        "format_international",
+        "format_national",
+        "is_number_match",
+        "is_valid",
+        "number_type",
+        "parse",
+    }
+)
+_I18N_EXPORTS = frozenset({"SUPPORTED_LANGUAGES", "generate_language"})
+
+
 def __getattr__(name: str) -> object:
-    if name in {"SUPPORTED_LANGUAGES", "generate_language"}:
+    if name in _I18N_EXPORTS:
         from . import i18n
 
         return getattr(i18n, name)
+    if name in _PHONE_EXPORTS:
+        from . import _phone
+
+        return getattr(_phone, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)
 
 
 __all__ = [

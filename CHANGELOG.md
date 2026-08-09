@@ -7,7 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.10.0] — 2026-07-23
+## [2.11.0] - 2026-08-09
+
+Minor release: a pre-flight `profile` command, reproducible-import tooling
+(schema lockfiles, per-column overrides, dedupe), new date/country/state
+normalizers, and a batch of correctness and safety fixes across the CLI, core
+library, and JS package.
+
+### Added
+
+- **`rolodexter profile INPUT`.** Reports match rate, which canonical fields
+  were populated, which headers went unmapped, and warning counts, without
+  writing any mapped output. This is the "what will I lose?" pre-flight step
+  the CLI previously had no answer for. Supports `--json`, `--max-rows`,
+  `--no-normalize` (faster; drops value-level warning counts), and the usual
+  `--region` / `--languages` / `--min-confidence` / `--override` flags.
+- **`rolodexter --version`.**
+- **Reproducible imports: `map --schema-out` / `--schema-in`.** Saves the
+  resolved header plan to a JSON file and replays it on a later run, so an
+  import routes columns identically across runs and across a `patterns.json`
+  update. Call it a mapping lockfile. At the library level,
+  `MappingSchema.to_dict()` / `MappingSchema.from_dict(data, mapper)` do the
+  serialization, and the new `ContactMapper.seed_header_cache(matches)` is
+  what makes a replayed plan win over live resolution.
+- **`map --override HEADER=FIELD`** (repeatable; also available on `explain`
+  and `profile`). Forces a column to a canonical field regardless of what the
+  alias table would otherwise resolve, e.g. `--override MMERGE3=full_address`.
+- **`map --keep-unmapped`.** Previously the CLI silently dropped every column
+  it could not map. It now warns on stderr listing the dropped columns, and
+  this flag carries them through to the output instead.
+- **`map --dedupe`.** Drops later rows that share an identity key (email,
+  phone, or source id) with an earlier row.
+- **New value normalizers.** Dates now normalize to ISO-8601 (`birthday`,
+  `created_at`, `updated_at`, `last_contacted`); countries to ISO 3166-1
+  alpha-2; US states and Canadian provinces to their 2-letter code. The date
+  normalizer refuses to guess: it only reorders a value when the order is
+  unambiguous, and reports an ambiguous value (`03/04/2024`, a two-digit year)
+  as a warning rather than silently picking a day/month order.
+- **`MappingWarning`.** `MappingResult.warnings` entries are now a `str`
+  subclass carrying `.category` (a `WarningCategory` value); fully backward
+  compatible, since they still compare, format, and JSON-serialize as plain
+  strings. `profile()` now groups warnings by that category instead of
+  matching substrings of the message text.
+- **Per-call `normalize=` override.** `map_payload`, `map_batch`,
+  `map_stream`, and `profile` all accept a per-call `normalize=` argument.
+
+### Fixed
+
+- **`map` exits 2 (not 0) when rows were skipped or quarantined,** so a
+  pipeline can gate on it instead of reporting success on a run that silently
+  dropped rows.
+- **Duplicate CSV column names are no longer lost.** A CSV with two columns
+  sharing a name used to have the first silently discarded by
+  `csv.DictReader`; both are now kept (the repeat is renamed with a `__N`
+  suffix) and merged by the mapper's normal collision handling.
+- **A headerless CSV now warns loudly** instead of silently treating row 1 as
+  the schema and losing that record.
+- **`map input.csv -o input.csv` is refused** instead of destroying the
+  source file. Mapping is lossy in both directions (formatting is rewritten,
+  and any unmapped column is dropped unless `--keep-unmapped` is set), so
+  overwriting the source in place had no undo.
+- **`--on-error quarantine` no longer creates or truncates the quarantine
+  file on a run with zero failures,** so a clean re-run no longer destroys
+  the previous run's rejects.
+- **A bare five-digit value is no longer guessed as a postal code without a
+  corroborating header,** so an order total or an account balance is no
+  longer filed as someone's address.
+- **A header naming a foreign key** (`primary_phone_id`, `contact_email_id`,
+  `email_ref`) **is no longer routed to the field that holds the value
+  itself.**
+- **`get_identity_keys()` no longer pairs `source_id` with `source_service`
+  by list position,** which fabricated a vendor attribution when a payload
+  had several of each.
+- **`import rolodexter` no longer eagerly loads libphonenumber metadata.**
+  Startup dropped from about 210 ms to about 80 ms, and `rolodexter fields`
+  from about 850 ms to about 220 ms end to end.
+- **A malformed i18n cache file with a non-string alias is now skipped as
+  corrupt** instead of raising an uncaught `AttributeError` out of
+  `ContactMapper()`.
+- **An unsupported or wrong-case i18n language code is now reported** instead
+  of silently ignored.
+- **Email values that are not shaped like an email now produce a warning,**
+  matching what the phone field already did.
+- **`profile()` gained a `normalize=False` fast path** for a quicker preview
+  on a large export (drops value-level warning counts).
+- **JS: a column literally named `__proto__` is now preserved as data**
+  instead of being dropped and replacing the returned object's prototype,
+  matching Python.
+- **JS: the name-particle set was missing entries,** so some names
+  capitalized differently than they did in Python; the sets now match.
+
+### Security
+
+- **i18n language-code path traversal.** An unvalidated language code could
+  traverse out of the i18n cache directory and have an arbitrary JSON file
+  merged into the alias routing table that decides where every column of a
+  contact export is routed. Language codes are now validated against the
+  supported set and case-folded, so `"ES"` resolves the same as `"es"`.
+
+## [2.10.0] - 2026-07-23
 
 Minor release: streaming import diagnostics and cross-import identity helpers,
 plus correctness and safety hardening for pattern registries, DataFrames, and
@@ -48,7 +146,7 @@ CLI output.
   pylint error checks in addition to Ruff, mypy, tests, parity probes, and
   package checks.
 
-## [2.9.1] — 2026-07-09
+## [2.9.1] - 2026-07-09
 
 Patch release: internal hardening with no public API changes.
 
@@ -66,7 +164,7 @@ Patch release: internal hardening with no public API changes.
 - **Py/JS conformance fixtures.** `tests/fixtures/conformance_cases.json` adds
   a shared corpus exercised by both `pytest` and the JS test runner.
 
-## [2.9.0] — 2026-07-08
+## [2.9.0] - 2026-07-08
 
 Minor release: new public features and API additions (first-class
 TypeScript/NPM package, expanded CLI, batch/stream/schema/DataFrame helpers)
@@ -173,7 +271,7 @@ current dependency/tooling resolutions.
   phone extraction, i18n user-cache/dependency-split tests, ambiguity guards for
   date/phone value-shape heuristics, plus LRU cache-control coverage.
 
-## [2.8.0] — 2026-05-28
+## [2.8.0] - 2026-05-28
 
 Forward-looking feature release: observability, a CLI, DataFrame + streaming
 APIs, an accuracy benchmark, and supply-chain hardening.
@@ -187,20 +285,20 @@ APIs, an accuracy benchmark, and supply-chain hardening.
     `--min-confidence`, `--no-normalize`, `--embedded-phones`).
   - `explain HEADER [--value V]` shows how a header resolves and why.
   - `fields` lists every canonical field.
-- **`ContactMapper.map_dataframe(df)`** (pandas, via the `pandas` extra) —
-  returns a copy with columns renamed to canonical fields and values
+- **`ContactMapper.map_dataframe(df)`** (pandas, via the `pandas` extra).
+  Returns a copy with columns renamed to canonical fields and values
   normalized; unmatched columns are preserved, collisions get a `__N` suffix.
-- **`ContactMapper.map_stream(iterable)`** — lazily yields one `MappingResult`
+- **`ContactMapper.map_stream(iterable)`.** Lazily yields one `MappingResult`
   per row, keeping memory constant for million-row CSV/JSONL streams.
   `map_batch` now delegates to it.
-- **`ContactMapper.compile_schema(headers)`** → **`MappingSchema`** — resolves
+- **`ContactMapper.compile_schema(headers)`** → **`MappingSchema`.** Resolves
   a fixed header set once into a reusable plan with `column_map()` (header →
   canonical, ideal for DataFrame/SQL renames), `unmatched_headers()`, and
   `apply(row)`.
-- **`MappingResult.warnings`** — non-fatal issues (a phone that didn't reach
+- **`MappingResult.warnings`.** Non-fatal issues (a phone that didn't reach
   E.164, or a match dropped by the confidence threshold), also surfaced in
   `to_dict()`.
-- **`MappingResult.explain()`** — a human-readable, ASCII summary of the
+- **`MappingResult.explain()`.** A human-readable, ASCII summary of the
   mapping (used by `rolodexter explain`).
 - **`strict` and `confidence_threshold`** on `ContactMapper()` /
   `map_payload()` / `map_batch()` / `map_stream()`. `strict` raises
@@ -219,8 +317,8 @@ APIs, an accuracy benchmark, and supply-chain hardening.
 
 ### Security
 
-- **Heuristic data-shape matching now skips values longer than 512 chars** —
-  cell values are caller-controlled, and nothing longer is a phone/email/URL,
+- **Heuristic data-shape matching now skips values longer than 512 chars.**
+  Cell values are caller-controlled, and nothing longer is a phone/email/URL,
   so this is both correct and a cheap guard against pathological inputs.
 - Added `SECURITY.md` and Dependabot (pip + GitHub Actions).
 - Capped `phonenumbers` at `<10` for parsing stability while allowing 8.x/9.x.
@@ -232,7 +330,7 @@ APIs, an accuracy benchmark, and supply-chain hardening.
   **Hypothesis** property tests (determinism, never-crashes, idempotent
   normalization). Suite is now 861 tests at ~96% branch coverage.
 
-## [2.7.0] — 2026-05-28
+## [2.7.0] - 2026-05-28
 
 Code-health audit follow-up: scalability, reliability, and data-quality fixes.
 
@@ -242,7 +340,7 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
   (exact / normalized / fuzzy) are deterministic per header, so `map_payload`
   / `map_batch` now resolve each unique header once and reuse the verdict for
   every subsequent row. Bulk ingestion of CSV/exports (where every row shares
-  the same headers) now scales with the number of *unique headers*, not rows —
+  the same headers) now scales with the number of *unique headers*, not rows;
   a 20k-row mixed-header batch drops from ~33 s to ~1 s. Value-dependent
   heuristics still run per row, so per-row correctness is unchanged.
 
@@ -286,7 +384,7 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
   the top candidates and rejects any whose length is far from the header's
   (`FUZZY_LENGTH_RATIO`), keeping genuine typo recovery while dropping the
   degenerate substring matches.
-- **`FuzzyMatchStrategy` alias-cache thread-safety** — the length-filtered
+- **`FuzzyMatchStrategy` alias-cache thread-safety.** The length-filtered
   alias cache is now guarded by a lock, so a single `ContactMapper` is safe to
   share across worker threads. Thread-safety is now documented on
   `ContactMapper`.
@@ -298,19 +396,19 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
 - **Removed a PyPI upload token from the working-tree `.env`.** Releases use
   OIDC trusted publishing, so no token is needed. Added a `gitleaks` secret
   scan to CI to prevent recurrence. (The previously-stored token must be
-  revoked on pypi.org — it cannot be revoked from the repo.)
+  revoked on pypi.org; it cannot be revoked from the repo.)
 
-## [2.6.6] — 2026-05-23
+## [2.6.6] - 2026-05-23
 
 ### Fixed
 
-- **`_merge()` deduplication** — when multiple aliases on a payload (e.g. `phone` and `mobile`) carry the same normalized value, the result no longer contains duplicate list entries.
-- **`PatternRegistry._all_aliases` deduplication** — aliases that appeared in both the `fields` table and expansion rules (e.g. `"first"`), or across English + i18n layers, are no longer counted multiple times.  Cuts the fuzzy-match scan list to unique entries.
-- **`HeuristicMatchStrategy` phone false-positives** — bare-digit strings that match the loose phone regex are now confirmed against libphonenumber's `is_possible_number`, so 10-digit numeric IDs are no longer misclassified as phones.
-- **`NameNormalizer._ensure_prefixes` thread-safety** — the one-time `nameparser` prefix patch is now guarded by a double-checked lock.  The i18n CLI's worker pool could previously race on first use.
-- **`_phone._wrap()` italian leading zero** — reads `national_number` directly while preserving `italian_leading_zero` (e.g. Italian numbers).
+- **`_merge()` deduplication.** When multiple aliases on a payload (e.g. `phone` and `mobile`) carry the same normalized value, the result no longer contains duplicate list entries.
+- **`PatternRegistry._all_aliases` deduplication.** Aliases that appeared in both the `fields` table and expansion rules (e.g. `"first"`), or across English + i18n layers, are no longer counted multiple times.  Cuts the fuzzy-match scan list to unique entries.
+- **`HeuristicMatchStrategy` phone false-positives.** Bare-digit strings that match the loose phone regex are now confirmed against libphonenumber's `is_possible_number`, so 10-digit numeric IDs are no longer misclassified as phones.
+- **`NameNormalizer._ensure_prefixes` thread-safety.** The one-time `nameparser` prefix patch is now guarded by a double-checked lock.  The i18n CLI's worker pool could previously race on first use.
+- **`_phone._wrap()` italian leading zero.** Reads `national_number` directly while preserving `italian_leading_zero` (e.g. Italian numbers).
 - **i18n `_translate_batch`** logs warnings on batch + per-phrase failures instead of swallowing them silently.
-- **i18n `generate_language`** no longer writes an empty cache file when zero translations succeed and no prior cache exists — the next invocation can retry instead of short-circuiting.
+- **i18n `generate_language`** no longer writes an empty cache file when zero translations succeed and no prior cache exists; the next invocation can retry instead of short-circuiting.
 - **i18n `_package_i18n_dir`** probe uses `unlink(missing_ok=True)` to survive transient races (AV scanners, parallel probes).
 
 ### Performance
@@ -322,15 +420,15 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
 
 - 11 redundant aliases from `patterns.json` that the expansion engine already generates (`primary_email`, `personal_email`, `primary_phone`, `secondary_phone`, `personal_phone`, `business_fax`, `mailing_city`, `mailing_state`, `mailing_zip`, `mailing_country`, `personal_website`).  Total aliases: 615 → 604; no behavior change.
 
-## [2.6.5] — 2026-03-01
+## [2.6.5] - 2026-03-01
 
 ### Added
 
-- **`ListNormalizer`** — tags and other list-adjacent fields now auto-normalise comma/semicolon-separated strings, JSON arrays, and Python lists to `list[str]`.
-- **`MappingResult.get_all_phones()`** — returns all phone values from `normalized` (across `phone`, `home_phone`, `work_phone`, `fax`, `whatsapp`), deduplicated and in order.
-- **`extract_embedded_phones` parameter on `map_payload()`** — when `True`, scans all non-phone string values with `PhoneNumberMatcher` and merges discovered numbers into the result.
-- **`overrides` parameter on `ContactMapper()` and `PatternRegistry()`** — caller-supplied `{alias: canonical}` dict applied before any strategy runs.  Intended for vendor-specific merge fields (e.g. Mailchimp `MMERGE*`).
-- **`depth` parameter on `map_payload()` and `map_batch()`** — flatten nested payloads up to `depth` levels (default `1`; max `5`).
+- **`ListNormalizer`.** Tags and other list-adjacent fields now auto-normalise comma/semicolon-separated strings, JSON arrays, and Python lists to `list[str]`.
+- **`MappingResult.get_all_phones()`.** Returns all phone values from `normalized` (across `phone`, `home_phone`, `work_phone`, `fax`, `whatsapp`), deduplicated and in order.
+- **`extract_embedded_phones` parameter on `map_payload()`.** When `True`, scans all non-phone string values with `PhoneNumberMatcher` and merges discovered numbers into the result.
+- **`overrides` parameter on `ContactMapper()` and `PatternRegistry()`.** Caller-supplied `{alias: canonical}` dict applied before any strategy runs.  Intended for vendor-specific merge fields (e.g. Mailchimp `MMERGE*`).
+- **`depth` parameter on `map_payload()` and `map_batch()`.** Flatten nested payloads up to `depth` levels (default `1`; max `5`).
 - Exported `ListNormalizer` from `rolodexter.__init__`.
 
 ### Fixed
@@ -341,13 +439,13 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
 
 ### Removed
 
-- **Service-specific override system** — `service_overrides` section removed from `patterns.json`.  `service` / `available_services` properties and `_apply_service_overrides()` removed from `PatternRegistry`.  The generic `overrides` dict supersedes this.
+- **Service-specific override system.** `service_overrides` section removed from `patterns.json`.  `service` / `available_services` properties and `_apply_service_overrides()` removed from `PatternRegistry`.  The generic `overrides` dict supersedes this.
 
-## [2.5.0] — 2025-07-10
+## [2.5.0] - 2025-07-10
 
 ### Changed
 
-- **`_phone.py` — complete rewrite** using `phonenumbers` (Google's libphonenumber).
+- **`_phone.py`: complete rewrite** using `phonenumbers` (Google's libphonenumber).
   Deleted ~510 lines of manual ITU metadata (`_CC`, `_REGION`, `_NO_TRUNK`,
   `_MOBILE_PREFIXES`, `_TOLL_FREE_PREFIXES`, `_PREMIUM_PREFIXES`), 19 grouping
   pattern constants, `_FORMAT_TEMPLATES` dict (45 countries), compiled regexes
@@ -355,20 +453,20 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
   manual parsing / formatting logic.  Replaced with a thin wrapper (~280 lines)
   delegating to `phonenumbers` for parsing, validation, E.164 / international /
   national formatting, number-type detection, number matching, and text extraction.
-- **`NameNormalizer`** — replaced 24-entry `_PARTICLES` frozenset and manual
+- **`NameNormalizer`.** Replaced 24-entry `_PARTICLES` frozenset and manual
   capitalize logic with `nameparser.HumanName`.  Added 9 extra prefixes
   (`ten`, `ter`, `zur`, `zum`, `das`, `des`, `op`, `el`, `af`) via
   `CONSTANTS.prefixes.add()`.  New `parse()` class method returns structured
   `{"title", "first", "middle", "last", "suffix", "nickname"}` dict.
-- **`PhoneNormalizer`** — removed regex fallback branch (`_PHONE_STRIP`).
+- **`PhoneNormalizer`.** Removed regex fallback branch (`_PHONE_STRIP`).
   Now delegates solely to `_phone.format_e164()`.
 
 ### Added
 
 - **Hard dependencies**: `phonenumbers>=8.0`, `nameparser>=1.1`.
 - `PhoneNumber.is_possible` property (delegates to `is_possible_number()`).
-- `NameNormalizer.parse()` — structured name decomposition via `nameparser`.
-- Tel: URI pre-processing (RFC 3966) — strips `tel:` scheme, extracts `;ext=`
+- `NameNormalizer.parse()`: structured name decomposition via `nameparser`.
+- Tel: URI pre-processing (RFC 3966); strips `tel:` scheme, extracts `;ext=`
   extensions, removes `;phone-context=` and other params before delegating to
   `phonenumbers`.
 - `00` / `011` international dial-out prefix pre-processing.
@@ -380,18 +478,18 @@ Code-health audit follow-up: scalability, reliability, and data-quality fixes.
 - Manual `_PARTICLES` frozenset in `NameNormalizer`.
 - `_PHONE_STRIP` regex fallback in `PhoneNormalizer`.
 
-## [1.0.0] — 2026-01-01
+## [1.0.0] - 2026-01-01
 
 ### Added
 
-- **ContactMapper** — multi-layer strategy pipeline (exact → normalized → fuzzy → heuristic).
-- **PatternRegistry** — O(1) indexed lookup over 400+ field aliases across 50+ canonical fields.
-- **4 matching strategies** — `ExactMatchStrategy`, `NormalizedMatchStrategy`, `FuzzyMatchStrategy`, `HeuristicMatchStrategy`.
-- **5 value normalizers** — Phone, Email, Name (with surname particle awareness), Address, String.
+- **ContactMapper.** Multi-layer strategy pipeline (exact → normalized → fuzzy → heuristic).
+- **PatternRegistry.** O(1) indexed lookup over 400+ field aliases across 50+ canonical fields.
+- **4 matching strategies.** `ExactMatchStrategy`, `NormalizedMatchStrategy`, `FuzzyMatchStrategy`, `HeuristicMatchStrategy`.
+- **5 value normalizers.** Phone, Email, Name (with surname particle awareness), Address, String.
 - **Batch processing** via `mapper.map_batch()`.
 - **Confidence scoring** on every match (0.0–1.0).
-- **MappingResult diagnostics** — match rate, per-field details, JSON serialisation.
-- **CanonicalField enum** — standardised fields with `str` mixin for easy JSON compat.
+- **MappingResult diagnostics.** Match rate, per-field details, JSON serialisation.
+- **CanonicalField enum.** Standardised fields with `str` mixin for easy JSON compat.
 - Full type annotations + PEP 561 `py.typed` marker.
 - Comprehensive test suite.
 - GitHub Actions CI + PyPI publish workflows.

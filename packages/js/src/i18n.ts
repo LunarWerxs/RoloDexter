@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   SUPPORTED_LANGUAGES,
+  normalizeLanguageCode,
   discover_cached as coreDiscoverCached,
   generateLanguageAsync,
   generate_language as generateLanguageSync,
@@ -405,12 +406,14 @@ function targetLanguages(raw: string | undefined): string[] {
   if (!raw) {
     return Object.keys(SUPPORTED_LANGUAGES).sort();
   }
-  const requested = raw.split(",").map((code) => code.trim());
-  const unknown = requested.filter((code) => !(code in SUPPORTED_LANGUAGES));
+  // Drop empty entries so a trailing comma ("es,") is not reported as an
+  // unknown language, and case-fold so "ES" works. Mirrors i18n.py.
+  const requested = raw.split(",").map((code) => code.trim()).filter(Boolean);
+  const unknown = requested.filter((code) => normalizeLanguageCode(code) === undefined);
   if (unknown.length > 0) {
     throw new Error(`Unknown language code(s): [${unknown.map(pyRepr).join(", ")}]\nRun with --list to see supported languages.`);
   }
-  return requested;
+  return requested.map((code) => normalizeLanguageCode(code) as string);
 }
 
 async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {

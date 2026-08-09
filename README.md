@@ -104,14 +104,33 @@ npm test
 
 ## Features
 
+### 🔎 Pre-Flight Profiling: "What Will I Lose?"
+
+```bash
+# See what a file maps to before you write anything
+rolodexter profile contacts.csv
+
+# Same report as JSON, for scripting
+rolodexter profile contacts.csv --json
+
+# Skip value-level normalization for a faster pass on a big file
+rolodexter profile huge.csv --no-normalize --max-rows 5000
+```
+
+`profile` never writes mapped output. It reports the match rate, which
+canonical fields got populated, which headers went unmapped, and categorized
+warning counts, so you can see what an import will drop or flag before
+running `map` for real. It accepts the same `--region`, `--languages`,
+`--min-confidence`, and `--override` flags as `map`.
+
 ### 🎯 Four-Layer Matching Pipeline
 
 Every field runs through the strategy chain in priority order:
 
-1. **Exact Match** — O(1) lookup against 600+ known aliases across 62 canonical fields
-2. **Normalized Match** — handles `CamelCase`, `dot.path`, `space → underscore`, and similar variations
-3. **Fuzzy Match** — `rapidfuzz` catches typos like `"phne_nmbr"` → `phone`
-4. **Heuristic Match** — regex detects emails, phones, URLs, postal codes by *data shape*
+1. **Exact Match**: O(1) lookup against 600+ known aliases across 62 canonical fields
+2. **Normalized Match**: handles `CamelCase`, `dot.path`, `space → underscore`, and similar variations
+3. **Fuzzy Match**: `rapidfuzz` catches typos like `"phne_nmbr"` → `phone`
+4. **Heuristic Match**: regex detects emails, phones, URLs, postal codes by *data shape*
 
 ### 📊 Confidence Scoring
 
@@ -122,7 +141,7 @@ match = mapper.identify("fname")
 # FieldMatch(original='fname', canonical='first_name', confidence=1.0, strategy='exact')
 
 match = mapper.identify("phne")
-# FieldMatch(original='phne', canonical='phone', confidence=0.85, strategy='fuzzy')
+# FieldMatch(original='phne', canonical='phone', confidence=0.7, strategy='fuzzy')
 
 match = mapper.identify("Column X", value="jane@test.com")
 # FieldMatch(original='Column X', canonical='email', confidence=0.6, strategy='heuristic')
@@ -155,7 +174,7 @@ print(result.get_all_phones())
 
 ### 🗂️ Tags / List Fields
 
-Fields like `tags` are automatically list-normalised — comma-separated strings, JSON arrays, and Python lists all collapse to a clean list:
+Fields like `tags` are automatically list-normalised: comma-separated strings, JSON arrays, and Python lists all collapse to a clean list:
 
 ```python
 result = mapper.map_payload({"tags": "vip, newsletter, beta"})
@@ -204,6 +223,9 @@ Automatic cleanup on matched fields:
 - **Names** → title case with particle awareness (`"jane van der berg"` → `"Jane van der Berg"`)
 - **Addresses** → excess whitespace collapsed, title-cased
 - **Tags** → normalized to `list[str]`
+- **Dates** → ISO-8601 for `birthday`, `created_at`, `updated_at`, `last_contacted`. Ambiguous values (`03/04/2024`, a two-digit year) are left unchanged and reported as a warning instead of guessed.
+- **Country** → ISO 3166-1 alpha-2 (`"Deutschland"` → `"DE"`)
+- **State / Province** → 2-letter US state or Canadian province code (`"california"` → `"CA"`)
 
 ### 📦 Batch & Streaming
 
@@ -247,10 +269,23 @@ rolodexter map huge.jsonl --format jsonl --max-materialized-rows 100000
 # Keep processing after bad rows, preserving failures in a JSONL quarantine file
 rolodexter map export.jsonl --strict --on-error quarantine -o clean.jsonl
 
+# Carry unmapped columns through instead of dropping them, and drop rows
+# that share an identity key (email/phone/source id) with an earlier row
+rolodexter map contacts.csv --keep-unmapped --dedupe -o clean.csv
+
+# Force a vendor-specific column to a canonical field
+rolodexter map contacts.csv --override "MMERGE3=full_address" -o clean.csv
+
+# Save the resolved header plan, then replay it on a later import so columns
+# route identically even after a patterns.json change (a mapping lockfile)
+rolodexter map jan.csv --schema-out plan.json -o jan-clean.csv
+rolodexter map feb.csv --schema-in plan.json  -o feb-clean.csv
+
 # See exactly how a header resolves
 rolodexter explain "Job Titel" --value CEO
 # 'Job Titel' -> job_title [fuzzy, conf=0.70]
 
+rolodexter --version
 rolodexter fields        # list every canonical field
 ```
 
@@ -261,6 +296,10 @@ rolodexter fields        # list every canonical field
 result = mapper.map_payload({"mobile": "not a phone"})
 print(result.warnings)
 # ("'mobile': phone value 'not a phone' could not be normalized to E.164 ...",)
+
+# Each warning is a str subclass carrying its category, for grouping by code
+# instead of matching substrings of the message text:
+print(result.warnings[0].category)   # 'phone_normalization'
 
 # Demand high-confidence mappings; fail loudly on any problem:
 mapper = ContactMapper(strict=True, confidence_threshold=0.8)
@@ -274,6 +313,12 @@ print(result.explain())   # human-readable resolution + warnings
 schema = mapper.compile_schema(["First Name", "Mobile Phone", "Org"])
 schema.column_map()         # {'First Name': 'first_name', 'Mobile Phone': 'phone', 'Org': 'company'}
 schema.apply(row)           # reuse the resolved plan per row
+
+# Save the plan and replay it later so columns route identically, even after
+# a patterns.json update (the "map --schema-out" / "--schema-in" CLI flags
+# do this for you):
+plan = schema.to_dict()
+schema2 = MappingSchema.from_dict(plan, mapper)
 ```
 
 ### 📈 Rich Diagnostics
@@ -459,4 +504,4 @@ pytest
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

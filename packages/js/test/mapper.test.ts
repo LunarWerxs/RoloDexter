@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -55,6 +55,9 @@ import {
   normalize_value,
   parse,
   version,
+  discoverCachedLanguages,
+  loadCachedLanguage,
+  normalizeLanguageCode,
 } from "../src/index.js";
 
 const CLI_EOL = process.platform === "win32" ? "\r\n" : "\n";
@@ -540,9 +543,16 @@ test("i18n CLI mirrors Python list and dry-run workflows", () => {
   assert.equal(missingLanguageBeforeHelp.stdout, "");
   assert.match(missingLanguageBeforeHelp.stderr, /argument --languages: expected one argument/);
 
+  // A trailing comma used to be a hard error reporting an unknown language ''.
+  // Empty entries are now dropped, matching i18n.py.
   const trailingEmptyLanguage = runI18nCli(["--dry-run", "--languages", "es,"]);
-  assert.equal(trailingEmptyLanguage.status, 1);
-  assert.match(trailingEmptyLanguage.stdout, /Unknown language code\(s\): \[''\]/);
+  assert.equal(trailingEmptyLanguage.status, 0, trailingEmptyLanguage.stderr);
+  assert.match(trailingEmptyLanguage.stdout, /Generating 1 language\(s\)/);
+
+  // Case-folding: "ES" resolves to the supported code.
+  const upperCaseLanguage = runI18nCli(["--dry-run", "--languages", "ES"]);
+  assert.equal(upperCaseLanguage.status, 0, upperCaseLanguage.stderr);
+  assert.match(upperCaseLanguage.stdout, /\[es\] Spanish/);
 
   const invalidWorkers = runI18nCli(["--dry-run", "--languages", "es", "--workers=abc"]);
   assert.equal(invalidWorkers.status, 2);
@@ -573,6 +583,79 @@ test("CommonJS consumers can require root and i18n subpath", () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), "2.10.0 Ada function false false function function false");
+});
+
+test("i18n language codes are validated before they become a file path", () => {
+  // A caller-supplied code reaches loadCachedLanguage from
+  // `new ContactMapper({languages})` and the CLI's --languages flag. Without
+  // validation a relative path escapes the cache directory and has its
+  // contents merged into the alias index, which decides where every column of
+  // a contact export is routed.
+  const dir = mkdtempSync(join(tmpdir(), "rolodexter-js-i18n-guard-"));
+  const outside = join(dir, "outside.json");
+  const inner = join(dir, "cache");
+  mkdirSync(inner, { recursive: true });
+  try {
+    writeFileSync(
+      outside,
+      JSON.stringify({ language_code: "x", language_name: "x", fields: { email: ["pwned"] } }),
+      "utf8",
+    );
+    assert.equal(loadCachedLanguage("../outside", { cache_dir: inner }), undefined);
+    assert.equal(loadCachedLanguage("zz", { cache_dir: inner }), undefined);
+
+    // Case-folding: "ES" is the supported "es".
+    assert.equal(normalizeLanguageCode(" ES "), "es");
+    assert.equal(normalizeLanguageCode("zz"), undefined);
+    assert.equal(normalizeLanguageCode(42), undefined);
+
+    // A real code still loads.
+    writeFileSync(
+      join(inner, "es.json"),
+      JSON.stringify({ language_code: "es", language_name: "Spanish", fields: { email: ["correo"] } }),
+      "utf8",
+    );
+    assert.deepEqual(loadCachedLanguage("ES", { cache_dir: inner })?.fields?.email, ["correo"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a malformed i18n cache file is skipped rather than trusted", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rolodexter-js-i18n-bad-"));
+  try {
+    const read = (): unknown =>
+      loadCachedLanguage("es", { cache_dir: dir })?.fields?.email;
+    const write = (body: unknown): void => {
+      writeFileSync(join(dir, "es.json"), JSON.stringify(body), "utf8");
+    };
+    // A real user cache may also hold es.json, and falling through to it is
+    // correct behavior. What must never happen is the malformed file being
+    // trusted, so assert on the poisoned alias rather than on undefined.
+
+    write(["not", "an", "object"]);
+    assert.notDeepEqual(read(), ["poisoned"]);
+
+    write({ language_code: "es", fields: { email: ["poisoned"] } }); // missing language_name
+    assert.notDeepEqual(read(), ["poisoned"]);
+
+    write({ language_code: "es", language_name: "Spanish", fields: "nope" });
+    assert.notDeepEqual(read(), ["poisoned"]);
+
+    // A non-string alias used to throw out of ContactMapper construction.
+    write({ language_code: "es", language_name: "Spanish", fields: { email: [123] } });
+    assert.notDeepEqual(read(), [123]);
+    assert.doesNotThrow(() => new ContactMapper({ languages: ["es"] }));
+
+    writeFileSync(join(dir, "es.json"), "NOT JSON{{{", "utf8");
+    assert.notDeepEqual(read(), ["poisoned"]);
+
+    // Only *.json named after a supported language counts as a pack.
+    writeFileSync(join(dir, "notes.json"), JSON.stringify({}), "utf8");
+    assert.equal("notes" in discoverCachedLanguages({ cache_dir: dir }), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("generate_language can build and cache an i18n pack", async () => {
@@ -1183,6 +1266,9 @@ test("mapping results expose email and identity helpers for deduplication", () =
     "source:hubspot:42",
   ]);
 
+  // Two vendors means the id -> vendor correspondence is unknowable: the two
+  // lists are built independently from raw key order, so pairing them by index
+  // emitted a confident but fabricated key. Ambiguous now means unqualified.
   const multipleServices = new MappingResult(
     {
       source_service: ["HubSpot", "Salesforce"],
@@ -1192,8 +1278,8 @@ test("mapping results expose email and identity helpers for deduplication", () =
     [],
   );
   assert.deepEqual(multipleServices.get_identity_keys(), [
-    "source:hubspot:42",
-    "source:salesforce:99",
+    "source_id:42",
+    "source_id:99",
     "source_id:orphan",
   ]);
 });
@@ -2037,7 +2123,7 @@ test("CLI usage errors mirror Python argparse exits", () => {
   assert.equal(root.stdout, "");
   assert.equal(
     root.stderr,
-    `usage: rolodexter [-h] {map,explain,fields} ...${CLI_EOL}rolodexter: error: the following arguments are required: command${CLI_EOL}`,
+    `usage: rolodexter [-h] [--version] {map,explain,profile,fields} ...${CLI_EOL}rolodexter: error: the following arguments are required: command${CLI_EOL}`,
   );
 
   const map = runCli(["map"]);
@@ -2135,7 +2221,7 @@ test("CLI CSV parsing follows Python DictReader edge behavior", () => {
     const badQuoteResult = runCli(["map", badQuote, "--format", "json"]);
     assert.equal(badQuoteResult.status, 0, badQuoteResult.stderr);
     assert.deepEqual(JSON.parse(badQuoteResult.stdout), [
-      { full_name: "A@Example.com Ada", email: null },
+      { full_name: "A@Example.com Ada", email: "" },
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -2234,7 +2320,7 @@ test("CLI can quarantine bad JSONL rows", () => {
       "--quarantine-output",
       quarantine,
     ]);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, /warning: quarantined row 2: invalid JSON: Expecting value/);
     assert.match(result.stderr, /quarantined 1 row/);
     assert.equal(readFileSync(output, "utf8").trim().split(/\r?\n/).length, 2);

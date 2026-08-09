@@ -1,0 +1,7 @@
+Placeholder so the packaged i18n directory exists in an installed wheel, the
+same way packages/js/src/i18n/.gitkeep does for the npm package.
+
+i18n.get_all_cache_dirs() reports this directory as a read-only input, ahead of
+the user cache. It is empty today; it is where a future release would ship
+curated language packs. Keeping both runtimes consistent means the two CLIs
+report the same cache directories, which scripts/cli_parity_probe.py checks.

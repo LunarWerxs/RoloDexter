@@ -23,6 +23,7 @@ from rolodexter import (
     MappingSchema,
     NormalizationError,
 )
+from rolodexter.__main__ import EXIT_PARTIAL
 from rolodexter.__main__ import main as cli_main
 from rolodexter.core import HeuristicMatchStrategy, normalize_value
 
@@ -220,7 +221,14 @@ class TestIdentityHelpers:
             "source:hubspot:42",
         ]
 
-    def test_multiple_source_services_are_paired_by_position(self) -> None:
+    def test_ambiguous_source_services_are_not_paired_by_position(self) -> None:
+        """Several vendors means the id->vendor correspondence is unknowable.
+
+        ``source_id`` and ``source_service`` are two independent lists built by
+        ``_merge`` from raw dict key order; nothing links position *i* of one to
+        position *i* of the other.  Zipping them emitted a confident but
+        fabricated key, so an ambiguous payload now yields unqualified keys.
+        """
         result = MappingResult(
             normalized={
                 "source_service": ["HubSpot", "Salesforce"],
@@ -231,9 +239,22 @@ class TestIdentityHelpers:
         )
 
         assert result.get_identity_keys() == [
-            "source:hubspot:42",
-            "source:salesforce:99",
+            "source_id:42",
+            "source_id:99",
             "source_id:orphan",
+        ]
+
+    def test_single_source_service_still_scopes_every_id(self) -> None:
+        """One vendor is unambiguous, so every id is scoped to it."""
+        result = MappingResult(
+            normalized={"source_service": "HubSpot", "source_id": ["42", "99"]},
+            unmapped={},
+            field_matches=(),
+        )
+
+        assert result.get_identity_keys() == [
+            "source:hubspot:42",
+            "source:hubspot:99",
         ]
 
 
@@ -375,6 +396,70 @@ class TestEnumIsSourceOfTruth:
             assert canonical in enum_values, (
                 f"patterns.json field {canonical!r} is not in CanonicalField"
             )
+
+    def test_every_canonical_field_has_aliases(self) -> None:
+        """The reverse direction: an enum member with no aliases is unreachable.
+
+        Only patterns.json subset-of-enum was pinned, so a new CanonicalField
+        member could ship with no alias, matchable by nothing, and no test
+        would notice.
+        """
+        data = json.loads(
+            files("rolodexter").joinpath("patterns.json").read_text("utf-8")
+        )
+        pattern_fields = set(data.get("fields", {}))
+        missing = sorted(
+            field.value
+            for field in CanonicalField
+            if field is not CanonicalField.UNKNOWN and field.value not in pattern_fields
+        )
+        assert not missing, (
+            f"CanonicalField member(s) {missing} have no aliases in patterns.json, "
+            "so no header can ever route to them"
+        )
+
+    def test_every_canonical_field_has_a_deliberate_normalizer(self) -> None:
+        """Every field is either in the normalizer table or knowingly a string.
+
+        Guards the other half of the same seam: adding a field and forgetting
+        to route it leaves it silently on StringNormalizer.
+        """
+        from rolodexter.core import _FIELD_NORMALIZERS
+
+        routed = set(_FIELD_NORMALIZERS)
+        unrouted = {f.value for f in CanonicalField} - routed
+        # These are deliberately plain strings; anything NEW must be a
+        # conscious addition to one list or the other.
+        expected_plain = {
+            "age",
+            "company",
+            "company_size",
+            "currency",
+            "department",
+            "gender",
+            "industry",
+            "job_title",
+            "language_preference",
+            "lead_status",
+            "lifecycle_stage",
+            "message",
+            "metadata",
+            "notes",
+            "owner",
+            "referrer_url",
+            "revenue",
+            "score",
+            "source",
+            "source_id",
+            "source_service",
+            "subject",
+            "timezone",
+            "unknown",
+            "utm_parameters",
+        }
+        assert unrouted == expected_plain, (
+            "canonical fields changed: update the normalizer table or this list"
+        )
 
     def test_normalize_value_passthrough_for_unknown_field(self) -> None:
         # Unknown canonical names fall back to a string strip, never crash.
@@ -581,7 +666,7 @@ class TestCLI:
         rc = cli_main(["map", str(in_path), "--format", "json", "--on-error", "skip"])
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert rc == 0
+        assert rc == EXIT_PARTIAL
         assert [row for row in data] == [{"first_name": "A"}, {"last_name": "B"}]
         assert "skipped row 2" in captured.err
 
@@ -606,7 +691,7 @@ class TestCLI:
         )
         captured = capsys.readouterr()
         lines = [json.loads(line) for line in captured.out.splitlines() if line]
-        assert rc == 0
+        assert rc == EXIT_PARTIAL
         assert lines == [{"phone": "+12025550143"}]
         assert "skipped row 3" in captured.err
 
@@ -641,7 +726,7 @@ class TestCLI:
         quarantined = [
             json.loads(line) for line in quarantine_path.read_text("utf-8").splitlines()
         ]
-        assert rc == 0
+        assert rc == EXIT_PARTIAL
         assert out_rows == [{"first_name": "A"}, {"last_name": "B"}]
         assert quarantined[0]["row"] == 2
         assert "invalid JSON" in quarantined[0]["error"]

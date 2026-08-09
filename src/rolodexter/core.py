@@ -20,7 +20,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from importlib import import_module, resources
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 # Library logger.  A NullHandler keeps rolodexter silent by default; callers
 # opt into output by configuring logging on this logger (or the root).
@@ -50,6 +50,77 @@ class NormalizationError(RolodexterError):
 
     .. versionadded:: 2.8.0
     """
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  WARNINGS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@unique
+class WarningCategory(str, Enum):
+    """Machine-readable classification for a :class:`MappingWarning`.
+
+    .. versionadded:: 2.11.0
+    """
+
+    LOW_CONFIDENCE = "low_confidence"
+    PHONE_NORMALIZATION = "phone_normalization"
+    EMAIL_VALIDATION = "email_validation"
+    EMBEDDED_PHONE_LIMIT = "embedded_phone_limit"
+    DATE_AMBIGUOUS = "date_ambiguous"
+    OTHER = "other"
+
+
+class MappingWarning(str):
+    """A warning message that also carries its category.
+
+    Subclasses :class:`str`, so it compares, formats, joins and JSON-serializes
+    exactly like the plain strings :attr:`MappingResult.warnings` has always
+    held — existing callers need no changes.  What it adds is
+    :attr:`category`, so :meth:`ContactMapper.profile` can group warnings by
+    what they *are* rather than by matching substrings of their English text.
+    A reworded message used to silently reclassify every warning as
+    ``"other"``, which quietly broke any pipeline gating on
+    :attr:`MappingProfile.warning_counts`.
+
+    .. versionadded:: 2.11.0
+    """
+
+    __slots__ = ("category",)
+
+    category: str
+
+    def __new__(
+        cls, message: str, category: str | WarningCategory = WarningCategory.OTHER
+    ) -> MappingWarning:
+        obj = super().__new__(cls, message)
+        obj.category = (
+            category.value if isinstance(category, WarningCategory) else str(category)
+        )
+        return obj
+
+    def __repr__(self) -> str:
+        return f"MappingWarning({str(self)!r}, category={self.category!r})"
+
+
+def _warning_category(warning: str) -> str:
+    """Return the category of *warning*, tolerating a plain ``str``.
+
+    :class:`MappingResult` is a public dataclass a caller may construct by
+    hand with ordinary strings, so fall back to the pre-2.11 text matching
+    rather than losing the classification entirely.
+    """
+    category = getattr(warning, "category", None)
+    if isinstance(category, str):
+        return category
+    if "dropped low-confidence match" in warning:
+        return WarningCategory.LOW_CONFIDENCE.value
+    if "could not be normalized to E.164" in warning:
+        return WarningCategory.PHONE_NORMALIZATION.value
+    if "embedded phone" in warning:
+        return WarningCategory.EMBEDDED_PHONE_LIMIT.value
+    return WarningCategory.OTHER.value
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -161,6 +232,10 @@ EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD: int = 5
 EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD: int = 20
 DEFAULT_HEADER_CACHE_MAX_SIZE: int = 4096
 
+# Sentinel distinguishing "no cache entry" from a cached miss (``None``), so
+# the header cache can be read without holding the lock across matching.
+_CACHE_MISS: Any = object()
+
 __all__ = [
     "DEFAULT_HEADER_CACHE_MAX_SIZE",
     "EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD",
@@ -177,6 +252,8 @@ __all__ = [
     "BooleanNormalizer",
     "CanonicalField",
     "ContactMapper",
+    "CountryNormalizer",
+    "DateNormalizer",
     "EmailNormalizer",
     "ExactMatchStrategy",
     "FieldMatch",
@@ -186,6 +263,7 @@ __all__ = [
     "MappingProfile",
     "MappingResult",
     "MappingSchema",
+    "MappingWarning",
     "MatchStrategy",
     "NameNormalizer",
     "NormalizationError",
@@ -195,8 +273,11 @@ __all__ = [
     "PhoneNormalizer",
     "PostalCodeNormalizer",
     "RolodexterError",
+    "StateNormalizer",
     "StringNormalizer",
+    "WarningCategory",
     "normalize_value",
+    "value_warnings",
 ]
 
 
@@ -385,18 +466,23 @@ class MappingResult:
             str(value).strip().lower() if value is not None else ""
             for value in services
         ]
-        for index, source_id in enumerate(source_ids):
+        # Scope IDs by vendor ONLY when the payload names exactly one vendor.
+        #
+        # When several headers collide onto ``source_id`` and several onto
+        # ``source_service``, the two lists are built independently by
+        # ``_merge`` from raw dict key order — nothing links position *i* of
+        # one to position *i* of the other.  Zipping them would emit a
+        # confident, fabricated key such as ``source:hubspot:222`` for a
+        # record that came from somewhere else, silently corrupting any
+        # dedup built on this API.  Ambiguous means unqualified, which is
+        # merely less specific rather than wrong.
+        service = normalized_services[0] if len(normalized_services) == 1 else ""
+        prefix = f"source:{service}" if service else "source_id"
+        for source_id in source_ids:
             if source_id is None:
                 continue
             text = str(source_id).strip()
             if text:
-                if len(normalized_services) == 1:
-                    service = normalized_services[0]
-                elif index < len(normalized_services):
-                    service = normalized_services[index]
-                else:
-                    service = ""
-                prefix = f"source:{service}" if service else "source_id"
                 add(f"{prefix}:{text}")
         return keys
 
@@ -704,6 +790,427 @@ class PostalCodeNormalizer:
         return cleaned
 
 
+class DateNormalizer:
+    """Normalize unambiguous date strings to ISO-8601 (``YYYY-MM-DD``).
+
+    **Refuses to guess.**  ``03/04/2024`` is 3 April in most of the world and
+    4 March in the United States, and there is nothing in the value to say
+    which.  Silently picking one would corrupt a birthday in half the data
+    it touches, so ambiguous values are returned unchanged and reported via
+    :func:`value_warnings`.  What is normalized:
+
+    * already-ISO values, with or without a time part (``2024-03-15``,
+      ``2024-03-15T09:30:00Z``) — the time is dropped;
+    * slash- or dot-separated values where one component is unambiguous
+      because it exceeds 12 (``25/03/2024``, ``2024/03/15``, ``15.03.2024``);
+    * ``YYYY/MM/DD``, where a four-digit leading year fixes the order.
+
+    Two-digit years are treated as ambiguous and left alone: mapping ``68`` to
+    1968 or 2068 is a guess of exactly the kind this class exists to avoid.
+
+    .. versionadded:: 2.11.0
+    """
+
+    _ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$")
+    _YMD_RE = re.compile(r"^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$")
+    _DMY_RE = re.compile(r"^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$")
+
+    @classmethod
+    def _iso(cls, year: int, month: int, day: int) -> str | None:
+        if not 1 <= month <= 12 or not 1 <= day <= 31:
+            return None
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        if not value or not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return value
+
+        m = cls._ISO_RE.match(text) or cls._YMD_RE.match(text)
+        if m:
+            iso = cls._iso(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return iso if iso is not None else value
+
+        m = cls._DMY_RE.match(text)
+        if m:
+            first, second, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            # Only one ordering can be valid when a component exceeds 12.
+            if first > 12 and second <= 12:
+                iso = cls._iso(year, second, first)  # DD/MM/YYYY
+                return iso if iso is not None else value
+            if second > 12 and first <= 12:
+                iso = cls._iso(year, first, second)  # MM/DD/YYYY
+                return iso if iso is not None else value
+        return value
+
+    @classmethod
+    def is_ambiguous(cls, value: str) -> bool:
+        """True if *value* looks like a date this class deliberately won't reorder."""
+        if not isinstance(value, str):
+            return False
+        text = value.strip()
+        if not text or cls.normalize(text) != text:
+            return False
+        m = cls._DMY_RE.match(text)
+        if m and int(m.group(1)) <= 12 and int(m.group(2)) <= 12:
+            return True
+        return bool(re.match(r"^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2}$", text))
+
+
+class CountryNormalizer:
+    """Normalize common country spellings to ISO 3166-1 alpha-2.
+
+    Recognizes alpha-2 codes, alpha-3 codes, and the English names and common
+    informal spellings of the countries that dominate contact data.  Anything
+    unrecognized is returned trimmed and otherwise untouched, so no data is
+    lost or mangled by an incomplete table.
+
+    .. versionadded:: 2.11.0
+    """
+
+    # alpha-3 → alpha-2 for the same set of countries covered by _NAMES.
+    _ALPHA3: ClassVar[dict[str, str]] = {
+        "arg": "AR",
+        "aus": "AU",
+        "aut": "AT",
+        "bel": "BE",
+        "bgr": "BG",
+        "bra": "BR",
+        "can": "CA",
+        "che": "CH",
+        "chl": "CL",
+        "chn": "CN",
+        "col": "CO",
+        "cze": "CZ",
+        "deu": "DE",
+        "dnk": "DK",
+        "esp": "ES",
+        "est": "EE",
+        "fin": "FI",
+        "fra": "FR",
+        "gbr": "GB",
+        "grc": "GR",
+        "hkg": "HK",
+        "hrv": "HR",
+        "hun": "HU",
+        "idn": "ID",
+        "ind": "IN",
+        "irl": "IE",
+        "isr": "IL",
+        "ita": "IT",
+        "jpn": "JP",
+        "kor": "KR",
+        "ltu": "LT",
+        "lux": "LU",
+        "lva": "LV",
+        "mex": "MX",
+        "mys": "MY",
+        "nld": "NL",
+        "nor": "NO",
+        "nzl": "NZ",
+        "per": "PE",
+        "phl": "PH",
+        "pol": "PL",
+        "prt": "PT",
+        "rou": "RO",
+        "rus": "RU",
+        "sau": "SA",
+        "sgp": "SG",
+        "svk": "SK",
+        "svn": "SI",
+        "swe": "SE",
+        "tha": "TH",
+        "tur": "TR",
+        "twn": "TW",
+        "ukr": "UA",
+        "usa": "US",
+        "vnm": "VN",
+        "zaf": "ZA",
+    }
+    _NAMES: ClassVar[dict[str, str]] = {
+        "argentina": "AR",
+        "australia": "AU",
+        "austria": "AT",
+        "belgium": "BE",
+        "brazil": "BR",
+        "brasil": "BR",
+        "bulgaria": "BG",
+        "canada": "CA",
+        "chile": "CL",
+        "china": "CN",
+        "colombia": "CO",
+        "croatia": "HR",
+        "czechia": "CZ",
+        "czech republic": "CZ",
+        "denmark": "DK",
+        "estonia": "EE",
+        "finland": "FI",
+        "france": "FR",
+        "germany": "DE",
+        "deutschland": "DE",
+        "greece": "GR",
+        "hong kong": "HK",
+        "hungary": "HU",
+        "india": "IN",
+        "indonesia": "ID",
+        "ireland": "IE",
+        "israel": "IL",
+        "italy": "IT",
+        "italia": "IT",
+        "japan": "JP",
+        "latvia": "LV",
+        "lithuania": "LT",
+        "luxembourg": "LU",
+        "malaysia": "MY",
+        "mexico": "MX",
+        "méxico": "MX",
+        "netherlands": "NL",
+        "the netherlands": "NL",
+        "holland": "NL",
+        "new zealand": "NZ",
+        "norway": "NO",
+        "peru": "PE",
+        "philippines": "PH",
+        "poland": "PL",
+        "polska": "PL",
+        "portugal": "PT",
+        "romania": "RO",
+        "russia": "RU",
+        "russian federation": "RU",
+        "saudi arabia": "SA",
+        "singapore": "SG",
+        "slovakia": "SK",
+        "slovenia": "SI",
+        "south africa": "ZA",
+        "south korea": "KR",
+        "korea": "KR",
+        "republic of korea": "KR",
+        "spain": "ES",
+        "españa": "ES",
+        "sweden": "SE",
+        "sverige": "SE",
+        "switzerland": "CH",
+        "taiwan": "TW",
+        "thailand": "TH",
+        "turkey": "TR",
+        "türkiye": "TR",
+        "ukraine": "UA",
+        "united kingdom": "GB",
+        "great britain": "GB",
+        "england": "GB",
+        "scotland": "GB",
+        "wales": "GB",
+        "uk": "GB",
+        "united states": "US",
+        "united states of america": "US",
+        "usa": "US",
+        "u.s.": "US",
+        "u.s.a.": "US",
+        "america": "US",
+        "vietnam": "VN",
+        "viet nam": "VN",
+    }
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        if not value or not isinstance(value, str):
+            return value
+        text = " ".join(value.strip().split())
+        if not text:
+            return value
+        lowered = text.lower()
+        named = cls._NAMES.get(lowered)
+        if named is not None:
+            return named
+        stripped = lowered.replace(".", "")
+        if len(stripped) == 2 and stripped.isalpha():
+            return stripped.upper()
+        alpha3 = cls._ALPHA3.get(stripped)
+        if alpha3 is not None:
+            return alpha3
+        return text
+
+
+class StateNormalizer:
+    """Normalize US state and Canadian province names to their 2-letter code.
+
+    Values that are already a valid code are uppercased; anything outside the
+    table is returned trimmed and title-cased so non-US/CA regions keep their
+    spelling.
+
+    .. versionadded:: 2.11.0
+    """
+
+    # US states + DC + territories, then Canadian provinces/territories.
+    _CODES: ClassVar[frozenset[str]] = frozenset(
+        (
+            *[
+                "AL",
+                "AK",
+                "AZ",
+                "AR",
+                "CA",
+                "CO",
+                "CT",
+                "DE",
+                "FL",
+                "GA",
+                "HI",
+                "ID",
+                "IL",
+                "IN",
+                "IA",
+                "KS",
+                "KY",
+                "LA",
+                "ME",
+                "MD",
+            ],
+            *[
+                "MA",
+                "MI",
+                "MN",
+                "MS",
+                "MO",
+                "MT",
+                "NE",
+                "NV",
+                "NH",
+                "NJ",
+                "NM",
+                "NY",
+                "NC",
+                "ND",
+                "OH",
+                "OK",
+                "OR",
+                "PA",
+                "RI",
+            ],
+            *[
+                "SC",
+                "SD",
+                "TN",
+                "TX",
+                "UT",
+                "VT",
+                "VA",
+                "WA",
+                "WV",
+                "WI",
+                "WY",
+                "DC",
+                "PR",
+                "VI",
+                "GU",
+                "AS",
+                "MP",
+            ],
+            *[
+                "AB",
+                "BC",
+                "MB",
+                "NB",
+                "NL",
+                "NS",
+                "NT",
+                "NU",
+                "ON",
+                "PE",
+                "QC",
+                "SK",
+                "YT",
+            ],
+        )
+    )
+    _NAMES: ClassVar[dict[str, str]] = {
+        "alabama": "AL",
+        "alaska": "AK",
+        "arizona": "AZ",
+        "arkansas": "AR",
+        "california": "CA",
+        "colorado": "CO",
+        "connecticut": "CT",
+        "delaware": "DE",
+        "district of columbia": "DC",
+        "florida": "FL",
+        "georgia": "GA",
+        "hawaii": "HI",
+        "idaho": "ID",
+        "illinois": "IL",
+        "indiana": "IN",
+        "iowa": "IA",
+        "kansas": "KS",
+        "kentucky": "KY",
+        "louisiana": "LA",
+        "maine": "ME",
+        "maryland": "MD",
+        "massachusetts": "MA",
+        "michigan": "MI",
+        "minnesota": "MN",
+        "mississippi": "MS",
+        "missouri": "MO",
+        "montana": "MT",
+        "nebraska": "NE",
+        "nevada": "NV",
+        "new hampshire": "NH",
+        "new jersey": "NJ",
+        "new mexico": "NM",
+        "new york": "NY",
+        "north carolina": "NC",
+        "north dakota": "ND",
+        "ohio": "OH",
+        "oklahoma": "OK",
+        "oregon": "OR",
+        "pennsylvania": "PA",
+        "puerto rico": "PR",
+        "rhode island": "RI",
+        "south carolina": "SC",
+        "south dakota": "SD",
+        "tennessee": "TN",
+        "texas": "TX",
+        "utah": "UT",
+        "vermont": "VT",
+        "virginia": "VA",
+        "washington": "WA",
+        "west virginia": "WV",
+        "wisconsin": "WI",
+        "wyoming": "WY",
+        "alberta": "AB",
+        "british columbia": "BC",
+        "manitoba": "MB",
+        "new brunswick": "NB",
+        "newfoundland and labrador": "NL",
+        "nova scotia": "NS",
+        "northwest territories": "NT",
+        "nunavut": "NU",
+        "ontario": "ON",
+        "prince edward island": "PE",
+        "quebec": "QC",
+        "québec": "QC",
+        "saskatchewan": "SK",
+        "yukon": "YT",
+    }
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        if not value or not isinstance(value, str):
+            return value
+        text = " ".join(value.strip().split())
+        if not text:
+            return value
+        lowered = text.lower()
+        named = cls._NAMES.get(lowered)
+        if named is not None:
+            return named
+        if text.upper() in cls._CODES:
+            return text.upper()
+        return _smart_titlecase(text)
+
+
 class BooleanNormalizer:
     """Normalize boolean-like strings to Python bools."""
 
@@ -789,6 +1296,9 @@ _ADDRESS_FIELDS: frozenset[str] = frozenset(
 )
 _BOOLEAN_FIELDS: frozenset[str] = frozenset({"email_opt_out", "subscribed", "verified"})
 _LIST_FIELDS: frozenset[str] = frozenset({"tags"})
+_DATE_FIELDS: frozenset[str] = frozenset(
+    {"birthday", "created_at", "updated_at", "last_contacted"}
+)
 _SOCIAL_FIELDS: frozenset[str] = frozenset(
     {
         "website",
@@ -804,6 +1314,25 @@ _SOCIAL_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+# Fields that hold a contactable value rather than a reference to a record.
+# A header like ``primary_phone_id`` names a foreign key, so the ``_id``-suffix
+# stripping in NormalizedMatchStrategy must not route it here — see
+# ``NormalizedMatchStrategy._is_value_bearing``.
+_VALUE_BEARING_FIELDS: frozenset[str] = _PHONE_FIELDS | _SOCIAL_FIELDS | {"email"}
+
+# Suffixes that mark a header as naming a *reference* to a record rather than
+# holding the record's value.  Used to veto a derived (normalized/fuzzy) match
+# onto a value-bearing field; an explicit alias in patterns.json still wins,
+# since the truth table is allowed to say that e.g. ``twitter_id`` really is
+# the handle for a given export format.
+_REFERENCE_SUFFIX_RE = re.compile(r"_(?:id|ids|uuid|guid|key|ref|fk)$")
+
+
+def _is_reference_header(header: str) -> bool:
+    """True if *header* names a foreign key (``primary_phone_id``, ``email_ref``)."""
+    return bool(_REFERENCE_SUFFIX_RE.search(_normalize_header(header)))
+
+
 # Build the lookup dict programmatically from the category sets.
 _FIELD_NORMALIZERS: dict[str, Any] = {  # maps canonical field → normalizer class
     **{f: PhoneNormalizer for f in _PHONE_FIELDS},
@@ -811,11 +1340,64 @@ _FIELD_NORMALIZERS: dict[str, Any] = {  # maps canonical field → normalizer cl
     **{f: AddressNormalizer for f in _ADDRESS_FIELDS},
     **{f: BooleanNormalizer for f in _BOOLEAN_FIELDS},
     **{f: ListNormalizer for f in _LIST_FIELDS},
+    **{f: DateNormalizer for f in _DATE_FIELDS},
     **{f: StringNormalizer for f in _SOCIAL_FIELDS},
     "email": EmailNormalizer,
     "postal_code": PostalCodeNormalizer,
+    "country": CountryNormalizer,
+    "state": StateNormalizer,
     # Remaining fields default to StringNormalizer via normalize_value()
 }
+
+
+# Deliberately permissive: this drives a *warning*, not a rejection, so it
+# should flag obvious junk ("n/a", "see notes", a bare name) without
+# second-guessing unusual-but-valid addresses.  No network lookup is performed.
+_EMAIL_SHAPE_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def value_warnings(key: str, canonical_field: str, value: Any) -> list[MappingWarning]:
+    """Return warnings about a *normalized* value that silently degraded.
+
+    Shared by :meth:`ContactMapper.map_payload` and
+    :meth:`ContactMapper.map_dataframe` so the two cannot drift on what counts
+    as a suspicious value.
+
+    .. versionadded:: 2.11.0
+       Extracted from ``map_payload``; adds the email shape check, which
+       previously had no equivalent to the phone E.164 check even though
+       ``email`` is the primary key :meth:`MappingResult.get_identity_keys`
+       builds on.
+    """
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    if not text:
+        return []
+    if canonical_field in _PHONE_FIELDS and not text.startswith("+"):
+        return [
+            MappingWarning(
+                f"{key!r}: phone value {value!r} could not be normalized to "
+                "E.164 (set a matching default_region?)",
+                WarningCategory.PHONE_NORMALIZATION,
+            )
+        ]
+    if canonical_field == "email" and not _EMAIL_SHAPE_RE.match(text):
+        return [
+            MappingWarning(
+                f"{key!r}: value {value!r} does not look like an email address",
+                WarningCategory.EMAIL_VALIDATION,
+            )
+        ]
+    if canonical_field in _DATE_FIELDS and DateNormalizer.is_ambiguous(text):
+        return [
+            MappingWarning(
+                f"{key!r}: date {value!r} is ambiguous (day/month order or a "
+                "two-digit year) and was left unchanged",
+                WarningCategory.DATE_AMBIGUOUS,
+            )
+        ]
+    return []
 
 
 def normalize_value(
@@ -996,7 +1578,7 @@ class PatternRegistry:
 
         # ── i18n layer (cached files only — never translates over the
         #    network from inside the constructor) ─────────────────────
-        from .i18n import SUPPORTED_LANGUAGES, load_cached
+        from .i18n import SUPPORTED_LANGUAGES, load_cached, normalize_language_code
 
         if self._languages == "all":
             lang_codes = sorted(SUPPORTED_LANGUAGES.keys())
@@ -1010,16 +1592,24 @@ class PatternRegistry:
             lang_codes = []
 
         missing: list[str] = []
-        for lang in lang_codes:
+        unknown: list[str] = []
+        for requested in lang_codes:
+            # Case-fold and validate before anything touches the filesystem.
+            # A caller-supplied code that is not a supported language is a
+            # user error worth reporting, not a path to resolve.
+            lang = normalize_language_code(requested)
+            if lang is None:
+                unknown.append(str(requested))
+                continue
+
             lang_data = load_cached(lang)
             if lang_data is None:
                 # Deliberately do NOT translate here: that would issue
                 # blocking network calls (with unbounded latency and silent
                 # rate-limit failures) from inside object construction.
                 # Generation is an explicit, offline step — see the class
-                # docstring.  Only flag genuinely-supported languages.
-                if lang in SUPPORTED_LANGUAGES:
-                    missing.append(lang)
+                # docstring.
+                missing.append(lang)
                 continue
 
             self._loaded_languages.append(lang)
@@ -1028,14 +1618,21 @@ class PatternRegistry:
                     self._add_alias(alias.lower().strip(), canonical)
 
         if missing:
-            import logging
-
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "No cached i18n aliases for %s — these languages were NOT "
                 "loaded. Generate them first (offline) with: "
                 "python -m rolodexter.i18n --languages %s",
                 ", ".join(missing),
                 ",".join(missing),
+            )
+        if unknown:
+            # Previously silent: a typo or a wrong-case code ("ES") produced
+            # English-only aliases with no explanation of why the caller's
+            # localized headers stopped matching.
+            logger.warning(
+                "Unsupported i18n language code(s) %s — ignored. Supported codes: %s",
+                ", ".join(repr(code) for code in unknown),
+                ", ".join(sorted(SUPPORTED_LANGUAGES)),
             )
 
     def _apply_overrides(self, overrides: dict[str, str] | None) -> None:
@@ -1386,16 +1983,36 @@ class NormalizedMatchStrategy(MatchStrategy):
         id_candidates = [c for c in out if c.endswith("_id")]
         for candidate in id_candidates:
             base = candidate[:-3]
-            if base and base not in out:
+            if base and base not in out and not self._is_value_bearing(base):
                 out.append(base)
                 # Also strip vendor prefix off the base
                 for pfx in self._VENDOR_PREFIXES:
                     if base.startswith(pfx):
                         inner = base[len(pfx) :]
-                        if inner and inner not in out:
+                        if (
+                            inner
+                            and inner not in out
+                            and not self._is_value_bearing(inner)
+                        ):
                             out.append(inner)
 
         return out
+
+    def _is_value_bearing(self, candidate: str) -> bool:
+        """True if *candidate* names a field that stores the value itself.
+
+        Stripping ``_id`` is a useful convenience for *reference* columns —
+        ``owner_id`` really does identify the owner, and ``account_id`` the
+        account.  It is actively harmful for fields whose whole purpose is to
+        hold the value: ``primary_phone_id`` is a foreign key, not a phone
+        number, and routing it to ``phone`` stores an internal ID as the
+        contact's number at near-exact confidence, where no confidence
+        threshold will catch it.
+
+        .. versionadded:: 2.11.0
+        """
+        canonical = self._registry.exact_lookup(candidate)
+        return canonical is not None and canonical in _VALUE_BEARING_FIELDS
 
     # ------------------------------------------------------------------
     def match(
@@ -1523,6 +2140,14 @@ class FuzzyMatchStrategy(MatchStrategy):
         if canonical is None:
             return None
 
+        # A header that structurally names a foreign key ("primary_phone_id",
+        # "email_ref") must not be *guessed* into a field that holds the value
+        # itself — that stores an internal ID as someone's phone number or
+        # email address.  Exact aliases are exempt: the truth table is allowed
+        # to assert that a given vendor's "<platform>_id" really is the handle.
+        if canonical in _VALUE_BEARING_FIELDS and _is_reference_header(header):
+            return None
+
         confidence = FUZZY_HIGH_CONFIDENCE if score >= 90 else FUZZY_LOW_CONFIDENCE
         return FieldMatch(
             original=header,
@@ -1634,6 +2259,37 @@ class HeuristicMatchStrategy(MatchStrategy):
             "day_of_birth",
         }
     )
+    # A bare five-digit run is the one genuinely ambiguous postal shape: an
+    # order total, an account balance, an employee number and a US ZIP are
+    # indistinguishable as values, so filing "45000" as a postal code is a coin
+    # flip.  Like the phone and birthday shapes above, require corroboration
+    # from the header for that pattern alone.  The alphanumeric shapes
+    # (K1A 0B1, SW1A 1AA) and ZIP+4 are distinctive enough to stand on their
+    # own and keep working with no header hint.
+    _AMBIGUOUS_POSTAL_RE = re.compile(r"^\d{5}$")
+    _POSTAL_HEADER_HINTS = frozenset(
+        {
+            "cep",
+            "cp",
+            "eircode",
+            "pincode",
+            "plz",
+            "postal",
+            "postalcode",
+            "postcode",
+            "zip",
+            "zipcode",
+        }
+    )
+    _POSTAL_HEADER_PHRASES = frozenset(
+        {
+            "postal_code",
+            "post_code",
+            "zip_code",
+            "codigo_postal",
+            "code_postal",
+        }
+    )
 
     @property
     def name(self) -> str:
@@ -1655,6 +2311,14 @@ class HeuristicMatchStrategy(MatchStrategy):
         return bool(
             (terms & cls._BIRTHDAY_HEADER_HINTS)
             or normalized in cls._BIRTHDAY_HEADER_PHRASES
+        )
+
+    @classmethod
+    def _has_postal_header_hint(cls, header: str) -> bool:
+        normalized, terms = cls._header_terms(header)
+        return bool(
+            (terms & cls._POSTAL_HEADER_HINTS)
+            or normalized in cls._POSTAL_HEADER_PHRASES
         )
 
     # Cap the value length the data-shape regexes scan.  Cell values are
@@ -1689,6 +2353,12 @@ class HeuristicMatchStrategy(MatchStrategy):
                 if parsed is None:
                     continue
             if canonical == "birthday" and not self._has_birthday_header_hint(header):
+                continue
+            if (
+                canonical == "postal_code"
+                and self._AMBIGUOUS_POSTAL_RE.match(cleaned)
+                and not self._has_postal_header_hint(header)
+            ):
                 continue
             return FieldMatch(
                 original=header,
@@ -1877,19 +2547,31 @@ class ContactMapper:
                 header, value=_value_for_matching(value), default_region=region
             )
 
+        # Hold the lock only around the cache read and the cache write — never
+        # across the strategy chain, which includes rapidfuzz scoring over the
+        # whole alias length band.  The class docstring invites callers to
+        # share one mapper across threads, and holding the lock through
+        # matching serialized exactly that case.  Two threads racing the same
+        # cold header may each compute the verdict; that is harmless, because
+        # header-only strategies are deterministic per header.
         with self._header_cache_lock:
-            if header in self._header_cache:
-                verdict = self._header_cache[header]
+            cached = self._header_cache.get(header, _CACHE_MISS)
+            if cached is not _CACHE_MISS:
                 self._header_cache.move_to_end(header)
-            else:
-                verdict = None
-                for strategy in self._header_strategies:
-                    result = strategy.match(header, value=None, default_region=region)
-                    if result is not None:
-                        verdict = result
-                        break
-                if self._header_cache_max_size != 0:
+
+        if cached is not _CACHE_MISS:
+            verdict = cast("FieldMatch | None", cached)
+        else:
+            verdict = None
+            for strategy in self._header_strategies:
+                result = strategy.match(header, value=None, default_region=region)
+                if result is not None:
+                    verdict = result
+                    break
+            if self._header_cache_max_size != 0:
+                with self._header_cache_lock:
                     self._header_cache[header] = verdict
+                    self._header_cache.move_to_end(header)
                     if self._header_cache_max_size is not None:
                         while len(self._header_cache) > self._header_cache_max_size:
                             self._header_cache.popitem(last=False)
@@ -1905,6 +2587,30 @@ class ContactMapper:
             if result is not None:
                 return result
         return self._unknown(header)
+
+    def seed_header_cache(self, matches: dict[str, FieldMatch]) -> None:
+        """Pre-load header verdicts so they win over live resolution.
+
+        Used by :meth:`MappingSchema.from_dict` to replay a saved mapping plan.
+        A seeded header resolves to the supplied :class:`FieldMatch` instead of
+        being re-derived from the alias table, which is what makes an import
+        reproducible across a ``patterns.json`` change.
+
+        Entries whose canonical field is ``unknown`` are skipped rather than
+        cached as a miss, so a column the plan could not resolve statically can
+        still be matched from its value by the per-row heuristics.
+
+        .. versionadded:: 2.11.0
+        """
+        with self._header_cache_lock:
+            for header, match in matches.items():
+                if match.canonical == CanonicalField.UNKNOWN.value:
+                    continue
+                self._header_cache[header] = match
+                self._header_cache.move_to_end(header)
+            if self._header_cache_max_size is not None:
+                while len(self._header_cache) > self._header_cache_max_size:
+                    self._header_cache.popitem(last=False)
 
     def clear_cache(self) -> None:
         """Clear cached header-resolution verdicts.
@@ -1934,6 +2640,7 @@ class ContactMapper:
         default_region: str | None = None,
         strict: bool | None = None,
         confidence_threshold: float | None = None,
+        normalize: bool | None = None,
     ) -> MappingResult:
         """Normalize an entire contact data dictionary.
 
@@ -1989,6 +2696,7 @@ class ContactMapper:
         )
         threshold = _validate_confidence_threshold(threshold)
         is_strict = self._strict if strict is None else strict
+        do_normalize = self._normalize if normalize is None else normalize
 
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
@@ -2001,30 +2709,25 @@ class ContactMapper:
             # Drop matches below the confidence floor (recorded, not silent).
             if match.is_matched and match.confidence < threshold:
                 warnings.append(
-                    f"{key!r}: dropped low-confidence match to {match.canonical!r} "
-                    f"(confidence {match.confidence:.2f} < threshold {threshold:.2f})"
+                    MappingWarning(
+                        f"{key!r}: dropped low-confidence match to "
+                        f"{match.canonical!r} (confidence {match.confidence:.2f} "
+                        f"< threshold {threshold:.2f})",
+                        WarningCategory.LOW_CONFIDENCE,
+                    )
                 )
                 match = self._unknown(key)
 
             matches.append(match)
 
             if match.is_matched:
-                if self._normalize:
+                if do_normalize:
                     final = normalize_value(
                         match.canonical, value, default_region=region
                     )
-                    # Surface the silent-degradation case: a phone field whose
-                    # value didn't become E.164 (e.g. wrong/missing region).
-                    if (
-                        match.canonical in _PHONE_FIELDS
-                        and isinstance(final, str)
-                        and final.strip()
-                        and not final.startswith("+")
-                    ):
-                        warnings.append(
-                            f"{key!r}: phone value {final!r} could not be normalized "
-                            f"to E.164 (set a matching default_region?)"
-                        )
+                    # Surface silent degradation: a phone that didn't reach
+                    # E.164, or an "email" that isn't shaped like one.
+                    warnings.extend(value_warnings(key, match.canonical, final))
                 else:
                     final = value
                 _merge(normalized, match.canonical, final)
@@ -2084,9 +2787,12 @@ class ContactMapper:
             if found_total >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD:
                 if not warned_payload_limit:
                     warnings.append(
-                        "embedded phone extraction stopped after "
-                        f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
-                        "for this payload"
+                        MappingWarning(
+                            "embedded phone extraction stopped after "
+                            f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
+                            "for this payload",
+                            WarningCategory.EMBEDDED_PHONE_LIMIT,
+                        )
                     )
                     warned_payload_limit = True
                 break
@@ -2094,8 +2800,11 @@ class ContactMapper:
             scan_text = text
             if len(scan_text) > EMBEDDED_PHONE_MAX_TEXT_CHARS:
                 warnings.append(
-                    f"{key!r}: embedded phone scan truncated at "
-                    f"{EMBEDDED_PHONE_MAX_TEXT_CHARS} characters"
+                    MappingWarning(
+                        f"{key!r}: embedded phone scan truncated at "
+                        f"{EMBEDDED_PHONE_MAX_TEXT_CHARS} characters",
+                        WarningCategory.EMBEDDED_PHONE_LIMIT,
+                    )
                 )
                 scan_text = scan_text[:EMBEDDED_PHONE_MAX_TEXT_CHARS]
 
@@ -2130,18 +2839,24 @@ class ContactMapper:
             if overflow_for_field:
                 if field_limit == EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD:
                     warnings.append(
-                        f"{key!r}: embedded phone extraction stopped after "
-                        f"{EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD} matches "
-                        "for this field"
+                        MappingWarning(
+                            f"{key!r}: embedded phone extraction stopped after "
+                            f"{EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD} matches "
+                            "for this field",
+                            WarningCategory.EMBEDDED_PHONE_LIMIT,
+                        )
                     )
                 if (
                     found_total >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD
                     and not warned_payload_limit
                 ):
                     warnings.append(
-                        "embedded phone extraction stopped after "
-                        f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
-                        "for this payload"
+                        MappingWarning(
+                            "embedded phone extraction stopped after "
+                            f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
+                            "for this payload",
+                            WarningCategory.EMBEDDED_PHONE_LIMIT,
+                        )
                     )
                     warned_payload_limit = True
 
@@ -2180,6 +2895,7 @@ class ContactMapper:
         extract_embedded_phones: bool = False,
         strict: bool | None = None,
         confidence_threshold: float | None = None,
+        normalize: bool | None = None,
     ) -> list[MappingResult]:
         """Process multiple payloads, materializing all results into a list.
 
@@ -2198,6 +2914,7 @@ class ContactMapper:
                 extract_embedded_phones=extract_embedded_phones,
                 strict=strict,
                 confidence_threshold=confidence_threshold,
+                normalize=normalize,
             )
         )
 
@@ -2210,6 +2927,7 @@ class ContactMapper:
         extract_embedded_phones: bool = False,
         strict: bool | None = None,
         confidence_threshold: float | None = None,
+        normalize: bool | None = None,
     ) -> Iterator[MappingResult]:
         """Lazily map an iterable of payloads, yielding one result at a time.
 
@@ -2234,6 +2952,7 @@ class ContactMapper:
                 extract_embedded_phones=extract_embedded_phones,
                 strict=strict,
                 confidence_threshold=confidence_threshold,
+                normalize=normalize,
             )
 
     def profile(
@@ -2246,6 +2965,7 @@ class ContactMapper:
         extract_embedded_phones: bool = False,
         strict: bool | None = None,
         confidence_threshold: float | None = None,
+        normalize: bool | None = None,
     ) -> MappingProfile:
         """Summarize mapping quality across a batch or stream.
 
@@ -2253,6 +2973,18 @@ class ContactMapper:
         memory use stays bounded for large imports. ``max_rows`` can limit a
         preview without consuming an additional item from an input iterator.
         Existing mapping semantics and options are reused unchanged.
+
+        *normalize* overrides value normalization for the profiling run only.
+        Profiling reads nothing but ``field_matches`` and ``warnings``, so
+        passing ``normalize=False`` skips all phone/name parsing and makes a
+        pre-flight scan of a large export several times faster — at the cost
+        of the value-level warning counts (``phone_normalization``,
+        ``email_validation``), which can only be produced by normalizing.
+        Left at ``None`` the mapper's own setting applies, so counts stay
+        complete by default.
+
+        .. versionchanged:: 2.11.0
+           Added *normalize*.
         """
         if max_rows is not None:
             if not isinstance(max_rows, int) or isinstance(max_rows, bool):
@@ -2281,6 +3013,7 @@ class ContactMapper:
                 extract_embedded_phones=extract_embedded_phones,
                 strict=strict,
                 confidence_threshold=confidence_threshold,
+                normalize=normalize,
             )
             rows_seen += 1
             for match in result.field_matches:
@@ -2292,15 +3025,7 @@ class ContactMapper:
                     unmatched_count += 1
                     unmapped_counts[match.original] += 1
             for warning in result.warnings:
-                if "dropped low-confidence match" in warning:
-                    category = "low_confidence"
-                elif "could not be normalized to E.164" in warning:
-                    category = "phone_normalization"
-                elif "embedded phone" in warning:
-                    category = "embedded_phone_limit"
-                else:
-                    category = "other"
-                warning_counts[category] += 1
+                warning_counts[_warning_category(warning)] += 1
 
         return MappingProfile(
             rows_seen=rows_seen,
@@ -2353,8 +3078,12 @@ class ContactMapper:
                 match = self.identify(key, default_region=region)
             if match.is_matched and match.confidence < threshold:
                 warnings.append(
-                    f"{key!r}: dropped low-confidence match to {match.canonical!r} "
-                    f"(confidence {match.confidence:.2f} < threshold {threshold:.2f})"
+                    MappingWarning(
+                        f"{key!r}: dropped low-confidence match to "
+                        f"{match.canonical!r} (confidence {match.confidence:.2f} "
+                        f"< threshold {threshold:.2f})",
+                        WarningCategory.LOW_CONFIDENCE,
+                    )
                 )
                 match = self._unknown(key)
             matches[key] = match
@@ -2458,17 +3187,9 @@ class ContactMapper:
                 out[new_name] = out[new_name].map(
                     lambda v, c=canonical: normalize_value(c, v, default_region=region)
                 )
-                if canonical in _PHONE_FIELDS:
+                if canonical in _PHONE_FIELDS or canonical == "email":
                     for final in out[new_name]:
-                        if (
-                            isinstance(final, str)
-                            and final.strip()
-                            and not final.startswith("+")
-                        ):
-                            warnings.append(
-                                f"{old_name!r}: phone value {final!r} could not be "
-                                "normalized to E.164 (set a matching default_region?)"
-                            )
+                        warnings.extend(value_warnings(old_name, canonical, final))
         if warnings:
             for warning in warnings:
                 logger.warning("%s", warning)
@@ -2520,6 +3241,119 @@ class MappingSchema:
         kwargs.setdefault("default_region", self.default_region)
         return self.mapper.map_payload(row, **kwargs)
 
+    SCHEMA_VERSION: ClassVar[int] = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable mapping plan (a "mapping lockfile").
+
+        Write this next to your import script and load it with
+        :meth:`from_dict` to get byte-identical column routing on every later
+        run — including after a ``patterns.json`` update or a rolodexter
+        upgrade that would otherwise resolve a header differently.  The plan is
+        plain JSON, so it can be reviewed in a pull request like any other
+        configuration.
+
+        .. versionadded:: 2.11.0
+        """
+        return {
+            "schema_version": self.SCHEMA_VERSION,
+            "default_region": self.default_region,
+            "columns": {
+                header: {
+                    "canonical": match.canonical,
+                    "confidence": match.confidence,
+                    "strategy": match.strategy,
+                    "service": match.service,
+                }
+                for header, match in self.matches.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        mapper: ContactMapper,
+        *,
+        default_region: str | None = None,
+    ) -> MappingSchema:
+        """Rebuild a plan saved by :meth:`to_dict` and bind it to *mapper*.
+
+        The restored verdicts are seeded into *mapper*'s header cache, so
+        subsequent :meth:`apply` / :meth:`ContactMapper.map_payload` calls route
+        columns exactly as the saved plan says rather than re-resolving them.
+        That is what makes an import reproducible: the plan wins over whatever
+        the current alias table would decide today.
+
+        Value-shape heuristics are per-row by nature and are not part of a
+        saved plan, so a header the plan records as ``unknown`` can still be
+        matched from its value at run time, exactly as
+        :meth:`ContactMapper.compile_schema` documents.
+
+        Raises :class:`PatternLoadError` if *data* is not a plan this version
+        understands.
+
+        .. versionadded:: 2.11.0
+        """
+        if not isinstance(data, dict):
+            raise PatternLoadError("Invalid mapping schema: expected an object")
+        version = data.get("schema_version")
+        if version != cls.SCHEMA_VERSION:
+            raise PatternLoadError(
+                f"Unsupported mapping schema version {version!r}; "
+                f"this rolodexter reads version {cls.SCHEMA_VERSION}"
+            )
+        columns = data.get("columns")
+        if not isinstance(columns, dict):
+            raise PatternLoadError(
+                "Invalid mapping schema: 'columns' must be an object"
+            )
+
+        matches: dict[str, FieldMatch] = {}
+        for header, entry in columns.items():
+            if not isinstance(header, str) or not isinstance(entry, dict):
+                raise PatternLoadError(
+                    "Invalid mapping schema: each column must map a string header "
+                    "to an object"
+                )
+            canonical = entry.get("canonical")
+            strategy = entry.get("strategy", "schema")
+            confidence = entry.get("confidence", EXACT_MATCH_CONFIDENCE)
+            service = entry.get("service")
+            if not isinstance(canonical, str) or not canonical.strip():
+                raise PatternLoadError(
+                    f"Invalid mapping schema: column {header!r} has no canonical field"
+                )
+            if not isinstance(strategy, str) or not isinstance(confidence, int | float):
+                raise PatternLoadError(
+                    f"Invalid mapping schema: column {header!r} has a malformed "
+                    "strategy or confidence"
+                )
+            matches[header] = FieldMatch(
+                original=header,
+                canonical=canonical,
+                confidence=float(confidence),
+                strategy=strategy,
+                service=service if isinstance(service, str) else None,
+            )
+
+        region = default_region
+        if region is None:
+            stored = data.get("default_region")
+            region = stored if isinstance(stored, str) else None
+
+        if not mapper.cache_info()["cacheable_pipeline"]:
+            # A custom strategy order that interleaves value-dependent
+            # strategies bypasses the header cache entirely, so a replayed plan
+            # would be silently ignored.  Say so rather than pretend.
+            logger.warning(
+                "MappingSchema.from_dict: this mapper's strategy pipeline is not "
+                "cacheable, so the saved plan cannot override live resolution; "
+                "use column_map() explicitly instead"
+            )
+        mapper.seed_header_cache(matches)
+        return cls(matches=matches, mapper=mapper, default_region=region)
+
 
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:
     """Merge *value* into *target[key]*, promoting to list on collision.
@@ -2527,6 +3361,11 @@ def _merge(target: dict[str, Any], key: str, value: Any) -> None:
     Duplicate values are dropped so the same normalized phone/email
     from multiple aliases (e.g. ``phone`` + ``mobile`` carrying the
     same number) appears only once.
+
+    .. versionchanged:: 2.11.0
+       Blank values (``None`` or whitespace-only) never join a collision: an
+       export with two columns for one field and only one of them filled in
+       yields the value, not ``["value", ""]``.
     """
     if key in _LIST_FIELDS:
         if key not in target:
@@ -2544,7 +3383,15 @@ def _merge(target: dict[str, Any], key: str, value: Any) -> None:
     if key not in target:
         target[key] = value
         return
+    # An empty cell carries no information, so it must not turn a good value
+    # into a two-element list. This shows up whenever an export has two columns
+    # meaning the same field and only one is filled in.
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return
     existing = target[key]
+    if existing is None or (isinstance(existing, str) and not existing.strip()):
+        target[key] = value
+        return
     if isinstance(existing, list):
         if value not in existing:
             existing.append(value)

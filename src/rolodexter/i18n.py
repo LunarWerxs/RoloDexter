@@ -75,6 +75,7 @@ __all__ = [
     "get_writable_cache_dir",
     "load_cached",
     "main",
+    "normalize_language_code",
 ]
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -446,37 +447,68 @@ def _load_master() -> dict[str, Any]:
 _CACHE_SCHEMA_KEYS = ("language_code", "language_name", "fields")
 
 
+def normalize_language_code(lang_code: Any) -> str | None:
+    """Return the canonical :data:`SUPPORTED_LANGUAGES` key for *lang_code*.
+
+    Accepts any case (``"ES"`` → ``"es"``) and surrounding whitespace, and
+    returns ``None`` for anything that is not a supported language.
+
+    Every path that turns a caller-supplied string into a cache *filename*
+    must go through here first.  ``lang_code`` reaches this module from
+    ``ContactMapper(languages=...)`` and the CLI's ``--languages`` flag, so an
+    unvalidated value would let a relative path (``"../../secrets"``) escape
+    the cache directory and have its contents merged into the alias index —
+    which is the table that decides where every column of a contact export is
+    routed.
+
+    .. versionadded:: 2.11.0
+    """
+    if not isinstance(lang_code, str):
+        return None
+    candidate = lang_code.strip().lower()
+    return candidate if candidate in SUPPORTED_LANGUAGES else None
+
+
 def _validate_cache_schema(data: Any, path: Path) -> dict[str, Any] | None:
     """Check *data* looks like a generated i18n cache file.
 
-    Returns *data* (typed as a dict) when it passes a light structural
-    check, or ``None`` (after logging a warning) when it's the wrong shape
-    — e.g. truncated, hand-edited, or written by an unrelated tool sharing
-    the cache directory.  This only validates *shape*; it doesn't verify
-    alias values.
+    Returns *data* (typed as a dict) when it passes a structural check, or
+    ``None`` (after logging a warning) when it's the wrong shape — e.g.
+    truncated, hand-edited, or written by an unrelated tool sharing the cache
+    directory.
+
+    .. versionchanged:: 2.11.0
+       Also validates that every alias is a non-empty string.  Previously only
+       the top-level shape was checked, so a half-written or hand-edited file
+       whose ``fields`` held a non-string entry raised an ``AttributeError``
+       out of ``PatternRegistry`` construction instead of being skipped as
+       corrupt like every other malformed file here.
     """
+    log = logging.getLogger(__name__)
+
+    def reject(detail: str) -> None:
+        log.warning("Ignoring corrupt i18n cache file %s: %s.", path, detail)
+
     if not isinstance(data, dict):
-        logging.getLogger(__name__).warning(
-            "Ignoring corrupt i18n cache file %s: expected a JSON object, got %s.",
-            path,
-            type(data).__name__,
-        )
+        reject(f"expected a JSON object, got {type(data).__name__}")
         return None
     missing = [key for key in _CACHE_SCHEMA_KEYS if key not in data]
     if missing:
-        logging.getLogger(__name__).warning(
-            "Ignoring corrupt i18n cache file %s: missing required key(s) %s.",
-            path,
-            ", ".join(missing),
-        )
+        reject(f"missing required key(s) {', '.join(missing)}")
         return None
-    if not isinstance(data.get("fields"), dict):
-        logging.getLogger(__name__).warning(
-            "Ignoring corrupt i18n cache file %s: 'fields' must be an object, got %s.",
-            path,
-            type(data.get("fields")).__name__,
-        )
+    fields = data.get("fields")
+    if not isinstance(fields, dict):
+        reject(f"'fields' must be an object, got {type(fields).__name__}")
         return None
+    for canonical, aliases in fields.items():
+        if not isinstance(canonical, str) or not canonical.strip():
+            reject("field names must be non-empty strings")
+            return None
+        if not isinstance(aliases, list) or any(
+            not isinstance(alias, str) or not alias.strip() for alias in aliases
+        ):
+            reject(f"aliases for field {canonical!r} must be non-empty strings")
+            return None
     return cast(dict[str, Any], data)
 
 
@@ -489,9 +521,17 @@ def load_cached(lang_code: str) -> dict[str, Any] | None:
     cache directory, if any) and a warning is logged rather than silently
     swallowed, since a poisoned per-user cache file would otherwise make
     aliases for that language silently vanish.
+
+    .. versionchanged:: 2.11.0
+       *lang_code* is validated against :data:`SUPPORTED_LANGUAGES` before it
+       is used to build a path, so a caller-supplied value can no longer
+       traverse out of the cache directory.
     """
+    code = normalize_language_code(lang_code)
+    if code is None:
+        return None
     for cache_dir in get_all_cache_dirs():
-        path = cache_dir / f"{lang_code}.json"
+        path = cache_dir / f"{code}.json"
         if path.exists():
             try:
                 with open(path, encoding="utf-8") as fh:
@@ -580,11 +620,14 @@ def generate_language(  # pylint: disable=too-many-locals
     ImportError
         If ``deep-translator`` is not installed.
     """
-    if lang_code not in SUPPORTED_LANGUAGES:
+    requested = lang_code
+    normalized = normalize_language_code(lang_code)
+    if normalized is None:
         raise ValueError(
-            f"Unsupported language: {lang_code!r}. "
+            f"Unsupported language: {requested!r}. "
             f"Supported: {sorted(SUPPORTED_LANGUAGES)}"
         )
+    lang_code = normalized
 
     # Check cache first
     if not force and not force_fields:
@@ -683,14 +726,25 @@ def generate_language(  # pylint: disable=too-many-locals
 
 
 def discover_cached() -> dict[str, Path]:
-    """Return a dict of ``{lang_code: path}`` for all cached i18n files."""
+    """Return a dict of ``{lang_code: path}`` for all cached i18n files.
+
+    Only files named after a supported language are reported.  The cache
+    directory is a shared, user-writable location, so an unrelated ``*.json``
+    sitting there is not a language pack and must not be advertised as one.
+
+    .. versionchanged:: 2.11.0
+       Ignores ``*.json`` files whose name is not a supported language code.
+    """
     found: dict[str, Path] = {}
     for cache_dir in get_all_cache_dirs():
         if not cache_dir.exists():
             continue
         for item in cache_dir.iterdir():
-            if item.suffix == ".json" and item.stem not in found:
-                found[item.stem] = item
+            if item.suffix != ".json":
+                continue
+            code = normalize_language_code(item.stem)
+            if code is not None and code not in found:
+                found[code] = item
     return found
 
 
@@ -770,13 +824,13 @@ def main() -> None:  # pylint: disable=too-many-locals
 
     # Determine target languages
     if args.languages:
-        requested = [c.strip() for c in args.languages.split(",")]
-        unknown = [c for c in requested if c not in SUPPORTED_LANGUAGES]
+        requested = [c.strip() for c in args.languages.split(",") if c.strip()]
+        unknown = [c for c in requested if normalize_language_code(c) is None]
         if unknown:
             print(f"ERROR: Unknown language code(s): {unknown}")
             print("Run with --list to see supported languages.")
             sys.exit(1)
-        target_codes = requested
+        target_codes = [cast(str, normalize_language_code(c)) for c in requested]
     else:
         target_codes = sorted(SUPPORTED_LANGUAGES.keys())
 

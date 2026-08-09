@@ -80,6 +80,8 @@ def test_submodule_public_export_lists_are_explicit() -> None:
         "BooleanNormalizer",
         "CanonicalField",
         "ContactMapper",
+        "CountryNormalizer",
+        "DateNormalizer",
         "EmailNormalizer",
         "ExactMatchStrategy",
         "FieldMatch",
@@ -89,6 +91,7 @@ def test_submodule_public_export_lists_are_explicit() -> None:
         "MappingProfile",
         "MappingResult",
         "MappingSchema",
+        "MappingWarning",
         "MatchStrategy",
         "NameNormalizer",
         "NormalizationError",
@@ -98,8 +101,11 @@ def test_submodule_public_export_lists_are_explicit() -> None:
         "PhoneNormalizer",
         "PostalCodeNormalizer",
         "RolodexterError",
+        "StateNormalizer",
         "StringNormalizer",
+        "WarningCategory",
         "normalize_value",
+        "value_warnings",
     ]
     assert i18n.__all__ == [
         "DEFAULT_TRANSLATE_RETRIES",
@@ -114,6 +120,7 @@ def test_submodule_public_export_lists_are_explicit() -> None:
         "get_writable_cache_dir",
         "load_cached",
         "main",
+        "normalize_language_code",
     ]
 
 
@@ -147,7 +154,7 @@ class TestLoading:
         assert registry.exact_lookup("fname") == "first_name"
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.6.0"
+        assert registry.version == "2.10.0"
 
     def test_custom_patterns(self) -> None:
         custom = {
@@ -624,7 +631,6 @@ class TestHeuristicMatch:
             ("www.example.com", "website"),
             ("https://linkedin.com/in/janedoe", "linkedin"),
             ("@janedoe", "twitter"),
-            ("90210", "postal_code"),
             ("90210-1234", "postal_code"),
             ("K1A 0B1", "postal_code"),
             ("SW1A 1AA", "postal_code"),
@@ -637,6 +643,32 @@ class TestHeuristicMatch:
         assert m.canonical == expected
         assert m.strategy == "heuristic"
         assert m.confidence == 0.60
+
+    @pytest.mark.parametrize(
+        "header",
+        ["zip", "Postal Code", "cust_plz", "shipping zipcode"],
+    )
+    def test_bare_five_digits_needs_a_postal_header_hint(self, header: str) -> None:
+        """A bare 5-digit run is only a postal code if the header says so."""
+        strat = HeuristicMatchStrategy()
+        m = strat.match(header, value="90210")
+        assert m is not None
+        assert m.canonical == "postal_code"
+
+    @pytest.mark.parametrize(
+        "header",
+        ["Unknown Column", "order_total", "account_balance", "employee_number"],
+    )
+    def test_bare_five_digits_is_not_guessed_as_postal(self, header: str) -> None:
+        r"""Money, IDs and quantities must not be filed as someone's postal code.
+
+        ``^\d{5}$`` cannot distinguish a ZIP from an order total, so without
+        corroboration from the header the shape is not trusted -- mirroring the
+        guards the phone and birthday shapes already have.
+        """
+        strat = HeuristicMatchStrategy()
+        assert strat.match(header, value="45000") is None
+        assert strat.match(header, value="90210") is None
 
     def test_none_value(self) -> None:
         strat = HeuristicMatchStrategy()
@@ -1602,8 +1634,8 @@ class TestFormBotGuessRequiredValueKeywords:
 class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
-    def test_version_is_2_6_0(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.6.0"
+    def test_version_matches_pattern_table(self, registry: PatternRegistry) -> None:
+        assert registry.version == "2.10.0"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1952,7 +1984,7 @@ class TestI18nModule:
         from rolodexter.i18n import _write_cache, load_cached
 
         lang_data = {
-            "language_code": "zz_test",
+            "language_code": "es",
             "language_name": "Test Language",
             "generated_at": "2026-01-01T00:00:00+00:00",
             "source_version": "2.2.0",
@@ -1962,10 +1994,10 @@ class TestI18nModule:
         with _mock_patch("rolodexter.i18n.get_cache_dir", return_value=tmp_path):
             written = _write_cache(lang_data)
         assert written.exists()
-        assert json.loads(written.read_text("utf-8"))["language_code"] == "zz_test"
+        assert json.loads(written.read_text("utf-8"))["language_code"] == "es"
         # Now load it back
         with _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]):
-            loaded = load_cached("zz_test")
+            loaded = load_cached("es")
         assert loaded is not None
         assert loaded["fields"]["email"] == ["prueba"]
 
@@ -1973,13 +2005,13 @@ class TestI18nModule:
         """Corrupt JSON is skipped, with a warning rather than silent failure."""
         from rolodexter.i18n import load_cached
 
-        bad_file = tmp_path / "zz_corrupt.json"
+        bad_file = tmp_path / "fr.json"
         bad_file.write_text("NOT JSON{{{", encoding="utf-8")
         with (
             _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
             caplog.at_level("WARNING", logger="rolodexter.i18n"),
         ):
-            assert load_cached("zz_corrupt") is None
+            assert load_cached("fr") is None
         assert "corrupt" in caplog.text.lower()
 
     def test_load_cached_wrong_schema(self, tmp_path: Path, caplog) -> None:
@@ -1988,13 +2020,13 @@ class TestI18nModule:
 
         from rolodexter.i18n import load_cached
 
-        bad_file = tmp_path / "zz_wrong_shape.json"
+        bad_file = tmp_path / "de.json"
         bad_file.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
         with (
             _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
             caplog.at_level("WARNING", logger="rolodexter.i18n"),
         ):
-            assert load_cached("zz_wrong_shape") is None
+            assert load_cached("de") is None
         assert "corrupt" in caplog.text.lower()
 
     def test_load_cached_missing_keys(self, tmp_path: Path, caplog) -> None:
@@ -2003,15 +2035,13 @@ class TestI18nModule:
 
         from rolodexter.i18n import load_cached
 
-        bad_file = tmp_path / "zz_missing_keys.json"
-        bad_file.write_text(
-            json.dumps({"language_code": "zz_missing_keys"}), encoding="utf-8"
-        )
+        bad_file = tmp_path / "it.json"
+        bad_file.write_text(json.dumps({"language_code": "it"}), encoding="utf-8")
         with (
             _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
             caplog.at_level("WARNING", logger="rolodexter.i18n"),
         ):
-            assert load_cached("zz_missing_keys") is None
+            assert load_cached("it") is None
         assert "corrupt" in caplog.text.lower()
 
     # --- discover_cached with tmp dir ---
@@ -2386,10 +2416,15 @@ class TestPhoneNormalizerE164:
         result = PhoneNormalizer.normalize("+86 138 0013 8000")
         assert result == "+8613800138000"
 
-    def test_regex_fallback_unknown_code(self) -> None:
-        """Numbers that can't be parsed fall back to regex strip."""
-        result = PhoneNormalizer.normalize("+999 000 000 0000")
-        assert isinstance(result, str)
+    def test_unparseable_number_is_returned_unchanged(self) -> None:
+        """An unparseable number is passed through, never silently mangled.
+
+        The manual regex fallback this used to describe was removed in 2.5.0;
+        ``isinstance(result, str)`` was vacuous, since the input is a str and
+        every branch returns one.  Pin the behavior that actually matters.
+        """
+        raw = "+999 000 000 0000"
+        assert PhoneNormalizer.normalize(raw) == raw
 
     def test_normalize_value_uses_e164(self) -> None:
         """normalize_value() for phone fields uses E.164 formatting."""
@@ -3986,18 +4021,18 @@ class TestI18nWriteAndLoadCache:
         monkeypatch.setattr("rolodexter.i18n.get_all_cache_dirs", lambda: [tmp_path])
 
         lang_data = {
-            "language_code": "test_lang",
-            "language_name": "Test Language",
+            "language_code": "sw",
+            "language_name": "Swahili",
             "generated_at": "2026-01-01T00:00:00+00:00",
-            "source_version": "2.6.0",
+            "source_version": "2.10.0",
             "fields": {"email": ["correo_test"]},
         }
         path = _write_cache(lang_data)
         assert path.exists()
 
-        loaded = load_cached("test_lang")
+        loaded = load_cached("sw")
         assert loaded is not None
-        assert loaded["language_code"] == "test_lang"
+        assert loaded["language_code"] == "sw"
         assert loaded["fields"]["email"] == ["correo_test"]
 
 
@@ -4033,7 +4068,7 @@ class TestI18nGenerateLanguageCached:
             "language_code": "es",
             "language_name": "Spanish",
             "generated_at": "2026-01-01",
-            "source_version": "2.6.0",
+            "source_version": "2.10.0",
             "fields": {"email": ["correo"]},
         }
         monkeypatch.setattr(
@@ -4112,20 +4147,24 @@ class TestPatternRegistryLanguages:
         monkeypatch.setattr("rolodexter.i18n.get_cache_dir", lambda: cache_dir)
         monkeypatch.setattr("rolodexter.i18n.get_all_cache_dirs", lambda: [cache_dir])
         lang_data = {
-            "language_code": "test_cov",
-            "language_name": "Test Coverage",
+            "language_code": "sw",
+            "language_name": "Swahili",
             "generated_at": "2026-01-01",
-            "source_version": "2.6.0",
+            "source_version": "2.10.0",
             "fields": {"email": ["correo_cov_test"]},
         }
         _write_cache(lang_data)
         try:
             reg = PatternRegistry(languages=["test_cov"])
+            assert reg.exact_lookup("correo_cov_test") is None
+            assert reg.loaded_languages == []
+            # A real, supported code loads the same cache file.
+            reg = PatternRegistry(languages=["sw"])
             assert reg.exact_lookup("correo_cov_test") == "email"
-            assert "test_cov" in reg.loaded_languages
+            assert "sw" in reg.loaded_languages
         finally:
             # Clean up
-            p = cache_dir / "test_cov.json"
+            p = cache_dir / "sw.json"
             if p.exists():
                 p.unlink()
 

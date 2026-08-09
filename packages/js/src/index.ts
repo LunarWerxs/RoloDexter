@@ -484,6 +484,7 @@ const NAME_FIELDS = new Set([
 const ADDRESS_FIELDS = new Set(["address_line1", "address_line2", "city", "full_address"]);
 const BOOLEAN_FIELDS = new Set(["email_opt_out", "subscribed", "verified"]);
 const LIST_FIELDS = new Set(["tags"]);
+const DATE_FIELDS = new Set(["birthday", "created_at", "updated_at", "last_contacted"]);
 const SOCIAL_FIELDS = new Set([
   "website",
   "linkedin",
@@ -1370,17 +1371,77 @@ export function get_all_cache_dirs(): string[] {
   return getAllCacheDirs();
 }
 
+/**
+ * Canonical SUPPORTED_LANGUAGES key for `langCode`, or undefined.
+ *
+ * Accepts any case ("ES" -> "es") and surrounding whitespace. Every path that
+ * turns a caller-supplied string into a cache *filename* must go through here
+ * first: `langCode` arrives from `new ContactMapper({languages})` and the CLI's
+ * --languages flag, so an unvalidated value would let a relative path
+ * ("../../secrets") escape the cache directory and have its contents merged
+ * into the alias index, which decides where every column is routed.
+ */
+export function normalizeLanguageCode(langCode: unknown): string | undefined {
+  if (typeof langCode !== "string") {
+    return undefined;
+  }
+  const candidate = langCode.trim().toLowerCase();
+  return candidate in SUPPORTED_LANGUAGES ? candidate : undefined;
+}
+
+/**
+ * Shape check for a generated i18n cache file.
+ *
+ * The cache directory is user-writable and its contents decide routing, so a
+ * truncated, hand-edited or foreign file must be skipped rather than trusted.
+ * Validating alias types here also stops a non-string entry throwing out of
+ * ContactMapper construction.
+ */
+function validateCacheSchema(data: unknown): LanguageData | undefined {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return undefined;
+  }
+  const record = data as Record<string, unknown>;
+  for (const key of ["language_code", "language_name", "fields"]) {
+    if (!(key in record)) {
+      return undefined;
+    }
+  }
+  const fields = record.fields;
+  if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
+    return undefined;
+  }
+  for (const [canonical, aliases] of Object.entries(fields as Record<string, unknown>)) {
+    if (!canonical.trim()) {
+      return undefined;
+    }
+    if (!Array.isArray(aliases) || aliases.some((alias) => typeof alias !== "string" || !alias.trim())) {
+      return undefined;
+    }
+  }
+  return data as LanguageData;
+}
+
 /** @internal */
 export function loadCachedLanguage(langCode: string, options: { cache_dir?: string } = {}): LanguageData | undefined {
+  const code = normalizeLanguageCode(langCode);
+  if (code === undefined) {
+    return undefined;
+  }
   for (const dir of getAllCacheDirs(options)) {
-    const path = join(dir, `${langCode}.json`);
+    const path = join(dir, `${code}.json`);
     if (!existsSync(path)) {
       continue;
     }
+    let parsed: unknown;
     try {
-      return JSON.parse(readFileSync(path, "utf8")) as LanguageData;
+      parsed = JSON.parse(readFileSync(path, "utf8"));
     } catch {
       continue;
+    }
+    const validated = validateCacheSchema(parsed);
+    if (validated !== undefined) {
+      return validated;
     }
   }
   return undefined;
@@ -1397,7 +1458,10 @@ export function discoverCachedLanguages(options: { cache_dir?: string } = {}): R
       if (!item.endsWith(".json")) {
         continue;
       }
-      const langCode = item.slice(0, -5);
+      const langCode = normalizeLanguageCode(item.slice(0, -5));
+      if (langCode === undefined) {
+        continue;
+      }
       found[langCode] ??= join(dir, item);
     }
   }
@@ -2243,16 +2307,20 @@ export class MappingResult {
     const normalizedServices = services.map((value) =>
       value == null ? "" : pyString(value).trim().toLowerCase()
     );
-    for (const [index, sourceId] of sourceIds.entries()) {
+    // Scope IDs by vendor ONLY when the payload names exactly one vendor.
+    // source_id and source_service are two independent lists built by the
+    // collision merge from raw key order; nothing links position i of one to
+    // position i of the other, so zipping them emitted a confident but
+    // fabricated key. Ambiguous means unqualified, which is less specific
+    // rather than wrong.
+    const service = normalizedServices.length === 1 ? normalizedServices[0] : "";
+    const prefix = service ? `source:${service}` : "source_id";
+    for (const sourceId of sourceIds) {
       if (sourceId == null) {
         continue;
       }
       const text = pyString(sourceId).trim();
       if (text) {
-        const service = normalizedServices.length === 1
-          ? normalizedServices[0]
-          : (normalizedServices[index] ?? "");
-        const prefix = service ? `source:${service}` : "source_id";
         add(`${prefix}:${text}`);
       }
     }
@@ -2387,6 +2455,100 @@ export class MappingSchema {
       default_region,
     });
   }
+
+  static readonly SCHEMA_VERSION = 1;
+
+  /**
+   * Return a JSON-serializable mapping plan (a "mapping lockfile").
+   *
+   * Load it back with from_dict to get byte-identical column routing on every
+   * later run, including after a patterns.json update that would otherwise
+   * resolve a header differently.
+   */
+  to_dict(): Record<string, unknown> {
+    const columns: Record<string, unknown> = {};
+    for (const [header, match] of this.matches.entries()) {
+      columns[header] = {
+        canonical: match.canonical,
+        confidence: match.confidence,
+        strategy: match.strategy,
+        service: match.service ?? null,
+      };
+    }
+    return {
+      schema_version: MappingSchema.SCHEMA_VERSION,
+      default_region: this.default_region ?? null,
+      columns,
+    };
+  }
+
+  /**
+   * Rebuild a plan saved by to_dict and bind it to `mapper`.
+   *
+   * The restored verdicts are seeded into the mapper's header cache, so later
+   * map_payload calls route columns exactly as the saved plan says rather than
+   * re-resolving them. Headers the plan records as `unknown` are skipped, so
+   * per-row value heuristics can still match them.
+   */
+  static from_dict(
+    data: Record<string, unknown>,
+    mapper: ContactMapper,
+    options: { default_region?: string | null } = {},
+  ): MappingSchema {
+    if (data === null || typeof data !== "object" || Array.isArray(data)) {
+      throw new PatternLoadError("Invalid mapping schema: expected an object");
+    }
+    const version = (data as { schema_version?: unknown }).schema_version;
+    if (version !== MappingSchema.SCHEMA_VERSION) {
+      throw new PatternLoadError(
+        `Unsupported mapping schema version ${pyRepr(version)}; this rolodexter reads version ${MappingSchema.SCHEMA_VERSION}`,
+      );
+    }
+    const columns = (data as { columns?: unknown }).columns;
+    if (columns === null || typeof columns !== "object" || Array.isArray(columns)) {
+      throw new PatternLoadError("Invalid mapping schema: 'columns' must be an object");
+    }
+
+    const matches: Record<string, FieldMatch> = {};
+    for (const [header, rawEntry] of Object.entries(columns as Record<string, unknown>)) {
+      if (rawEntry === null || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+        throw new PatternLoadError(
+          "Invalid mapping schema: each column must map a string header to an object",
+        );
+      }
+      const entry = rawEntry as Record<string, unknown>;
+      const canonical = entry.canonical;
+      const strategy = entry.strategy ?? "schema";
+      const confidence = entry.confidence ?? EXACT_MATCH_CONFIDENCE;
+      const service = entry.service;
+      if (typeof canonical !== "string" || !canonical.trim()) {
+        throw new PatternLoadError(
+          `Invalid mapping schema: column ${pyRepr(header)} has no canonical field`,
+        );
+      }
+      if (typeof strategy !== "string" || typeof confidence !== "number") {
+        throw new PatternLoadError(
+          `Invalid mapping schema: column ${pyRepr(header)} has a malformed strategy or confidence`,
+        );
+      }
+      matches[header] = fieldMatch(
+        header,
+        canonical,
+        confidence,
+        strategy,
+        typeof service === "string" ? service : null,
+      );
+    }
+
+    let region = options.default_region;
+    if (region === undefined) {
+      const stored = (data as { default_region?: unknown }).default_region;
+      region = typeof stored === "string" ? stored : null;
+    }
+
+    mapper.seed_header_cache(matches);
+    return new MappingSchema(matches, mapper, region);
+  }
 }
 
 const CONTACT_MAPPER_OPTION_KEYS = new Set([
@@ -2424,7 +2586,50 @@ function underscore(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizedCandidates(header: string): string[] {
+// Fields that hold a contactable value rather than a reference to a record.
+// A header like "primary_phone_id" names a foreign key, so the _id-suffix
+// stripping below must not route it to `phone` -- that stores an internal ID
+// as the contact's number at 0.95 confidence, where no threshold catches it.
+// A payload key literally named "__proto__" hits the prototype setter on a
+// plain object: the value is silently dropped (Python's dict keeps it) and the
+// returned object's prototype is replaced with caller-supplied data, so later
+// lookups on it can return injected values. Defining it as an own property
+// preserves the data, matches Python, and leaves the prototype alone -- while
+// keeping a normal object literal so deepStrictEqual and spread still behave.
+function setOwnProperty(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === "__proto__") {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    return;
+  }
+  target[key] = value;
+}
+
+function valueBearingFields(): Set<string> {
+  return new Set([...PHONE_FIELDS, ...SOCIAL_FIELDS, "email"]);
+}
+
+const VALUE_BEARING_FIELDS = valueBearingFields();
+
+// Suffixes marking a header as naming a reference rather than holding a value.
+// An explicit alias in patterns.json still wins: the truth table is allowed to
+// say that a given export's "<platform>_id" really is the handle.
+const REFERENCE_SUFFIX_RE = /_(?:id|ids|uuid|guid|key|ref|fk)$/;
+
+function isReferenceHeader(header: string): boolean {
+  return REFERENCE_SUFFIX_RE.test(underscore(splitCamel(header)));
+}
+
+function isValueBearing(registry: PatternRegistry, candidate: string): boolean {
+  const canonical = registry.exact_lookup(candidate);
+  return Boolean(canonical) && VALUE_BEARING_FIELDS.has(canonical as string);
+}
+
+function normalizedCandidates(header: string, registry: PatternRegistry): string[] {
   const out: string[] = [];
   const h = header.trim();
   if (!h) {
@@ -2492,13 +2697,13 @@ function normalizedCandidates(header: string): string[] {
   for (const candidate of [...out]) {
     if (candidate.endsWith("_id")) {
       const base = candidate.slice(0, -3);
-      if (base && !out.includes(base)) {
+      if (base && !out.includes(base) && !isValueBearing(registry, base)) {
         out.push(base);
       }
       for (const prefix of VENDOR_PREFIXES) {
         if (base.startsWith(prefix)) {
           const inner = base.slice(prefix.length);
-          if (inner && !out.includes(inner)) {
+          if (inner && !out.includes(inner) && !isValueBearing(registry, inner)) {
             out.push(inner);
           }
         }
@@ -2555,18 +2760,28 @@ function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | und
   if (!clean) {
     return undefined;
   }
+  // A header that structurally names a foreign key ("primary_phone_id",
+  // "email_ref") must not be *guessed* into a field that holds the value
+  // itself -- that stores an internal ID as someone's phone number or email.
+  // Exact aliases are exempt; only this guessing strategy is vetoed.
+  const veto = (match: FieldMatch | undefined): FieldMatch | undefined => {
+    if (match && VALUE_BEARING_FIELDS.has(match.canonical) && isReferenceHeader(header)) {
+      return undefined;
+    }
+    return match;
+  };
   if (PYTHON_FUZZY_COMPAT.has(clean)) {
     const verdict = PYTHON_FUZZY_COMPAT.get(clean);
-    return verdict ? fieldMatch(header, verdict.canonical, verdict.confidence, "fuzzy") : undefined;
+    return veto(verdict ? fieldMatch(header, verdict.canonical, verdict.confidence, "fuzzy") : undefined);
   }
   if (clean === "reply_to_email") {
     return undefined;
   }
   if (clean === "repyto") {
-    return fieldMatch(header, "owner", FUZZY_HIGH_CONFIDENCE, "fuzzy");
+    return veto(fieldMatch(header, "owner", FUZZY_HIGH_CONFIDENCE, "fuzzy"));
   }
   if (clean === "ownerid") {
-    return fieldMatch(header, "owner", FUZZY_LOW_CONFIDENCE, "fuzzy");
+    return veto(fieldMatch(header, "owner", FUZZY_LOW_CONFIDENCE, "fuzzy"));
   }
   const aliases = registry.all_aliases.filter((alias) => alias.length > 2);
   if (aliases.length === 0) {
@@ -2583,6 +2798,14 @@ function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | und
   let matchedAlias: string | undefined;
   let score = 0;
   for (const [alias, aliasScore] of candidates) {
+    // Python passes score_cutoff=FUZZY_MATCH_THRESHOLD to rapidfuzz, so a
+    // candidate below it never reaches this loop. fuzzball is queried one
+    // point lower to absorb small scorer differences between the two
+    // libraries, which means the floor has to be re-applied here or JS would
+    // accept a match Python rejects outright.
+    if (aliasScore < FUZZY_MATCH_THRESHOLD) {
+      continue;
+    }
     const shorter = Math.min(alias.length, clean.length);
     const longer = Math.max(alias.length, clean.length);
     if (longer > 0 && shorter / longer >= FUZZY_LENGTH_RATIO) {
@@ -2603,11 +2826,13 @@ function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | und
   if (/^address_line[12]$/.test(canonical) && !/\d/.test(clean) && clean.includes("_line") && !clean.startsWith("address")) {
     confidenceScore = Math.min(confidenceScore, FUZZY_MATCH_THRESHOLD);
   }
-  return fieldMatch(
-    header,
-    canonical,
-    confidenceScore >= 90 ? FUZZY_HIGH_CONFIDENCE : FUZZY_LOW_CONFIDENCE,
-    "fuzzy",
+  return veto(
+    fieldMatch(
+      header,
+      canonical,
+      confidenceScore >= 90 ? FUZZY_HIGH_CONFIDENCE : FUZZY_LOW_CONFIDENCE,
+      "fuzzy",
+    ),
   );
 }
 
@@ -2638,6 +2863,31 @@ const HEURISTIC_PATTERNS: Array<[string, RegExp]> = [
 ];
 
 const PHONE_HEADER_HINTS = new Set(["cell", "fax", "mobile", "phone", "phones", "sms", "tel", "telephone", "whatsapp"]);
+// A bare five-digit run is the one genuinely ambiguous postal shape: an order
+// total, an account balance and a US ZIP are indistinguishable as values, so
+// filing "45000" as a postal code is a coin flip. Like the phone and birthday
+// shapes, require corroboration from the header for that pattern alone; the
+// alphanumeric shapes (K1A 0B1, SW1A 1AA) and ZIP+4 stand on their own.
+const AMBIGUOUS_POSTAL_RE = /^\d{5}$/;
+const POSTAL_HEADER_HINTS = new Set([
+  "cep",
+  "cp",
+  "eircode",
+  "pincode",
+  "plz",
+  "postal",
+  "postalcode",
+  "postcode",
+  "zip",
+  "zipcode",
+]);
+const POSTAL_HEADER_PHRASES = new Set([
+  "postal_code",
+  "post_code",
+  "zip_code",
+  "codigo_postal",
+  "code_postal",
+]);
 const BIRTHDAY_HEADER_HINTS = new Set(["birth", "birthday", "birthdate", "bday", "dob"]);
 const BIRTHDAY_HEADER_PHRASES = new Set(["birth_date", "date_of_birth", "day_of_birth"]);
 
@@ -2667,6 +2917,11 @@ function hasBirthdayHeaderHint(header: string): boolean {
   return termsIncludeAny(terms, BIRTHDAY_HEADER_HINTS) || BIRTHDAY_HEADER_PHRASES.has(normalized);
 }
 
+function hasPostalHeaderHint(header: string): boolean {
+  const { normalized, terms } = headerTerms(header);
+  return termsIncludeAny(terms, POSTAL_HEADER_HINTS) || POSTAL_HEADER_PHRASES.has(normalized);
+}
+
 function heuristicMatch(header: string, value: string | undefined, defaultRegion: string | null | undefined): FieldMatch | undefined {
   if (!value) {
     return undefined;
@@ -2689,6 +2944,9 @@ function heuristicMatch(header: string, value: string | undefined, defaultRegion
       }
     }
     if (canonical === "birthday" && !hasBirthdayHeaderHint(header)) {
+      continue;
+    }
+    if (canonical === "postal_code" && AMBIGUOUS_POSTAL_RE.test(cleaned) && !hasPostalHeaderHint(header)) {
       continue;
     }
     return fieldMatch(header, canonical, HEURISTIC_CONFIDENCE, "heuristic");
@@ -2775,7 +3033,7 @@ export class NormalizedMatchStrategy extends MatchStrategy {
   }
 
   match(header: string): FieldMatch | undefined {
-    for (const candidate of normalizedCandidates(header)) {
+    for (const candidate of normalizedCandidates(header, this.#registry)) {
       const canonical = this.#registry.exact_lookup(candidate);
       if (canonical) {
         return fieldMatch(header, canonical, NORMALIZED_MATCH_CONFIDENCE, this.name);
@@ -2881,24 +3139,71 @@ function smartTitleCase(value: string): string {
     .join(" ");
 }
 
+// Kept in step with Python's nameparser prefix set plus core.py's
+// _EXTRA_PREFIXES. "dos", "den" and "della" were missing, which made
+// "maria dos santos" capitalize as "Maria Dos Santos" in JS and
+// "Maria dos Santos" in Python for the same input.
 const NAME_PARTICLES = new Set([
+  "aan",
+  "abu",
+  "aen",
   "af",
-  "das",
+  "al",
+  "auf",
+  "av",
+  "bar",
+  "bat",
+  "bin",
+  "bint",
+  "bon",
   "da",
+  "dal",
+  "das",
   "de",
+  "degli",
+  "dei",
   "del",
+  "dela",
+  "della",
+  "delle",
+  "delli",
+  "dello",
+  "dem",
+  "den",
   "der",
   "des",
   "di",
+  "do",
+  "dos",
   "du",
   "el",
+  "freiherr",
+  "freiherrin",
+  "heer",
+  "het",
+  "ibn",
   "la",
+  "le",
+  "mac",
+  "mc",
   "op",
+  "san",
+  "santa",
+  "st",
+  "ste",
+  "te",
   "ten",
   "ter",
+  "tho",
+  "thoe",
   "van",
+  "vande",
+  "vander",
+  "vd",
+  "vel",
+  "vom",
   "von",
-  "y",
+  "zu",
   "zum",
   "zur",
 ]);
@@ -3119,6 +3424,419 @@ function parseNameParts(text: string, nickname: string): Record<string, string> 
 }
 
 /** @internal */
+
+// ── Date / country / state normalization (mirrors core.py) ───────────────
+// These tables are generated from the Python source of truth; keep them in
+// step, and let scripts/parity_probe.py be the thing that proves it.
+
+const ISO_DATE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/;
+const YMD_DATE_RE = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/;
+const DMY_DATE_RE = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/;
+const SHORT_YEAR_DATE_RE = /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2}$/;
+
+function isoDate(year: number, month: number, day: number): string | undefined {
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return undefined;
+  }
+  const pad = (n: number, width: number): string => String(n).padStart(width, "0");
+  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
+}
+
+/**
+ * Normalize an UNAMBIGUOUS date to ISO-8601. Refuses to guess: "03/04/2024" is
+ * 3 April in most of the world and 4 March in the US, so it is returned
+ * unchanged (and reported as a warning) rather than silently reordered.
+ */
+function normalizeDate(value: string): string {
+  const text = value.trim();
+  if (!text) {
+    return value;
+  }
+  const ymd = ISO_DATE_RE.exec(text) ?? YMD_DATE_RE.exec(text);
+  if (ymd) {
+    return isoDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3])) ?? value;
+  }
+  const dmy = DMY_DATE_RE.exec(text);
+  if (dmy) {
+    const first = Number(dmy[1]);
+    const second = Number(dmy[2]);
+    const year = Number(dmy[3]);
+    if (first > 12 && second <= 12) {
+      return isoDate(year, second, first) ?? value;
+    }
+    if (second > 12 && first <= 12) {
+      return isoDate(year, first, second) ?? value;
+    }
+  }
+  return value;
+}
+
+function isAmbiguousDate(value: string): boolean {
+  const text = value.trim();
+  if (!text || normalizeDate(text) !== text) {
+    return false;
+  }
+  const dmy = DMY_DATE_RE.exec(text);
+  if (dmy && Number(dmy[1]) <= 12 && Number(dmy[2]) <= 12) {
+    return true;
+  }
+  return SHORT_YEAR_DATE_RE.test(text);
+}
+
+const COUNTRY_ALPHA3: Record<string, string> = {
+  "arg": "AR",
+  "aus": "AU",
+  "aut": "AT",
+  "bel": "BE",
+  "bgr": "BG",
+  "bra": "BR",
+  "can": "CA",
+  "che": "CH",
+  "chl": "CL",
+  "chn": "CN",
+  "col": "CO",
+  "cze": "CZ",
+  "deu": "DE",
+  "dnk": "DK",
+  "esp": "ES",
+  "est": "EE",
+  "fin": "FI",
+  "fra": "FR",
+  "gbr": "GB",
+  "grc": "GR",
+  "hkg": "HK",
+  "hrv": "HR",
+  "hun": "HU",
+  "idn": "ID",
+  "ind": "IN",
+  "irl": "IE",
+  "isr": "IL",
+  "ita": "IT",
+  "jpn": "JP",
+  "kor": "KR",
+  "ltu": "LT",
+  "lux": "LU",
+  "lva": "LV",
+  "mex": "MX",
+  "mys": "MY",
+  "nld": "NL",
+  "nor": "NO",
+  "nzl": "NZ",
+  "per": "PE",
+  "phl": "PH",
+  "pol": "PL",
+  "prt": "PT",
+  "rou": "RO",
+  "rus": "RU",
+  "sau": "SA",
+  "sgp": "SG",
+  "svk": "SK",
+  "svn": "SI",
+  "swe": "SE",
+  "tha": "TH",
+  "tur": "TR",
+  "twn": "TW",
+  "ukr": "UA",
+  "usa": "US",
+  "vnm": "VN",
+  "zaf": "ZA",
+};
+
+const COUNTRY_NAMES: Record<string, string> = {
+  "america": "US",
+  "argentina": "AR",
+  "australia": "AU",
+  "austria": "AT",
+  "belgium": "BE",
+  "brasil": "BR",
+  "brazil": "BR",
+  "bulgaria": "BG",
+  "canada": "CA",
+  "chile": "CL",
+  "china": "CN",
+  "colombia": "CO",
+  "croatia": "HR",
+  "czech republic": "CZ",
+  "czechia": "CZ",
+  "denmark": "DK",
+  "deutschland": "DE",
+  "england": "GB",
+  "espa\u00f1a": "ES",
+  "estonia": "EE",
+  "finland": "FI",
+  "france": "FR",
+  "germany": "DE",
+  "great britain": "GB",
+  "greece": "GR",
+  "holland": "NL",
+  "hong kong": "HK",
+  "hungary": "HU",
+  "india": "IN",
+  "indonesia": "ID",
+  "ireland": "IE",
+  "israel": "IL",
+  "italia": "IT",
+  "italy": "IT",
+  "japan": "JP",
+  "korea": "KR",
+  "latvia": "LV",
+  "lithuania": "LT",
+  "luxembourg": "LU",
+  "malaysia": "MY",
+  "mexico": "MX",
+  "m\u00e9xico": "MX",
+  "netherlands": "NL",
+  "new zealand": "NZ",
+  "norway": "NO",
+  "peru": "PE",
+  "philippines": "PH",
+  "poland": "PL",
+  "polska": "PL",
+  "portugal": "PT",
+  "republic of korea": "KR",
+  "romania": "RO",
+  "russia": "RU",
+  "russian federation": "RU",
+  "saudi arabia": "SA",
+  "scotland": "GB",
+  "singapore": "SG",
+  "slovakia": "SK",
+  "slovenia": "SI",
+  "south africa": "ZA",
+  "south korea": "KR",
+  "spain": "ES",
+  "sverige": "SE",
+  "sweden": "SE",
+  "switzerland": "CH",
+  "taiwan": "TW",
+  "thailand": "TH",
+  "the netherlands": "NL",
+  "turkey": "TR",
+  "t\u00fcrkiye": "TR",
+  "u.s.": "US",
+  "u.s.a.": "US",
+  "uk": "GB",
+  "ukraine": "UA",
+  "united kingdom": "GB",
+  "united states": "US",
+  "united states of america": "US",
+  "usa": "US",
+  "viet nam": "VN",
+  "vietnam": "VN",
+  "wales": "GB",
+};
+
+function normalizeCountry(value: string): string {
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text) {
+    return value;
+  }
+  const lowered = text.toLowerCase();
+  const named = COUNTRY_NAMES[lowered];
+  if (named !== undefined) {
+    return named;
+  }
+  const stripped = lowered.replace(/\./g, "");
+  if (stripped.length === 2 && /^[a-z]+$/.test(stripped)) {
+    return stripped.toUpperCase();
+  }
+  const alpha3 = COUNTRY_ALPHA3[stripped];
+  if (alpha3 !== undefined) {
+    return alpha3;
+  }
+  return text;
+}
+
+const STATE_CODES = new Set([
+  "AB",
+  "AK",
+  "AL",
+  "AR",
+  "AS",
+  "AZ",
+  "BC",
+  "CA",
+  "CO",
+  "CT",
+  "DC",
+  "DE",
+  "FL",
+  "GA",
+  "GU",
+  "HI",
+  "IA",
+  "ID",
+  "IL",
+  "IN",
+  "KS",
+  "KY",
+  "LA",
+  "MA",
+  "MB",
+  "MD",
+  "ME",
+  "MI",
+  "MN",
+  "MO",
+  "MP",
+  "MS",
+  "MT",
+  "NB",
+  "NC",
+  "ND",
+  "NE",
+  "NH",
+  "NJ",
+  "NL",
+  "NM",
+  "NS",
+  "NT",
+  "NU",
+  "NV",
+  "NY",
+  "OH",
+  "OK",
+  "ON",
+  "OR",
+  "PA",
+  "PE",
+  "PR",
+  "QC",
+  "RI",
+  "SC",
+  "SD",
+  "SK",
+  "TN",
+  "TX",
+  "UT",
+  "VA",
+  "VI",
+  "VT",
+  "WA",
+  "WI",
+  "WV",
+  "WY",
+  "YT",
+]);
+
+const STATE_NAMES: Record<string, string> = {
+  "alabama": "AL",
+  "alaska": "AK",
+  "alberta": "AB",
+  "arizona": "AZ",
+  "arkansas": "AR",
+  "british columbia": "BC",
+  "california": "CA",
+  "colorado": "CO",
+  "connecticut": "CT",
+  "delaware": "DE",
+  "district of columbia": "DC",
+  "florida": "FL",
+  "georgia": "GA",
+  "hawaii": "HI",
+  "idaho": "ID",
+  "illinois": "IL",
+  "indiana": "IN",
+  "iowa": "IA",
+  "kansas": "KS",
+  "kentucky": "KY",
+  "louisiana": "LA",
+  "maine": "ME",
+  "manitoba": "MB",
+  "maryland": "MD",
+  "massachusetts": "MA",
+  "michigan": "MI",
+  "minnesota": "MN",
+  "mississippi": "MS",
+  "missouri": "MO",
+  "montana": "MT",
+  "nebraska": "NE",
+  "nevada": "NV",
+  "new brunswick": "NB",
+  "new hampshire": "NH",
+  "new jersey": "NJ",
+  "new mexico": "NM",
+  "new york": "NY",
+  "newfoundland and labrador": "NL",
+  "north carolina": "NC",
+  "north dakota": "ND",
+  "northwest territories": "NT",
+  "nova scotia": "NS",
+  "nunavut": "NU",
+  "ohio": "OH",
+  "oklahoma": "OK",
+  "ontario": "ON",
+  "oregon": "OR",
+  "pennsylvania": "PA",
+  "prince edward island": "PE",
+  "puerto rico": "PR",
+  "quebec": "QC",
+  "qu\u00e9bec": "QC",
+  "rhode island": "RI",
+  "saskatchewan": "SK",
+  "south carolina": "SC",
+  "south dakota": "SD",
+  "tennessee": "TN",
+  "texas": "TX",
+  "utah": "UT",
+  "vermont": "VT",
+  "virginia": "VA",
+  "washington": "WA",
+  "west virginia": "WV",
+  "wisconsin": "WI",
+  "wyoming": "WY",
+  "yukon": "YT",
+};
+
+function normalizeState(value: string): string {
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text) {
+    return value;
+  }
+  const named = STATE_NAMES[text.toLowerCase()];
+  if (named !== undefined) {
+    return named;
+  }
+  if (STATE_CODES.has(text.toUpperCase())) {
+    return text.toUpperCase();
+  }
+  return smartTitleCase(text);
+}
+
+// Deliberately permissive: this drives a *warning*, not a rejection, so it
+// flags obvious junk ("n/a", "see notes", a bare name) without second-guessing
+// unusual-but-valid addresses. No network lookup is performed.
+const EMAIL_SHAPE_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * Warnings about a normalized value that silently degraded. Shared by
+ * map_payload and map_dataframe so the two cannot drift on what counts as
+ * suspicious.
+ */
+function valueWarnings(key: string, canonicalField: string, value: unknown): string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+  const text = value.trim();
+  if (!text) {
+    return [];
+  }
+  if (PHONE_FIELDS.has(canonicalField) && !text.startsWith("+")) {
+    return [
+      `${pyRepr(key)}: phone value ${pyRepr(value)} could not be normalized to E.164 (set a matching default_region?)`,
+    ];
+  }
+  if (canonicalField === "email" && !EMAIL_SHAPE_RE.test(text)) {
+    return [`${pyRepr(key)}: value ${pyRepr(value)} does not look like an email address`];
+  }
+  if (DATE_FIELDS.has(canonicalField) && isAmbiguousDate(text)) {
+    return [
+      `${pyRepr(key)}: date ${pyRepr(value)} is ambiguous (day/month order or a two-digit year) and was left unchanged`,
+    ];
+  }
+  return [];
+}
+
 export function normalizeValue(canonicalField: CanonicalFieldValue, value: unknown, default_region: string | null = null): unknown {
   const field = canonicalFieldValue(canonicalField);
   if (PHONE_FIELDS.has(field)) {
@@ -3138,6 +3856,15 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
   if (field === "postal_code" && typeof value === "string") {
     const cleaned = value.trim().toUpperCase();
     return cleaned.replace(/^([A-Z]\d[A-Z])(\d[A-Z]\d)$/, "$1 $2");
+  }
+  if (DATE_FIELDS.has(field) && typeof value === "string") {
+    return normalizeDate(value);
+  }
+  if (field === "country" && typeof value === "string") {
+    return normalizeCountry(value);
+  }
+  if (field === "state" && typeof value === "string") {
+    return normalizeState(value);
   }
   if (BOOLEAN_FIELDS.has(field) && typeof value === "string") {
     const lower = value.trim().toLowerCase();
@@ -3359,7 +4086,20 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
     target[key] = value;
     return;
   }
+  // An empty cell carries no information, so it must not turn a good value
+  // into a two-element list. This shows up whenever an export has two columns
+  // meaning the same field and only one is filled in.
+  const isBlank = (candidate: unknown): boolean =>
+    candidate === null || candidate === undefined ||
+    (typeof candidate === "string" && candidate.trim() === "");
+  if (isBlank(value)) {
+    return;
+  }
   const existing = target[key];
+  if (isBlank(existing)) {
+    target[key] = value;
+    return;
+  }
   if (Array.isArray(existing)) {
     if (!pythonIncludes(existing, value)) {
       existing.push(value);
@@ -3528,9 +4268,14 @@ export class ContactMapper {
             `${pyRepr(key)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
           );
         }
+        // Surface silent degradation beyond phones too: an "email" that is not
+        // shaped like one, or a date whose day/month order cannot be known.
+        if (!PHONE_FIELDS.has(match.canonical)) {
+          warnings.push(...valueWarnings(key, match.canonical, finalValue));
+        }
         mergeValue(normalized, match.canonical, finalValue);
       } else {
-        unmapped[key] = value;
+        setOwnProperty(unmapped, key, value);
       }
     }
 
@@ -3771,6 +4516,32 @@ export class ContactMapper {
     }
 
     throw attributeError("'list' object has no attribute 'columns'");
+  }
+
+  /**
+   * Pre-load header verdicts so a replayed plan wins over live resolution.
+   *
+   * Entries whose canonical field is `unknown` are skipped rather than cached
+   * as a miss, so a column the plan could not resolve statically can still be
+   * matched from its value by the per-row heuristics.
+   */
+  seed_header_cache(matches: Record<string, FieldMatch>): void {
+    for (const [header, match] of Object.entries(matches)) {
+      if (match.canonical === "unknown") {
+        continue;
+      }
+      this.#headerCache.delete(header);
+      this.#headerCache.set(header, match);
+    }
+    if (this.#headerCacheMaxSize !== null) {
+      while (this.#headerCache.size > this.#headerCacheMaxSize) {
+        const oldest = this.#headerCache.keys().next();
+        if (oldest.done) {
+          break;
+        }
+        this.#headerCache.delete(oldest.value);
+      }
+    }
   }
 
   clear_cache(): void {

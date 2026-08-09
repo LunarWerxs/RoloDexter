@@ -1,6 +1,6 @@
 {
   "name": "rolodexter",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "description": "Universal contact field mapper for JavaScript and TypeScript.",
   "type": "module",
   "license": "MIT",
@@ -70,10 +70,12 @@
   },
   "scripts": {
     "sync:patterns": "node scripts/sync-patterns.mjs",
+    "check:patterns": "node scripts/sync-patterns.mjs --check",
     "build": "npm run sync:patterns && tsc -p tsconfig.json && node scripts/build-cjs.mjs && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
+    "coverage": "npm run build && node scripts/run-tests.mjs --coverage",
     "test:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
     "prepack": "npm test && npm run test:parity"
   },

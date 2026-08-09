@@ -40,6 +40,48 @@ CASES: dict[str, Any] = {
     ],
     "payloads": [
         {"id": "basic", "payload": {"fname": "Ada", "surname": "Lovelace", "mobile": "(202) 555-0143"}},
+        # ── 2.11.0 guards and normalizers ────────────────────────────────
+        # A bare 5-digit run is only a postal code when the header corroborates
+        # it; money and IDs must not be filed as someone's address.
+        {"id": "postal_ambiguous_money", "payload": {"order_total": "45000"}},
+        {"id": "postal_ambiguous_balance", "payload": {"account_balance": "99999"}},
+        {"id": "postal_hinted_header", "payload": {"zip": "90210"}},
+        {"id": "postal_hinted_plz", "payload": {"cust_plz": "10115"}},
+        {"id": "postal_distinctive_ca", "payload": {"Column X": "K1A 0B1"}},
+        {"id": "postal_distinctive_uk", "payload": {"Column X": "SW1A 1AA"}},
+        # A header naming a foreign key must not be guessed into the field that
+        # holds the value itself.
+        {"id": "reference_phone_id", "payload": {"primary_phone_id": "48291"}},
+        {"id": "reference_email_id", "payload": {"contact_email_id": "9"}},
+        {"id": "reference_website_id", "payload": {"website_id": "12"}},
+        {"id": "reference_email_ref", "payload": {"email_ref": "x"}},
+        {"id": "reference_owner_id_still_maps", "payload": {"owner_id": "7"}},
+        {"id": "reference_company_id_still_maps", "payload": {"shipping_company_id": "3"}},
+        # Dates normalize only when unambiguous, and warn when they are not.
+        {"id": "date_iso", "payload": {"birthday": "2024-03-15"}},
+        {"id": "date_unambiguous_dmy", "payload": {"birthday": "25/03/2024"}},
+        {"id": "date_ambiguous", "payload": {"birthday": "03/04/2024"}},
+        {"id": "date_two_digit_year", "payload": {"date of birth": "12/11/68"}},
+        {"id": "date_ymd_slash", "payload": {"created": "2024/3/5"}},
+        {"id": "country_name", "payload": {"country": "United States"}},
+        {"id": "country_native", "payload": {"country": "deutschland"}},
+        {"id": "country_alpha2", "payload": {"country": "gb"}},
+        {"id": "country_unknown", "payload": {"country": "Freedonia"}},
+        {"id": "state_name", "payload": {"state": "california"}},
+        {"id": "state_province", "payload": {"state": "Ontario"}},
+        {"id": "state_foreign", "payload": {"state": "Bavaria"}},
+        {"id": "email_shape_warning", "payload": {"email": "see notes"}},
+        # Rare name particles: these diverged before 2.11.0.
+        {"id": "particle_dos", "payload": {"full_name": "maria dos santos"}},
+        {"id": "particle_den", "payload": {"full_name": "anna van den heuvel"}},
+        {"id": "particle_della", "payload": {"full_name": "giovanni della casa"}},
+        {"id": "particle_op_den", "payload": {"full_name": "sven op den kamp"}},
+        # A key literally named __proto__ must survive as data in both runtimes.
+        {"id": "proto_key_is_data", "payload": {"__proto__": "x", "fname": "Ada"}},
+        # An empty duplicate column must not turn a good value into a list.
+        {"id": "merge_blank_second", "payload": {"E-Mail": "bob@y.co.uk", "E-Mail__2": ""}},
+        {"id": "merge_blank_first", "payload": {"E-Mail": "", "E-Mail__2": "bob@y.co.uk"}},
+        {"id": "merge_two_real_values", "payload": {"E-Mail": "a@x.com", "E-Mail__2": "b@x.com"}},
         {"id": "nested_depth1", "payload": {"person": {"fname": "Ada"}}, "options": {"depth": 1}},
         {"id": "nested_depth2", "payload": {"person": {"fname": "Ada"}}, "options": {"depth": 2}},
         {"id": "unknown_email_value", "payload": {"Mystery": "ada@example.com"}},
