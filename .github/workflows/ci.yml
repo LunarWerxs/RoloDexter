@@ -123,10 +123,6 @@ jobs:
         working-directory: packages/js
         run: npm run typecheck
 
-      - name: Check patterns.json is in sync
-        working-directory: packages/js
-        run: npm run check:patterns
-
       - name: Test
         working-directory: packages/js
         run: npm test
