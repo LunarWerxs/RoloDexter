@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Anonymous CLI install ping.** The `rolodexter` command (not the library)
+  now sends a small, opt-out, throttled-to-once-per-24h ping carrying only a
+  random per-install id, the running version, and a coarse OS tag. It reuses
+  the same request as the update check, so there is no extra network call,
+  and `import rolodexter` remains fully network-silent. Disable with
+  `ROLODEXTER_NO_PING=1`. See the README's Privacy section and SECURITY.md.
+
 ## [2.11.1] - 2026-08-09
 
 ### Fixed

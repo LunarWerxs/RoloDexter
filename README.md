@@ -489,9 +489,40 @@ src/rolodexter/
 ├── __main__.py      # CLI: rolodexter map / explain / fields
 ├── core.py          # ContactMapper, PatternRegistry, strategies, normalizers
 ├── _phone.py        # E.164 phone parser (wraps libphonenumber)
+├── _ping.py         # Anonymous CLI install ping (see Privacy, below)
 ├── i18n.py          # On-demand i18n generator (40 languages, cached)
 └── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
 ```
+
+## Privacy
+
+`rolodexter` performs all contact mapping locally; the data you pass to
+`ContactMapper` or the `map`/`profile`/`explain` commands never leaves your
+machine, and `import rolodexter` on its own makes no network call at all.
+
+The `rolodexter` CLI does send one small anonymous ping, at most once every 24
+hours, so we can see rough install and version-adoption counts. Each ping
+carries only:
+
+- a random id generated once per install (not derived from your hostname,
+  username, MAC address, or any other machine identifier)
+- the running `rolodexter` version
+- a coarse OS tag, e.g. `win11-26100`, `macos`, or `linux`
+
+Nothing else is sent: no hostname, no username, no file paths, no email, and
+never any contact data. The same request also doubles as the CLI's update
+check, so the ping adds no extra network call of its own. A country is
+derived server-side from the connection for aggregate stats only; no IP
+address is stored. See [SECURITY.md](SECURITY.md) for the full disclosure.
+
+Opt out at any time with:
+
+```bash
+export ROLODEXTER_NO_PING=1
+```
+
+The ping is also skipped automatically under `pytest` and common CI
+environments.
 
 ## Contributing
 
