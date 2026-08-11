@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import IO, Any
 
 from . import __version__
-from ._ping import maybe_ping
 from .core import (
     CanonicalField,
     ContactMapper,
@@ -976,9 +975,6 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
-    # Anonymous, opt-out, throttled to <=1/24h; see _ping.py and SECURITY.md.
-    # --version/--help exit inside parse_args above and never reach this line.
-    maybe_ping(__version__)
     try:
         return cast_int(args.func(args))
     except (RolodexterError, OSError, ValueError, json.JSONDecodeError) as exc:
