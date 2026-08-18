@@ -291,6 +291,11 @@
   }
   .fields span.hot { color: var(--plum); border-color: rgba(182,129,208,0.45); background: rgba(182,129,208,0.09); }
 
+  /* ---------- FAQ ---------- */
+  .faq-list { display: grid; gap: 28px; max-width: 760px; }
+  .faq-list h3 { font-size: 1.04rem; margin-bottom: 9px; color: var(--ink); }
+  .faq-list p { color: var(--muted); font-size: 0.94rem; }
+
   /* ---------- Final CTA ---------- */
   .cta-final { text-align: center; padding-block: 96px; }
   .cta-final h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin-bottom: 18px; }
@@ -402,6 +407,121 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
         })(window, document, 'ak_35bcd27f9c3b5d9bc43eeb3ea06c64b731ae');
     </script>
     <!-- End ARGUS Analytics Pixel -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://rolodexter.lunarwerx.com/#app",
+      "name": "RoloDexter",
+      "description": "Route messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. 600+ aliases, 62 canonical fields, confidence scores, and E.164 phone normalization. Python and TypeScript.",
+      "applicationCategory": "DeveloperApplication",
+      "softwareVersion": "2.11.1",
+      "url": "https://rolodexter.lunarwerx.com/",
+      "downloadUrl": "https://pypi.org/project/rolodexter/",
+      "image": "https://rolodexter.lunarwerx.com/assets/og-image.png",
+      "featureList": [
+        "600+ known field aliases across 62 canonical fields",
+        "Four-layer matching pipeline: exact, normalized, fuzzy, and heuristic matching",
+        "Confidence score returned on every field match",
+        "E.164 phone normalization via libphonenumber",
+        "Name, email, address, and tag value normalization",
+        "Batch processing and constant-memory streaming for CSV/JSONL exports",
+        "pandas DataFrame column renaming and normalization",
+        "Command-line interface for mapping, explaining, and listing fields",
+        "Reusable compiled mapping schemas",
+        "On-demand alias generation for 40 languages",
+        "Python and TypeScript packages sharing one alias table"
+      ],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@id": "https://lunarwerx.com/#org"
+      },
+      "publisher": {
+        "@id": "https://lunarwerx.com/#org"
+      }
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://lunarwerx.com/#org",
+      "name": "LunarWerx Studios",
+      "url": "https://lunarwerx.com/",
+      "logo": "https://lunarwerx.com/logowhite.webp",
+      "sameAs": [
+        "https://github.com/LunarWerxs"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://rolodexter.lunarwerx.com/#site",
+      "name": "RoloDexter",
+      "url": "https://rolodexter.lunarwerx.com/",
+      "publisher": {
+        "@id": "https://lunarwerx.com/#org"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://rolodexter.lunarwerx.com/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is RoloDexter free to use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — RoloDexter is free, open-source software released under the MIT license. The Python package installs with pip install rolodexter and the JavaScript/TypeScript package installs with npm install rolodexter; both are maintained as one dual-package, MIT-licensed project."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What does RoloDexter do?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields — like first_name, email, and phone — and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does RoloDexter figure out what a messy column name means?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Every incoming field is tried against four strategies in order of certainty: an exact lookup against the alias table (confidence 1.0), normalized matching that handles CamelCase and dot.path variants, fuzzy matching that catches typos like phne_nmbr, and a heuristic pass that detects emails, phones, and URLs by the shape of the value itself."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does RoloDexter work with pandas DataFrames?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Calling map_dataframe() on a pandas DataFrame renames its columns to the canonical schema and normalizes the values in place, while columns RoloDexter doesn't recognize are kept rather than dropped. The same mapper also handles a single dict payload, a batch of payloads, or a streamed CSV/JSONL export in constant memory."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does RoloDexter support languages other than English?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. English ships by default, and alias tables for 40 languages — including Spanish, French, German, and Japanese — generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does RoloDexter fail silently on bad data?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No — non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="lw-parent" href="https://lunarwerx.com/" aria-label="Back to LunarWerx Studios, the parent studio"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg><span class="lw-tip" aria-hidden="true"><span>LunarWerx Studios</span><span>Every app we build, in one place</span></span></a>
@@ -429,7 +549,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
   <section class="hero container" aria-labelledby="hero-heading">
     <div class="hero-grid">
       <div>
-        <p class="eyebrow">rolodexter · v2.10.0 · python + typescript</p>
+        <p class="eyebrow">rolodexter · v2.11.1 · python + typescript</p>
         <h1 id="hero-heading">Every export names the same field differently. <span class="accent">Map them all to one schema.</span></h1>
         <p class="hero-sub">Point RoloDexter at a CRM payload, a form post, or a CSV nobody has looked at since 2019, and get back clean canonical fields with a confidence score on every match.</p>
         <div class="hero-actions">
@@ -541,7 +661,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
           <div class="card-icon">3</div>
           <h3>Fuzzy</h3>
           <p>Typos survive. <code class="cls">phne_nmbr</code> still resolves to <code class="cls">phone</code>, and you can see that it was a guess.</p>
-          <span class="strat">confidence 0.85</span>
+          <span class="strat">confidence 0.70–0.85</span>
         </div>
         <div class="card glassy">
           <div class="card-icon">4</div>
@@ -598,7 +718,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
 
 mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span class="tok-punc">(</span><span class="tok-str">"phne"</span><span class="tok-punc">)</span>
 <span class="tok-out">FieldMatch(canonical='phone',
-           confidence=0.85, strategy='fuzzy')</span>
+           confidence=0.70, strategy='fuzzy')</span>
 
 mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span class="tok-punc">(</span><span class="tok-str">"Column X"</span><span class="tok-punc">,</span>
                 value<span class="tok-punc">=</span><span class="tok-str">"jane@test.com"</span><span class="tok-punc">)</span>
@@ -666,6 +786,44 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
       </div>
       <div class="fields">
         <span class="hot">first_name</span><span class="hot">last_name</span><span>full_name</span><span>middle_name</span><span>nickname</span><span>prefix</span><span>suffix</span><span class="hot">email</span><span class="hot">phone</span><span>home_phone</span><span>work_phone</span><span>fax</span><span>whatsapp</span><span>website</span><span class="hot">company</span><span>job_title</span><span>department</span><span>industry</span><span>address_line1</span><span>address_line2</span><span>city</span><span>state</span><span>postal_code</span><span>country</span><span>full_address</span><span>linkedin</span><span>twitter</span><span>facebook</span><span>instagram</span><span>github</span><span>youtube</span><span>tiktok</span><span>discord</span><span>telegram</span><span>lead_status</span><span>lifecycle_stage</span><span>email_opt_out</span><span>tags</span><span>source</span><span>utm_parameters</span><span>score</span><span>owner</span><span>birthday</span><span>age</span><span>created_at</span><span>updated_at</span><span>last_contacted</span><span>revenue</span><span>currency</span><span>message</span><span>subject</span><span>company_size</span><span>notes</span><span>metadata</span><span>gender</span><span>timezone</span><span>language_preference</span><span>referrer_url</span><span>source_id</span><span>source_service</span><span>subscribed</span><span>verified</span><span>unknown</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ============ FAQ ============ -->
+  <section class="section" id="faq" aria-labelledby="faq-heading">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">// faq</p>
+        <h2 id="faq-heading">Questions people ask</h2>
+      </div>
+      <div class="faq-list">
+        <div>
+          <h3>Is RoloDexter free to use?</h3>
+          <p>Yes — RoloDexter is free, open-source software released under the MIT license. The Python package installs with <code class="cls">pip install rolodexter</code> and the JavaScript/TypeScript package installs with <code class="cls">npm install rolodexter</code>; both are maintained as one dual-package, MIT-licensed project.</p>
+        </div>
+        <div>
+          <h3>What does RoloDexter do?</h3>
+          <p>RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields — like <code class="cls">first_name</code>, <code class="cls">email</code>, and <code class="cls">phone</code> — and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns.</p>
+        </div>
+        <div>
+          <h3>How does RoloDexter figure out what a messy column name means?</h3>
+          <p>Every incoming field is tried against four strategies in order of certainty: an exact lookup against the alias table (confidence 1.0), normalized matching that handles CamelCase and dot.path variants, fuzzy matching that catches typos like <code class="cls">phne_nmbr</code>, and a heuristic pass that detects emails, phones, and URLs by the shape of the value itself.</p>
+        </div>
+        <div>
+          <h3>Does RoloDexter work with pandas DataFrames?</h3>
+          <p>Yes. Calling <code class="cls">map_dataframe()</code> on a pandas DataFrame renames its columns to the canonical schema and normalizes the values in place, while columns RoloDexter doesn't recognize are kept rather than dropped. The same mapper also handles a single dict payload, a batch of payloads, or a streamed CSV/JSONL export in constant memory.</p>
+        </div>
+        <div>
+          <h3>Does RoloDexter support languages other than English?</h3>
+          <p>Yes. English ships by default, and alias tables for 40 languages — including Spanish, French, German, and Japanese — generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts.</p>
+        </div>
+        <div>
+          <h3>Does RoloDexter fail silently on bad data?</h3>
+          <p>No — non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text.</p>
+        </div>
       </div>
     </div>
   </section>

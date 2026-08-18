@@ -1,0 +1,25 @@
+# RoloDexter
+
+> The universal contact field mapper. Routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema, with 600+ known aliases, 62 canonical fields, a confidence score on every match, and E.164 phone normalization. Python and TypeScript, MIT-licensed.
+
+Every CRM, email platform, and CSV export names the same fields differently (HubSpot's `firstname`, Salesforce's `FirstName`, Mailchimp's `FNAME`, or an unlabeled `Column A`). RoloDexter resolves that chaos through a four-layer matching pipeline, tried in order of certainty: exact alias lookup, normalized-casing matching, fuzzy typo matching, and a heuristic pass that reads the value's shape when the header carries no meaning at all. It also normalizes the matched values themselves, so output is ready to store rather than ready for another round of regexes. It is maintained as a dual-package repository: the Python package is the canonical implementation and owns the shared alias table, and the JavaScript/TypeScript package syncs that table at build time.
+
+## Key facts
+- 600+ known field aliases across 62 canonical fields, exposed as a string enum
+- Four-layer matching pipeline: exact (confidence 1.0), normalized, fuzzy (confidence 0.70–0.85), and heuristic (confidence 0.6) matching
+- Value normalization: phones to E.164 via libphonenumber, names title-cased with particle awareness, emails lowercased and trimmed, addresses cleaned and title-cased, tags coerced to lists
+- Non-fatal issues return as warnings instead of failing silently; strict mode turns a low-confidence match or unparseable value into a loud failure
+- Batch processing and constant-memory streaming for CSV/JSONL exports, plus a preview mode that reports import readiness without retaining mapped output
+- pandas DataFrame support: renames columns to canonical fields and normalizes values in place, keeping unrecognized columns instead of dropping them
+- Command-line interface (`rolodexter map`, `rolodexter explain`, `rolodexter fields`)
+- On-demand alias generation for 40 languages, cached locally with bounded network behavior
+- Per-caller field overrides for vendor-specific names not in the standard alias table
+- Free, open-source, MIT-licensed
+- Current version: v2.11.1
+
+## Links
+- Home: https://rolodexter.lunarwerx.com/
+- Source code: https://github.com/LunarWerxs/RoloDexter
+- PyPI: https://pypi.org/project/rolodexter/
+- npm: https://www.npmjs.com/package/rolodexter
+- License: https://github.com/LunarWerxs/RoloDexter/blob/main/LICENSE
