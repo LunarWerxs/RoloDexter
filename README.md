@@ -16,6 +16,13 @@ Route messy, inconsistent contact data from *any* source to a clean, canonical s
 
 ---
 
+RoloDexter is an open-source Python and TypeScript library that maps messy,
+inconsistent contact field names, like HubSpot's `firstname` or a CSV's
+`Column A`, onto one canonical schema of 62 fields. It resolves each header
+through a four-layer pipeline, exact, normalized, fuzzy, heuristic, scores
+every match's confidence, and normalizes the matched values so the output is
+ready to store.
+
 ## Packages In This Repository
 
 RoloDexter is maintained as a dual-package repository:
@@ -502,6 +509,70 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## FAQ
+
+**Is RoloDexter free?**
+Yes. RoloDexter is MIT-licensed and free to use in commercial and open-source
+projects, both the Python package on PyPI and the JavaScript/TypeScript
+package on npm. There is no paid tier, account, or API key involved: it
+installs as a normal dependency and runs entirely inside your own process.
+
+**Does it work offline?**
+Yes, for field mapping and value normalization, both run entirely locally
+with no network calls. The one exception is the optional i18n alias
+generator (`rolodexter[i18n-generate]`), which calls Google Translate to
+build language caches; that step is explicit, one-time, and the caches it
+produces are then loaded offline with no further network access.
+
+**What are the system requirements?**
+The Python package needs Python 3.10 or newer (tested through 3.14) plus
+its two core dependencies, `phonenumbers` and `nameparser`; optional extras
+add `rapidfuzz` for fuzzy matching, `pandas` for DataFrame support, or
+translation libraries for i18n generation. The JavaScript/TypeScript package
+needs Node.js 20 or newer. Neither requires a database or server.
+
+**How is it different from Zapier's or Make's field mapping?**
+Zapier and Make connect two apps by having you manually map each field
+between them for every workflow you build, by hand, per pill. RoloDexter
+instead resolves headers automatically against a built-in table of 600+
+aliases across 62 canonical fields, so a HubSpot export and a random CSV
+both land on the same schema without you wiring each column yourself.
+
+**How is it different from an ETL platform like Talend or Alteryx?**
+Talend and Alteryx are full ETL platforms with schema mapping as one feature
+among many; Talend Data Fabric alone is priced for enterprise budgets,
+commonly six figures a year. RoloDexter is a free, MIT-licensed library that
+does one job, contact field mapping and value normalization, embedded
+directly in your own Python or Node code with no platform to manage.
+
+**How is it different from using `phonenumbers` or `nameparser` directly?**
+`phonenumbers` and `nameparser`, two libraries RoloDexter depends on, each
+solve one field type: phone parsing and name parsing. Neither tells you
+which of fifty CSV columns is a phone number, or that `mobilephone` and
+`mobile` both mean `phone`. RoloDexter runs header identification across all
+62 canonical fields first, then hands the matched values to libraries like
+these for normalization.
+
+**What data formats does it support?**
+CSV, JSON, and JSON Lines files through the CLI (`rolodexter map`), plus
+plain Python dicts, lists, and streaming iterables through the library API,
+and pandas DataFrames with the `pandas` extra installed. Output can be
+written as CSV, JSON, or streamed JSONL, and a `--schema-out`/`--schema-in`
+lockfile replays a resolved header plan on later imports.
+
+**Is my data sent anywhere?**
+No. Field mapping and value normalization run entirely inside your own
+Python or Node process; RoloDexter makes no network calls and has no server
+component. The only exception is the optional, explicitly-invoked i18n
+alias generator, which sends field names, not your contact data, to Google
+Translate to build a local language cache.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+---
+
+Made by [LunarWerx Studios](https://lunarwerx.com), the team also behind
+[RepoYeti](https://repoyeti.com), [AgentHydra](https://agenthydra.lunarwerx.com),
+and [SageThumbs](https://sagethumbs.lunarwerx.com).

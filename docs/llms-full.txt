@@ -1,0 +1,121 @@
+# RoloDexter
+
+> The universal contact field mapper. Routes messy, inconsistent contact data
+> from any CRM, form, or CSV export to one clean canonical schema, with 600+
+> known aliases, 62 canonical fields, a confidence score on every match, and
+> E.164 phone normalization. Python and TypeScript, MIT-licensed.
+
+## What it is
+
+Every CRM, email platform, and CSV export names the same fields differently
+(HubSpot's `firstname`, Salesforce's `FirstName`, Mailchimp's `FNAME`, or an
+unlabeled `Column A`). RoloDexter resolves that chaos through a four-layer
+matching pipeline, tried in order of certainty: exact alias lookup (confidence
+1.0), normalized-casing matching, fuzzy typo matching (confidence 0.70-0.85),
+and a heuristic pass that reads the value's shape when the header carries no
+meaning at all (confidence 0.6). It also normalizes the matched values
+themselves, so output is ready to store rather than ready for another round
+of regexes.
+
+RoloDexter is a dual-package repository: the Python package is the canonical
+implementation and owns the shared alias table; the JavaScript/TypeScript
+package syncs that table at build time, so both ecosystems agree.
+
+## Who it's for
+
+Developers moving contact data between systems that don't agree on field
+names: CRM-to-CRM migrations, CSV/JSONL imports of unknown provenance, form
+and webhook payload normalization, and data pipelines that need a stable
+canonical schema regardless of source.
+
+## Key facts
+
+- 600+ known field aliases across 62 canonical fields, exposed as a string enum
+- Four-layer matching: exact (1.0), normalized, fuzzy (0.70-0.85), heuristic (0.6)
+- Phones normalized to E.164 via libphonenumber; names title-cased with
+  particle awareness; emails lowercased/trimmed; addresses cleaned; tags
+  coerced to lists; dates to ISO-8601 (ambiguous dates are flagged, not guessed)
+- Non-fatal issues return as categorized warnings instead of failing silently;
+  strict mode turns a low-confidence match or unparseable value into a loud failure
+- Batch processing and constant-memory streaming for CSV/JSONL exports, plus a
+  preview/profile mode that reports import readiness without retaining output
+- pandas DataFrame support: renames columns to canonical fields and
+  normalizes values in place, keeping unrecognized columns instead of
+  dropping them
+- Command-line interface: `rolodexter map`, `rolodexter profile`,
+  `rolodexter explain`, `rolodexter fields`
+- On-demand alias generation for 40 languages, cached locally with bounded
+  network behavior (timeouts, retries, worker counts configurable)
+- Per-caller field overrides for vendor-specific names not in the standard table
+- Schema compile-once: resolve headers to a mapping plan once, replay it on
+  every later import so columns route identically
+- Supports Python 3.10-3.14; free, open-source, MIT-licensed
+- Current version: v2.11.1
+
+## Installation
+
+Python: `pip install rolodexter` (core). Extras: `rolodexter[fuzzy]` for
+rapidfuzz matching, `rolodexter[pandas]` for DataFrame support,
+`rolodexter[i18n-generate]` for on-demand alias generation in 40 languages,
+`rolodexter[all]` for everything.
+
+JavaScript/TypeScript: `npm install rolodexter`.
+
+## Pricing
+
+Free and open source under the MIT License, no paid tier, no usage limits,
+no API key required. Full details: https://rolodexter.lunarwerx.com/pricing.md
+
+## FAQ
+
+Q: Is RoloDexter free to use?
+A: Yes. MIT-licensed; install with pip or npm.
+
+Q: What does RoloDexter do?
+A: Routes messy contact data to 62 canonical fields via 600+ known aliases,
+returning a confidence score on every match.
+
+Q: How does it figure out a messy column name?
+A: Exact alias lookup, then normalized-casing matching, then fuzzy typo
+matching, then a heuristic pass on the value's shape.
+
+Q: Does it work with pandas DataFrames?
+A: Yes, via `map_dataframe()`, which renames and normalizes columns in place.
+
+Q: Does it support languages other than English?
+A: Yes, 40 languages generate on demand and cache locally.
+
+Q: Does it fail silently on bad data?
+A: No. Non-fatal issues return as categorized warnings; strict mode fails loudly instead.
+
+Q: Does RoloDexter work offline?
+A: Yes for the default English table (fully local). Generating the other 40
+language caches needs a one-time network fetch, then those are offline too.
+
+Q: How is it different from a no-code tool like Zapier?
+A: Zapier/Make map fields by hand per workflow step. RoloDexter is a callable
+library with a maintained alias table and confidence scores, no per-workflow UI.
+
+## Limitations
+
+- Fuzzy and heuristic matches are confidence-scored guesses (0.6-0.85), not
+  certainties, always check `confidence` before trusting a low-scored match.
+- Alias generation for non-English languages requires network access the
+  first time; results are then cached and load offline.
+- Ambiguous dates (e.g. a two-digit year) are left unchanged and reported as
+  a warning rather than guessed.
+- RoloDexter maps and normalizes fields; it is not a full customer data
+  platform. It does not do cross-source identity resolution beyond matching
+  on an identity key (email/phone/source id) you provide via `--dedupe`.
+
+## Links
+
+- Home: https://rolodexter.lunarwerx.com/
+- Source code: https://github.com/LunarWerxs/RoloDexter
+- PyPI: https://pypi.org/project/rolodexter/
+- npm: https://www.npmjs.com/package/rolodexter
+- License: https://github.com/LunarWerxs/RoloDexter/blob/main/LICENSE
+- Pricing: https://rolodexter.lunarwerx.com/pricing.md
+- Studio: https://lunarwerx.com/
+
+Last updated: 2026-08-23
