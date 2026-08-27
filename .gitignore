@@ -58,3 +58,6 @@ logo/
 # ── Internal AI coding-agent scratch/session notes ─────────────────────
 # (audit logs, restart lists, etc. — not user-facing docs; keep out of the repo)
 docs/todo/
+
+# Local AI memory for this repo. Deliberately NOT published.
+/.claude/memory/
