@@ -894,7 +894,7 @@ export class PhoneNumberMatcher implements Iterable<PhoneNumberMatch> {
     this.#text = text;
     this.#defaultRegion = default_region;
     const requestedMax = options.max_matches;
-    if (requestedMax !== undefined && requestedMax !== null && typeof requestedMax !== "number") {
+    if (requestedMax != null && typeof requestedMax !== "number") {
       throw new TypeError("'>' not supported between instances of 'str' and 'int'");
     }
     this.#maxMatches = requestedMax === undefined || requestedMax === null ? null : Math.max(0, requestedMax);
@@ -1243,7 +1243,7 @@ function validatePatternData(data: unknown, source: string): PatternData {
   }
 
   const expansion = root.expansion;
-  if (expansion !== undefined && expansion !== null) {
+  if (expansion != null) {
     if (!isPlainObject(expansion)) {
       fail("'expansion' must be an object");
     }
@@ -1957,7 +1957,7 @@ export class PatternRegistry {
     }
     const patternsPath = options.patterns_path;
     const patterns = options.patterns;
-    this.#data = patterns !== null && patterns !== undefined
+    this.#data = patterns != null
       ? validatePatternData(patterns, "custom patterns")
       : patternsPath
         ? loadPatternFile(patternsPath)
@@ -3925,7 +3925,7 @@ export function normalize_value(
       ? pythonMissingRequiredArgs("normalize_value", ["canonical_field", "value"])
       : pythonMissingRequiredArg("normalize_value", "value");
   }
-  if (arguments.length > 3 || (arguments.length === 3 && options !== null && options !== undefined && typeof options !== "object")) {
+  if (arguments.length > 3 || (arguments.length === 3 && options != null && typeof options !== "object")) {
     throw pythonPositionalTypeError("normalize_value", 2, arguments.length);
   }
   return normalizeValue(canonicalField, value, options?.default_region ?? null);
@@ -3950,7 +3950,7 @@ export class PhoneNormalizer {
       throw pythonMissingRequiredArg("PhoneNormalizer.normalize", "value");
     }
     const rawOptions = options as unknown;
-    if (rawOptions !== null && rawOptions !== undefined && typeof rawOptions !== "object") {
+    if (rawOptions != null && typeof rawOptions !== "object") {
       throw pythonPositionalTypeError("PhoneNormalizer.normalize", 2, arguments.length + 1);
     }
     const region = (rawOptions as { default_region?: string | null } | null | undefined)?.default_region ?? null;
@@ -4169,7 +4169,7 @@ export class ContactMapper {
     this.#strict = opts.strict ?? false;
     this.#confidenceThreshold = validateConfidenceThreshold(opts.confidence_threshold ?? 0);
     const headerCacheMaxSize = opts.header_cache_max_size;
-    if (headerCacheMaxSize !== undefined && headerCacheMaxSize !== null && typeof headerCacheMaxSize !== "number") {
+    if (headerCacheMaxSize != null && typeof headerCacheMaxSize !== "number") {
       throw new TypeError(`'<' not supported between instances of '${pythonTypeName(headerCacheMaxSize)}' and 'int'`);
     }
     this.#headerCacheMaxSize = headerCacheMaxSize === undefined ? DEFAULT_HEADER_CACHE_MAX_SIZE : headerCacheMaxSize;
@@ -4317,13 +4317,12 @@ export class ContactMapper {
     const opts = options ?? {};
     const maxRows = opts.max_rows;
     if (
-      maxRows !== null &&
-      maxRows !== undefined &&
+      maxRows != null &&
       (typeof maxRows !== "number" || !Number.isInteger(maxRows))
     ) {
       throw new TypeError("max_rows must be an integer or None");
     }
-    if (maxRows !== null && maxRows !== undefined && maxRows < 0) {
+    if (maxRows != null && maxRows < 0) {
       throw valueError("max_rows must be non-negative or None");
     }
 

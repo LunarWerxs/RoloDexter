@@ -1,11 +1,34 @@
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const packageRoot = resolve(here, "..");
-const repoRoot = resolve(packageRoot, "..", "..");
+
+function findPackageRoot(from) {
+  let current = from;
+  while (current !== dirname(current)) {
+    if (existsSync(resolve(current, "package.json"))) {
+      return current;
+    }
+    current = dirname(current);
+  }
+  throw new Error("Could not find package.json");
+}
+
+function findRepoRoot(from) {
+  let current = from;
+  while (current !== dirname(current)) {
+    if (existsSync(resolve(current, ".git"))) {
+      return current;
+    }
+    current = dirname(current);
+  }
+  throw new Error("Could not find .git directory");
+}
+
+const packageRoot = findPackageRoot(here);
+const repoRoot = findRepoRoot(packageRoot);
 const source = resolve(repoRoot, "src", "rolodexter", "patterns.json");
 const target = resolve(packageRoot, "src", "patterns.json");
 
