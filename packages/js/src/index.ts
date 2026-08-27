@@ -2629,6 +2629,78 @@ function isValueBearing(registry: PatternRegistry, candidate: string): boolean {
   return Boolean(canonical) && VALUE_BEARING_FIELDS.has(canonical as string);
 }
 
+/** Push the dot-segment ("Company.Name") derived candidates for header `h` onto `out`. */
+function pushDotSuffixCandidates(h: string, out: string[]): void {
+  if (!h.includes(".")) {
+    return;
+  }
+  const dot = h.lastIndexOf(".");
+  const prefixRaw = h.slice(0, dot).toLowerCase().trim();
+  const suffixRaw = h.slice(dot + 1).trim();
+  const suffixLower = suffixRaw.replace(/[\s-]+/g, "_").toLowerCase();
+  const lastPrefix = prefixRaw.slice(prefixRaw.lastIndexOf(".") + 1);
+  if (COMPANY_PREFIXES.has(lastPrefix) && ["name", "nombre"].includes(suffixLower)) {
+    out.unshift("company");
+  }
+  if (suffixLower) {
+    out.push(suffixLower);
+  }
+  if (/[A-Z]/.test(suffixRaw.slice(1))) {
+    const snakeSuffix = splitCamel(suffixRaw).toLowerCase().replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+    if (snakeSuffix && snakeSuffix !== suffixLower) {
+      out.push(snakeSuffix);
+    }
+  }
+}
+
+/** Push the indexed-group ("Phone 1 - Value") derived candidates for header `h` onto `out`. */
+function pushIndexedCandidates(h: string, out: string[]): void {
+  const indexed = /^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$/.exec(h);
+  if (!indexed) {
+    return;
+  }
+  const group = indexed[1]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
+  const prop = indexed[2]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
+  if (group && prop) {
+    out.push(`${group}_${prop}`, prop, group);
+  }
+}
+
+/** Push vendor/address prefix-stripped variants of `uscore` onto `out`. */
+function pushPrefixCandidates(uscore: string, out: string[]): void {
+  for (const prefix of VENDOR_PREFIXES) {
+    if (uscore.startsWith(prefix)) {
+      out.push(uscore.slice(prefix.length));
+    }
+  }
+  for (const prefix of ADDRESS_PREFIXES) {
+    if (uscore.startsWith(prefix)) {
+      out.push(uscore.slice(prefix.length));
+    }
+  }
+}
+
+/** Push `_id`-stripped bases (and their vendor-prefix-stripped inner forms) for existing candidates onto `out`. */
+function pushIdBaseCandidates(out: string[], registry: PatternRegistry): void {
+  for (const candidate of [...out]) {
+    if (!candidate.endsWith("_id")) {
+      continue;
+    }
+    const base = candidate.slice(0, -3);
+    if (base && !out.includes(base) && !isValueBearing(registry, base)) {
+      out.push(base);
+    }
+    for (const prefix of VENDOR_PREFIXES) {
+      if (base.startsWith(prefix)) {
+        const inner = base.slice(prefix.length);
+        if (inner && !out.includes(inner) && !isValueBearing(registry, inner)) {
+          out.push(inner);
+        }
+      }
+    }
+  }
+}
+
 function normalizedCandidates(header: string, registry: PatternRegistry): string[] {
   const out: string[] = [];
   const h = header.trim();
@@ -2648,68 +2720,16 @@ function normalizedCandidates(header: string, registry: PatternRegistry): string
     }
   }
 
-  if (h.includes(".")) {
-    const dot = h.lastIndexOf(".");
-    const prefixRaw = h.slice(0, dot).toLowerCase().trim();
-    const suffixRaw = h.slice(dot + 1).trim();
-    const suffixLower = suffixRaw.replace(/[\s-]+/g, "_").toLowerCase();
-    const lastPrefix = prefixRaw.slice(prefixRaw.lastIndexOf(".") + 1);
-    if (COMPANY_PREFIXES.has(lastPrefix) && ["name", "nombre"].includes(suffixLower)) {
-      out.unshift("company");
-    }
-    if (suffixLower) {
-      out.push(suffixLower);
-    }
-    if (/[A-Z]/.test(suffixRaw.slice(1))) {
-      const snakeSuffix = splitCamel(suffixRaw).toLowerCase().replace(/_+/g, "_").replace(/^_+|_+$/g, "");
-      if (snakeSuffix && snakeSuffix !== suffixLower) {
-        out.push(snakeSuffix);
-      }
-    }
-  }
-
-  const indexed = /^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$/.exec(h);
-  if (indexed) {
-    const group = indexed[1]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
-    const prop = indexed[2]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
-    if (group && prop) {
-      out.push(`${group}_${prop}`, prop, group);
-    }
-  }
+  pushDotSuffixCandidates(h, out);
+  pushIndexedCandidates(h, out);
 
   const numStripped = uscore.replace(/_\d+/g, "").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
   if (numStripped && numStripped !== uscore) {
     out.push(numStripped);
   }
 
-  for (const prefix of VENDOR_PREFIXES) {
-    if (uscore.startsWith(prefix)) {
-      out.push(uscore.slice(prefix.length));
-    }
-  }
-
-  for (const prefix of ADDRESS_PREFIXES) {
-    if (uscore.startsWith(prefix)) {
-      out.push(uscore.slice(prefix.length));
-    }
-  }
-
-  for (const candidate of [...out]) {
-    if (candidate.endsWith("_id")) {
-      const base = candidate.slice(0, -3);
-      if (base && !out.includes(base) && !isValueBearing(registry, base)) {
-        out.push(base);
-      }
-      for (const prefix of VENDOR_PREFIXES) {
-        if (base.startsWith(prefix)) {
-          const inner = base.slice(prefix.length);
-          if (inner && !out.includes(inner) && !isValueBearing(registry, inner)) {
-            out.push(inner);
-          }
-        }
-      }
-    }
-  }
+  pushPrefixCandidates(uscore, out);
+  pushIdBaseCandidates(out, registry);
 
   return out;
 }
@@ -3837,6 +3857,50 @@ function valueWarnings(key: string, canonicalField: string, value: unknown): str
   return [];
 }
 
+/** Normalize a boolean-field string value ("yes"/"no"/...), mirroring the Python boolean coercion. */
+function normalizeBooleanFieldValue(value: string): boolean | string {
+  const lower = value.trim().toLowerCase();
+  if (["true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"].includes(lower)) {
+    return true;
+  }
+  if (["false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"].includes(lower)) {
+    return false;
+  }
+  return value.trim();
+}
+
+/** Normalize a list-field value (array, JSON array text, or delimited text) into a string array. */
+function normalizeListFieldValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(pyString).map((item) => item.trim()).filter(Boolean);
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+  const text = value.trim();
+  if (!text) {
+    return value;
+  }
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map(pyString).map((item) => item.trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to separator-based parsing.
+    }
+  }
+  const separator = text.includes(";") ? ";" : text.includes(",") ? "," : undefined;
+  if (separator) {
+    const items = text.split(separator).map((item) => item.trim()).filter(Boolean);
+    if (items.length > 0) {
+      return items;
+    }
+  }
+  return [text];
+}
+
 export function normalizeValue(canonicalField: CanonicalFieldValue, value: unknown, default_region: string | null = null): unknown {
   const field = canonicalFieldValue(canonicalField);
   if (PHONE_FIELDS.has(field)) {
@@ -3867,44 +3931,10 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
     return normalizeState(value);
   }
   if (BOOLEAN_FIELDS.has(field) && typeof value === "string") {
-    const lower = value.trim().toLowerCase();
-    if (["true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"].includes(lower)) {
-      return true;
-    }
-    if (["false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"].includes(lower)) {
-      return false;
-    }
-    return value.trim();
+    return normalizeBooleanFieldValue(value);
   }
   if (LIST_FIELDS.has(field)) {
-    if (Array.isArray(value)) {
-      return value.map(pyString).map((item) => item.trim()).filter(Boolean);
-    }
-    if (typeof value !== "string") {
-      return value;
-    }
-    const text = value.trim();
-    if (!text) {
-      return value;
-    }
-    if (text.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(text) as unknown;
-        if (Array.isArray(parsed)) {
-          return parsed.map(pyString).map((item) => item.trim()).filter(Boolean);
-        }
-      } catch {
-        // Fall through to separator-based parsing.
-      }
-    }
-    const separator = text.includes(";") ? ";" : text.includes(",") ? "," : undefined;
-    if (separator) {
-      const items = text.split(separator).map((item) => item.trim()).filter(Boolean);
-      if (items.length > 0) {
-        return items;
-      }
-    }
-    return [text];
+    return normalizeListFieldValue(value);
   }
   if (SOCIAL_FIELDS.has(field) && typeof value === "string") {
     return value.trim();
@@ -4222,6 +4252,53 @@ export class ContactMapper {
     return unknown(header);
   }
 
+  /** Resolve, normalize, and record one `key`/`value` entry of a payload during `map_payload`, mutating the accumulators in place. */
+  #mapField(
+    key: string,
+    value: unknown,
+    region: string | null,
+    threshold: number,
+    normalizeValues: boolean,
+    normalized: Record<string, unknown>,
+    unmapped: Record<string, unknown>,
+    fieldMatches: FieldMatch[],
+    warnings: string[],
+  ): void {
+    let match = this.#resolve(key, value, region);
+
+    if (isMatched(match) && match.confidence < threshold) {
+      warnings.push(
+        `${pyRepr(key)}: dropped low-confidence match to ${pyRepr(match.canonical)} (confidence ${match.confidence.toFixed(2)} < threshold ${threshold.toFixed(2)})`,
+      );
+      match = unknown(key);
+    }
+
+    fieldMatches.push(match);
+
+    if (!isMatched(match)) {
+      setOwnProperty(unmapped, key, value);
+      return;
+    }
+
+    const finalValue = normalizeValues ? normalizeValue(match.canonical, value, region) : value;
+    if (
+      PHONE_FIELDS.has(match.canonical) &&
+      typeof finalValue === "string" &&
+      finalValue.trim() &&
+      !finalValue.startsWith("+")
+    ) {
+      warnings.push(
+        `${pyRepr(key)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
+      );
+    }
+    // Surface silent degradation beyond phones too: an "email" that is not
+    // shaped like one, or a date whose day/month order cannot be known.
+    if (!PHONE_FIELDS.has(match.canonical)) {
+      warnings.push(...valueWarnings(key, match.canonical, finalValue));
+    }
+    mergeValue(normalized, match.canonical, finalValue);
+  }
+
   map_payload(payload: Record<string, unknown>, options: MapPayloadOptions = {}): MappingResult {
     assertPythonMethodOptions("ContactMapper.map_payload", "payload", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.map_payload", options, MAP_PAYLOAD_OPTION_KEYS);
@@ -4245,38 +4322,7 @@ export class ContactMapper {
     const warnings: string[] = [];
 
     for (const [key, value] of Object.entries(flat)) {
-      let match = this.#resolve(key, value, region);
-
-      if (isMatched(match) && match.confidence < threshold) {
-        warnings.push(
-          `${pyRepr(key)}: dropped low-confidence match to ${pyRepr(match.canonical)} (confidence ${match.confidence.toFixed(2)} < threshold ${threshold.toFixed(2)})`,
-        );
-        match = unknown(key);
-      }
-
-      fieldMatches.push(match);
-
-      if (isMatched(match)) {
-        const finalValue = normalizeValues ? normalizeValue(match.canonical, value, region) : value;
-        if (
-          PHONE_FIELDS.has(match.canonical) &&
-          typeof finalValue === "string" &&
-          finalValue.trim() &&
-          !finalValue.startsWith("+")
-        ) {
-          warnings.push(
-            `${pyRepr(key)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
-          );
-        }
-        // Surface silent degradation beyond phones too: an "email" that is not
-        // shaped like one, or a date whose day/month order cannot be known.
-        if (!PHONE_FIELDS.has(match.canonical)) {
-          warnings.push(...valueWarnings(key, match.canonical, finalValue));
-        }
-        mergeValue(normalized, match.canonical, finalValue);
-      } else {
-        setOwnProperty(unmapped, key, value);
-      }
+      this.#mapField(key, value, region, threshold, normalizeValues, normalized, unmapped, fieldMatches, warnings);
     }
 
     if (shouldExtractEmbeddedPhones) {
@@ -4419,34 +4465,8 @@ export class ContactMapper {
     return new MappingSchema(Object.fromEntries(matches), this, region);
   }
 
-  map_dataframe(rows: DataFrameLike, options: MapDataFrameOptions = {}): unknown {
-    assertPythonMethodOptions("ContactMapper.map_dataframe", "df", arguments.length, options);
-    assertPythonOptionsKeys("ContactMapper.map_dataframe", options, MAP_DATAFRAME_OPTION_KEYS);
-    const opts = options ?? {};
-    const region = opts.default_region ?? this.#defaultRegion;
-    const normalizeValues = opts.normalize === null || opts.normalize === undefined ? this.#normalize : opts.normalize;
-    const isStrict = opts.strict === null || opts.strict === undefined ? this.#strict : opts.strict;
-    const thresholdOption = opts.confidence_threshold;
-    const threshold = validateConfidenceThreshold(thresholdOption === null || thresholdOption === undefined ? this.#confidenceThreshold : thresholdOption);
-    const columns: string[] = [];
-    if (Array.isArray(rows)) {
-      throw attributeError("'list' object has no attribute 'columns'");
-    } else if (isDataFrameLike(rows)) {
-      columns.push(...dataframeColumns(rows));
-    } else {
-      throw new TypeError("map_dataframe expects an array of row objects or a DataFrame-like object with columns and rename()");
-    }
-
-    const schema = this.compile_schema(columns, {
-      default_region: region,
-      strict: isStrict,
-      confidence_threshold: threshold,
-    });
-    if (new Set(columns).size !== columns.length) {
-      throw valueError(
-        "map_dataframe requires unique input column labels; duplicate labels cannot be renamed without ambiguity",
-      );
-    }
+  /** Build the collision-free output-column rename plan for `map_dataframe`, warning on any collision. */
+  #buildDataframeRenamePlan(columns: string[], schema: MappingSchema): Map<string, string> {
     const rename = new Map<string, string>();
     const usedNames = new Set(
       columns.filter((column) => {
@@ -4475,6 +4495,64 @@ export class ContactMapper {
       }
       rename.set(column, newName);
     }
+    return rename;
+  }
+
+  /** Normalize the renamed output columns in place for `map_dataframe`, pushing any phone-normalization warnings. */
+  #normalizeDataframeColumns(out: DataFrameLike, rename: Map<string, string>, region: string | null, warnings: string[]): void {
+    for (const [oldName, newName] of rename) {
+      const canonical = newName.split("__", 1)[0] ?? newName;
+      const values = dataframeColumnValues(out, newName);
+      const mapped = mappedColumnValues(values, (value) => normalizeValue(canonical, value, region));
+      if (mapped === undefined) {
+        continue;
+      }
+      setDataframeColumn(out, newName, mapped);
+      if (PHONE_FIELDS.has(canonical)) {
+        for (const finalValue of iterableColumnValues(mapped)) {
+          if (
+            typeof finalValue === "string" &&
+            finalValue.trim() &&
+            !finalValue.startsWith("+")
+          ) {
+            warnings.push(
+              `${pyRepr(oldName)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  map_dataframe(rows: DataFrameLike, options: MapDataFrameOptions = {}): unknown {
+    assertPythonMethodOptions("ContactMapper.map_dataframe", "df", arguments.length, options);
+    assertPythonOptionsKeys("ContactMapper.map_dataframe", options, MAP_DATAFRAME_OPTION_KEYS);
+    const opts = options ?? {};
+    const region = opts.default_region ?? this.#defaultRegion;
+    const normalizeValues = opts.normalize === null || opts.normalize === undefined ? this.#normalize : opts.normalize;
+    const isStrict = opts.strict === null || opts.strict === undefined ? this.#strict : opts.strict;
+    const thresholdOption = opts.confidence_threshold;
+    const threshold = validateConfidenceThreshold(thresholdOption === null || thresholdOption === undefined ? this.#confidenceThreshold : thresholdOption);
+    const columns: string[] = [];
+    if (Array.isArray(rows)) {
+      throw attributeError("'list' object has no attribute 'columns'");
+    } else if (isDataFrameLike(rows)) {
+      columns.push(...dataframeColumns(rows));
+    } else {
+      throw new TypeError("map_dataframe expects an array of row objects or a DataFrame-like object with columns and rename()");
+    }
+
+    const schema = this.compile_schema(columns, {
+      default_region: region,
+      strict: isStrict,
+      confidence_threshold: threshold,
+    });
+    if (new Set(columns).size !== columns.length) {
+      throw valueError(
+        "map_dataframe requires unique input column labels; duplicate labels cannot be renamed without ambiguity",
+      );
+    }
+    const rename = this.#buildDataframeRenamePlan(columns, schema);
 
     const warnings: string[] = [];
     if (isDataFrameLike(rows)) {
@@ -4482,28 +4560,7 @@ export class ContactMapper {
       const renamed = rows.rename({ columns: renameRecord }) ?? rows.rename(renameRecord);
       const out = (renamed ?? rows) as DataFrameLike;
       if (normalizeValues) {
-        for (const [oldName, newName] of rename) {
-          const canonical = newName.split("__", 1)[0] ?? newName;
-          const values = dataframeColumnValues(out, newName);
-          const mapped = mappedColumnValues(values, (value) => normalizeValue(canonical, value, region));
-          if (mapped === undefined) {
-            continue;
-          }
-          setDataframeColumn(out, newName, mapped);
-          if (PHONE_FIELDS.has(canonical)) {
-            for (const finalValue of iterableColumnValues(mapped)) {
-              if (
-                typeof finalValue === "string" &&
-                finalValue.trim() &&
-                !finalValue.startsWith("+")
-              ) {
-                warnings.push(
-                  `${pyRepr(oldName)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
-                );
-              }
-            }
-          }
-        }
+        this.#normalizeDataframeColumns(out, rename, region, warnings);
       }
       if (warnings.length > 0) {
         emitRolodexterWarnings(warnings);

@@ -535,6 +535,105 @@ function validateOnError(value: string): OnError {
   throw usageError(mapUsageLine(), "rolodexter map", `argument --on-error: invalid choice: ${pyRepr(value)} (choose from fail, skip, quarantine)`);
 }
 
+/** Handle one `rolodexter map` CLI token, mutating `args`/`positional`/`unknownShortOptions` in place. Returns the loop index to resume from. */
+function applyMapOption(
+  argv: string[],
+  i: number,
+  arg: string,
+  knownOptions: string[],
+  args: MapArgs,
+  positional: string[],
+  unknownShortOptions: string[],
+): number {
+  const resolved = optionToken(arg, knownOptions, mapUsageLine(), "rolodexter map");
+  const option = resolved?.option ?? arg;
+  const inlineValue = resolved?.value;
+  if (arg === "-o" || option === "--output") {
+    const [value, next] = arg === "-o"
+      ? takeResolvedValue(argv, i, "-o", undefined, mapUsageLine(), "rolodexter map")
+      : takeResolvedValue(argv, i, "--output", inlineValue, mapUsageLine(), "rolodexter map");
+    args.output = value;
+    return next;
+  } else if (arg.startsWith("-o") && arg.length > 2 && !arg.startsWith("--")) {
+    args.output = arg.slice(2);
+  } else if (option === "--format") {
+    const [value, next] = takeResolvedValue(argv, i, "--format", inlineValue, mapUsageLine(), "rolodexter map");
+    args.format = validateFormat(value, "--format", mapUsageLine(), "rolodexter map");
+    return next;
+  } else if (option === "--in-format") {
+    const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, mapUsageLine(), "rolodexter map");
+    args.inFormat = validateFormat(value, "--in-format", mapUsageLine(), "rolodexter map");
+    return next;
+  } else if (option === "--region") {
+    const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, mapUsageLine(), "rolodexter map");
+    args.region = value;
+    return next;
+  } else if (option === "--languages") {
+    const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, mapUsageLine(), "rolodexter map");
+    args.languages = value;
+    return next;
+  } else if (option === "--strict") {
+    rejectExplicitFlagValue("--strict", inlineValue, mapUsageLine(), "rolodexter map");
+    args.strict = true;
+  } else if (option === "--min-confidence") {
+    const [value, next] = takeResolvedValue(argv, i, "--min-confidence", inlineValue, mapUsageLine(), "rolodexter map");
+    args.minConfidence = asFloat(value, "--min-confidence", mapUsageLine(), "rolodexter map");
+    return next;
+  } else if (option === "--no-normalize") {
+    rejectExplicitFlagValue("--no-normalize", inlineValue, mapUsageLine(), "rolodexter map");
+    args.normalize = false;
+  } else if (option === "--embedded-phones") {
+    rejectExplicitFlagValue("--embedded-phones", inlineValue, mapUsageLine(), "rolodexter map");
+    args.embeddedPhones = true;
+  } else if (option === "--on-error") {
+    const [value, next] = takeResolvedValue(argv, i, "--on-error", inlineValue, mapUsageLine(), "rolodexter map");
+    args.onError = validateOnError(value);
+    return next;
+  } else if (option === "--quarantine-output") {
+    const [value, next] = takeResolvedValue(argv, i, "--quarantine-output", inlineValue, mapUsageLine(), "rolodexter map");
+    args.quarantineOutput = value;
+    return next;
+  } else if (option === "--max-materialized-rows") {
+    const [value, next] = takeResolvedValue(argv, i, "--max-materialized-rows", inlineValue, mapUsageLine(), "rolodexter map");
+    args.maxMaterializedRows = optionalLimit(asNonNegativeInt(value, "--max-materialized-rows", mapUsageLine(), "rolodexter map"));
+    return next;
+  } else if (option === "--max-json-input-bytes") {
+    const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, mapUsageLine(), "rolodexter map");
+    args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", mapUsageLine(), "rolodexter map"));
+    return next;
+  } else if (option === "--keep-unmapped") {
+    rejectExplicitFlagValue("--keep-unmapped", inlineValue, mapUsageLine(), "rolodexter map");
+    args.keepUnmapped = true;
+  } else if (option === "--dedupe") {
+    rejectExplicitFlagValue("--dedupe", inlineValue, mapUsageLine(), "rolodexter map");
+    args.dedupe = true;
+  } else if (option === "--override") {
+    const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, mapUsageLine(), "rolodexter map");
+    (args.override ??= []).push(value);
+    return next;
+  } else if (option === "--schema-out") {
+    const [value, next] = takeResolvedValue(argv, i, "--schema-out", inlineValue, mapUsageLine(), "rolodexter map");
+    args.schemaOut = value;
+    return next;
+  } else if (option === "--schema-in") {
+    const [value, next] = takeResolvedValue(argv, i, "--schema-in", inlineValue, mapUsageLine(), "rolodexter map");
+    args.schemaIn = value;
+    return next;
+  } else if (option === "--help" || arg === "-h") {
+    rejectExplicitFlagValue("--help", inlineValue, mapUsageLine(), "rolodexter map");
+    throw new CliHelpError(mapUsage());
+  } else if (arg.startsWith("-")) {
+    if (/^-[^-]/.test(arg) && positional.length === 0) {
+      unknownShortOptions.push(arg);
+      return i;
+    }
+    throw usageError(mapUsageLine(), "rolodexter map", `unrecognized arguments: ${arg}`);
+  } else {
+    positional.push(arg);
+  }
+  return i;
+}
+
 function parseMapArgs(argv: string[]): MapArgs {
   const positional: string[] = [];
   const unknownShortOptions: string[] = [];
@@ -581,92 +680,7 @@ function parseMapArgs(argv: string[]): MapArgs {
       positional.push(...argv.slice(i + 1));
       break;
     }
-    const resolved = optionToken(arg, knownOptions, mapUsageLine(), "rolodexter map");
-    const option = resolved?.option ?? arg;
-    const inlineValue = resolved?.value;
-    if (arg === "-o" || option === "--output") {
-      const [value, next] = arg === "-o"
-        ? takeResolvedValue(argv, i, "-o", undefined, mapUsageLine(), "rolodexter map")
-        : takeResolvedValue(argv, i, "--output", inlineValue, mapUsageLine(), "rolodexter map");
-      args.output = value;
-      i = next;
-    } else if (arg.startsWith("-o") && arg.length > 2 && !arg.startsWith("--")) {
-      args.output = arg.slice(2);
-    } else if (option === "--format") {
-      const [value, next] = takeResolvedValue(argv, i, "--format", inlineValue, mapUsageLine(), "rolodexter map");
-      args.format = validateFormat(value, "--format", mapUsageLine(), "rolodexter map");
-      i = next;
-    } else if (option === "--in-format") {
-      const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, mapUsageLine(), "rolodexter map");
-      args.inFormat = validateFormat(value, "--in-format", mapUsageLine(), "rolodexter map");
-      i = next;
-    } else if (option === "--region") {
-      const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, mapUsageLine(), "rolodexter map");
-      args.region = value;
-      i = next;
-    } else if (option === "--languages") {
-      const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, mapUsageLine(), "rolodexter map");
-      args.languages = value;
-      i = next;
-    } else if (option === "--strict") {
-      rejectExplicitFlagValue("--strict", inlineValue, mapUsageLine(), "rolodexter map");
-      args.strict = true;
-    } else if (option === "--min-confidence") {
-      const [value, next] = takeResolvedValue(argv, i, "--min-confidence", inlineValue, mapUsageLine(), "rolodexter map");
-      args.minConfidence = asFloat(value, "--min-confidence", mapUsageLine(), "rolodexter map");
-      i = next;
-    } else if (option === "--no-normalize") {
-      rejectExplicitFlagValue("--no-normalize", inlineValue, mapUsageLine(), "rolodexter map");
-      args.normalize = false;
-    } else if (option === "--embedded-phones") {
-      rejectExplicitFlagValue("--embedded-phones", inlineValue, mapUsageLine(), "rolodexter map");
-      args.embeddedPhones = true;
-    } else if (option === "--on-error") {
-      const [value, next] = takeResolvedValue(argv, i, "--on-error", inlineValue, mapUsageLine(), "rolodexter map");
-      args.onError = validateOnError(value);
-      i = next;
-    } else if (option === "--quarantine-output") {
-      const [value, next] = takeResolvedValue(argv, i, "--quarantine-output", inlineValue, mapUsageLine(), "rolodexter map");
-      args.quarantineOutput = value;
-      i = next;
-    } else if (option === "--max-materialized-rows") {
-      const [value, next] = takeResolvedValue(argv, i, "--max-materialized-rows", inlineValue, mapUsageLine(), "rolodexter map");
-      args.maxMaterializedRows = optionalLimit(asNonNegativeInt(value, "--max-materialized-rows", mapUsageLine(), "rolodexter map"));
-      i = next;
-    } else if (option === "--max-json-input-bytes") {
-      const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, mapUsageLine(), "rolodexter map");
-      args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", mapUsageLine(), "rolodexter map"));
-      i = next;
-    } else if (option === "--keep-unmapped") {
-      rejectExplicitFlagValue("--keep-unmapped", inlineValue, mapUsageLine(), "rolodexter map");
-      args.keepUnmapped = true;
-    } else if (option === "--dedupe") {
-      rejectExplicitFlagValue("--dedupe", inlineValue, mapUsageLine(), "rolodexter map");
-      args.dedupe = true;
-    } else if (option === "--override") {
-      const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, mapUsageLine(), "rolodexter map");
-      (args.override ??= []).push(value);
-      i = next;
-    } else if (option === "--schema-out") {
-      const [value, next] = takeResolvedValue(argv, i, "--schema-out", inlineValue, mapUsageLine(), "rolodexter map");
-      args.schemaOut = value;
-      i = next;
-    } else if (option === "--schema-in") {
-      const [value, next] = takeResolvedValue(argv, i, "--schema-in", inlineValue, mapUsageLine(), "rolodexter map");
-      args.schemaIn = value;
-      i = next;
-    } else if (option === "--help" || arg === "-h") {
-      rejectExplicitFlagValue("--help", inlineValue, mapUsageLine(), "rolodexter map");
-      throw new CliHelpError(mapUsage());
-    } else if (arg.startsWith("-")) {
-      if (/^-[^-]/.test(arg) && positional.length === 0) {
-        unknownShortOptions.push(arg);
-        continue;
-      }
-      throw usageError(mapUsageLine(), "rolodexter map", `unrecognized arguments: ${arg}`);
-    } else {
-      positional.push(arg);
-    }
+    i = applyMapOption(argv, i, arg, knownOptions, args, positional, unknownShortOptions);
   }
 
   if (positional.length === 0) {
@@ -750,6 +764,71 @@ function parseExplainArgs(argv: string[]): ExplainArgs {
   return args;
 }
 
+/** Handle one `rolodexter profile` CLI token, mutating `args`/`positional`/`unknownShortOptions` in place. Returns the loop index to resume from. */
+function applyProfileOption(
+  argv: string[],
+  i: number,
+  arg: string,
+  knownOptions: string[],
+  args: ProfileArgs,
+  positional: string[],
+  unknownShortOptions: string[],
+): number {
+  const resolved = optionToken(arg, knownOptions, profileUsageLine(), "rolodexter profile");
+  const option = resolved?.option ?? arg;
+  const inlineValue = resolved?.value;
+  if (option === "--in-format") {
+    const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.inFormat = validateFormat(value, "--in-format", profileUsageLine(), "rolodexter profile");
+    return next;
+  } else if (option === "--region") {
+    const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.region = value;
+    return next;
+  } else if (option === "--languages") {
+    const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.languages = value;
+    return next;
+  } else if (option === "--override") {
+    const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, profileUsageLine(), "rolodexter profile");
+    (args.override ??= []).push(value);
+    return next;
+  } else if (option === "--max-rows") {
+    const [value, next] = takeResolvedValue(argv, i, "--max-rows", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.maxRows = asNonNegativeInt(value, "--max-rows", profileUsageLine(), "rolodexter profile");
+    return next;
+  } else if (option === "--min-confidence") {
+    const [value, next] = takeResolvedValue(argv, i, "--min-confidence", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.minConfidence = asFloat(value, "--min-confidence", profileUsageLine(), "rolodexter profile");
+    return next;
+  } else if (option === "--embedded-phones") {
+    rejectExplicitFlagValue("--embedded-phones", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.embeddedPhones = true;
+  } else if (option === "--no-normalize") {
+    rejectExplicitFlagValue("--no-normalize", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.noNormalize = true;
+  } else if (option === "--json") {
+    rejectExplicitFlagValue("--json", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.json = true;
+  } else if (option === "--max-json-input-bytes") {
+    const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", profileUsageLine(), "rolodexter profile"));
+    return next;
+  } else if (option === "--help" || arg === "-h") {
+    rejectExplicitFlagValue("--help", inlineValue, profileUsageLine(), "rolodexter profile");
+    throw new CliHelpError(profileUsage());
+  } else if (arg.startsWith("-")) {
+    if (/^-[^-]/.test(arg) && positional.length === 0) {
+      unknownShortOptions.push(arg);
+      return i;
+    }
+    throw usageError(profileUsageLine(), "rolodexter profile", `unrecognized arguments: ${arg}`);
+  } else {
+    positional.push(arg);
+  }
+  return i;
+}
+
 function parseProfileArgs(argv: string[]): ProfileArgs {
   const positional: string[] = [];
   const unknownShortOptions: string[] = [];
@@ -784,58 +863,7 @@ function parseProfileArgs(argv: string[]): ProfileArgs {
       positional.push(...argv.slice(i + 1));
       break;
     }
-    const resolved = optionToken(arg, knownOptions, profileUsageLine(), "rolodexter profile");
-    const option = resolved?.option ?? arg;
-    const inlineValue = resolved?.value;
-    if (option === "--in-format") {
-      const [value, next] = takeResolvedValue(argv, i, "--in-format", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.inFormat = validateFormat(value, "--in-format", profileUsageLine(), "rolodexter profile");
-      i = next;
-    } else if (option === "--region") {
-      const [value, next] = takeResolvedValue(argv, i, "--region", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.region = value;
-      i = next;
-    } else if (option === "--languages") {
-      const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.languages = value;
-      i = next;
-    } else if (option === "--override") {
-      const [value, next] = takeResolvedValue(argv, i, "--override", inlineValue, profileUsageLine(), "rolodexter profile");
-      (args.override ??= []).push(value);
-      i = next;
-    } else if (option === "--max-rows") {
-      const [value, next] = takeResolvedValue(argv, i, "--max-rows", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.maxRows = asNonNegativeInt(value, "--max-rows", profileUsageLine(), "rolodexter profile");
-      i = next;
-    } else if (option === "--min-confidence") {
-      const [value, next] = takeResolvedValue(argv, i, "--min-confidence", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.minConfidence = asFloat(value, "--min-confidence", profileUsageLine(), "rolodexter profile");
-      i = next;
-    } else if (option === "--embedded-phones") {
-      rejectExplicitFlagValue("--embedded-phones", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.embeddedPhones = true;
-    } else if (option === "--no-normalize") {
-      rejectExplicitFlagValue("--no-normalize", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.noNormalize = true;
-    } else if (option === "--json") {
-      rejectExplicitFlagValue("--json", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.json = true;
-    } else if (option === "--max-json-input-bytes") {
-      const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, profileUsageLine(), "rolodexter profile");
-      args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", profileUsageLine(), "rolodexter profile"));
-      i = next;
-    } else if (option === "--help" || arg === "-h") {
-      rejectExplicitFlagValue("--help", inlineValue, profileUsageLine(), "rolodexter profile");
-      throw new CliHelpError(profileUsage());
-    } else if (arg.startsWith("-")) {
-      if (/^-[^-]/.test(arg) && positional.length === 0) {
-        unknownShortOptions.push(arg);
-        continue;
-      }
-      throw usageError(profileUsageLine(), "rolodexter profile", `unrecognized arguments: ${arg}`);
-    } else {
-      positional.push(arg);
-    }
+    i = applyProfileOption(argv, i, arg, knownOptions, args, positional, unknownShortOptions);
   }
   if (positional.length === 0) {
     throw usageError(profileUsageLine(), "rolodexter profile", "the following arguments are required: input");
@@ -1033,60 +1061,58 @@ function parsePythonJson(raw: string): unknown {
   return revivePythonJsonConstants(JSON.parse(replacePythonJsonConstants(raw)) as unknown);
 }
 
-async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
-  if (format === "csv") {
-    const records = parsePythonCsv(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
-    const rawHeaders = (records.shift() ?? []).map(String);
-    const [headers, renamed] = dedupeHeaders(rawHeaders);
-    if (renamed > 0) {
-      logStderr(`warning: ${renamed} duplicate column name(s) in ${path} were renamed with a __N suffix so no column is lost`);
-    }
-    if (mapper && looksLikeDataNotHeaders(rawHeaders, mapper)) {
-      logStderr(
-        `warning: the first row of ${path} looks like DATA, not column names - it has been consumed as the header row and that record will not appear in the output. Add a header row, or re-export with one.`,
-      );
-    }
-    let lineNumber = 1;
-    for (const record of records) {
-      lineNumber += csvRecordLineSpan(record);
-      if (record.length === 1 && record[0] === "") {
-        continue;
-      }
-      const data: Record<string, unknown> = {};
-      for (const [index, header] of headers.entries()) {
-        data[header] = index < record.length ? record[index] : "";
-      }
-      yield { kind: "row", rowNumber: lineNumber, data };
-    }
-    return;
+async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
+  const records = parsePythonCsv(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
+  const rawHeaders = (records.shift() ?? []).map(String);
+  const [headers, renamed] = dedupeHeaders(rawHeaders);
+  if (renamed > 0) {
+    logStderr(`warning: ${renamed} duplicate column name(s) in ${path} were renamed with a __N suffix so no column is lost`);
   }
-
-  if (format === "jsonl") {
-    const lines = createInterface({
-      crlfDelay: Infinity,
-      input: createReadStream(path, { encoding: "utf8" }),
-    });
-    let lineNumber = 0;
-    for await (const line of lines) {
-      lineNumber += 1;
-      const raw = line.trim();
-      if (!raw) {
-        continue;
-      }
-      try {
-        const parsed = parsePythonJson(raw);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          yield { kind: "row", rowNumber: lineNumber, data: parsed as Record<string, unknown> };
-        } else {
-          yield { kind: "failure", rowNumber: lineNumber, error: `expected JSON object, got ${pythonTypeName(parsed)}`, raw: parsed };
-        }
-      } catch (error) {
-        yield { kind: "failure", rowNumber: lineNumber, error: `invalid JSON: ${pythonJsonDecodeShortMessage(raw, error as Error)}`, raw };
-      }
-    }
-    return;
+  if (mapper && looksLikeDataNotHeaders(rawHeaders, mapper)) {
+    logStderr(
+      `warning: the first row of ${path} looks like DATA, not column names - it has been consumed as the header row and that record will not appear in the output. Add a header row, or re-export with one.`,
+    );
   }
+  let lineNumber = 1;
+  for (const record of records) {
+    lineNumber += csvRecordLineSpan(record);
+    if (record.length === 1 && record[0] === "") {
+      continue;
+    }
+    const data: Record<string, unknown> = {};
+    for (const [index, header] of headers.entries()) {
+      data[header] = index < record.length ? record[index] : "";
+    }
+    yield { kind: "row", rowNumber: lineNumber, data };
+  }
+}
 
+async function* readJsonlRows(path: string): AsyncGenerator<InputRow | RowFailure> {
+  const lines = createInterface({
+    crlfDelay: Infinity,
+    input: createReadStream(path, { encoding: "utf8" }),
+  });
+  let lineNumber = 0;
+  for await (const line of lines) {
+    lineNumber += 1;
+    const raw = line.trim();
+    if (!raw) {
+      continue;
+    }
+    try {
+      const parsed = parsePythonJson(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        yield { kind: "row", rowNumber: lineNumber, data: parsed as Record<string, unknown> };
+      } else {
+        yield { kind: "failure", rowNumber: lineNumber, error: `expected JSON object, got ${pythonTypeName(parsed)}`, raw: parsed };
+      }
+    } catch (error) {
+      yield { kind: "failure", rowNumber: lineNumber, error: `invalid JSON: ${pythonJsonDecodeShortMessage(raw, error as Error)}`, raw };
+    }
+  }
+}
+
+async function* readJsonRows(path: string, maxJsonBytes: number | null): AsyncGenerator<InputRow | RowFailure> {
   if (maxJsonBytes !== null) {
     const bytes = Buffer.byteLength(readFileSync(path));
     if (bytes > maxJsonBytes) {
@@ -1113,6 +1139,18 @@ async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonB
         : { kind: "failure", rowNumber: index + 1, error: `expected JSON object, got ${pythonTypeName(item)}`, raw: item };
     }
   }
+}
+
+async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
+  if (format === "csv") {
+    yield* readCsvRows(path, mapper);
+    return;
+  }
+  if (format === "jsonl") {
+    yield* readJsonlRows(path);
+    return;
+  }
+  yield* readJsonRows(path, maxJsonBytes);
 }
 
 function pythonTypeName(value: unknown): string {
@@ -1525,6 +1563,59 @@ async function peekHeaders(path: string, format: Exclude<Format, "auto">, maxJso
   return [];
 }
 
+/** Map one input row/failure into `results` or `outputWriter`, mutating `stats`/`seenKeys` in place. Returns the amount to add to the streamed row count. */
+async function processMapRow(
+  item: InputRow | RowFailure,
+  args: MapArgs,
+  mapper: ContactMapper,
+  stats: MapStats,
+  seenKeys: Set<string>,
+  quarantineWriter: LazyQuarantineWriter | undefined,
+  streamJsonl: boolean,
+  outputWriter: TextWriter | undefined,
+  results: MappingResult[],
+  outputFormat: Format,
+): Promise<number> {
+  if (item.kind === "failure") {
+    stats.failed += await handleFailure(item, args, quarantineWriter);
+    return 0;
+  }
+  let result: MappingResult;
+  try {
+    result = mapper.map_payload(item.data, { extract_embedded_phones: args.embeddedPhones });
+  } catch (error) {
+    stats.failed += await handleFailure({
+      kind: "failure",
+      rowNumber: item.rowNumber,
+      error: (error as Error).message,
+      raw: item.data,
+    }, args, quarantineWriter);
+    return 0;
+  }
+
+  noteResult(stats, result);
+  if (args.dedupe) {
+    const keys = result.get_identity_keys();
+    if (keys.length > 0 && keys.some((key) => seenKeys.has(key))) {
+      stats.duplicates += 1;
+      return 0;
+    }
+    for (const key of keys) {
+      seenKeys.add(key);
+    }
+  }
+
+  if (streamJsonl) {
+    await outputWriter?.write(`${pythonCompactJson(rowPayload(result, args.keepUnmapped))}\n`);
+    return 1;
+  }
+  if (args.maxMaterializedRows !== null && results.length >= args.maxMaterializedRows) {
+    throw new Error(`${outputFormat.toUpperCase()} output requires materializing more than ${args.maxMaterializedRows} row(s); use --format jsonl for streaming output or raise --max-materialized-rows`);
+  }
+  results.push(result);
+  return 0;
+}
+
 async function commandMap(argv: string[]): Promise<number> {
   let args: MapArgs;
   try {
@@ -1592,44 +1683,7 @@ async function commandMap(argv: string[]): Promise<number> {
 
   try {
     for await (const item of items) {
-      if (item.kind === "failure") {
-        stats.failed += await handleFailure(item, args, quarantineWriter);
-        continue;
-      }
-      let result: MappingResult;
-      try {
-        result = mapper.map_payload(item.data, { extract_embedded_phones: args.embeddedPhones });
-      } catch (error) {
-        stats.failed += await handleFailure({
-          kind: "failure",
-          rowNumber: item.rowNumber,
-          error: (error as Error).message,
-          raw: item.data,
-        }, args, quarantineWriter);
-        continue;
-      }
-
-      noteResult(stats, result);
-      if (args.dedupe) {
-        const keys = result.get_identity_keys();
-        if (keys.length > 0 && keys.some((key) => seenKeys.has(key))) {
-          stats.duplicates += 1;
-          continue;
-        }
-        for (const key of keys) {
-          seenKeys.add(key);
-        }
-      }
-
-      if (streamJsonl) {
-        await outputWriter?.write(`${pythonCompactJson(rowPayload(result, args.keepUnmapped))}\n`);
-        count += 1;
-      } else {
-        if (args.maxMaterializedRows !== null && results.length >= args.maxMaterializedRows) {
-          throw new Error(`${outputFormat.toUpperCase()} output requires materializing more than ${args.maxMaterializedRows} row(s); use --format jsonl for streaming output or raise --max-materialized-rows`);
-        }
-        results.push(result);
-      }
+      count += await processMapRow(item, args, mapper, stats, seenKeys, quarantineWriter, streamJsonl, outputWriter, results, outputFormat);
     }
 
     if (streamJsonl) {
