@@ -574,6 +574,53 @@ def _write_cache(lang_data: dict[str, Any]) -> Path:
     return path
 
 
+def _translate_new_fields(
+    to_translate: set[str],
+    field_phrases: dict[str, str],
+    translate_code: str,
+    english_aliases: set[str],
+    *,
+    timeout: float,
+    retries: int,
+    retry_backoff: float,
+) -> dict[str, list[str]]:
+    """Translate every canonical field in `to_translate`.
+
+    Filtered to novel alias variants: anything already an English alias, or
+    a single character, is dropped. A field with no surviving variant after
+    translation is omitted rather than written as an empty list.
+    """
+    new_translations: dict[str, list[str]] = {}
+    if not to_translate:
+        return new_translations
+    canonicals = sorted(to_translate)
+    phrases = [field_phrases[c] for c in canonicals]
+    if (
+        timeout == DEFAULT_TRANSLATE_TIMEOUT
+        and retries == DEFAULT_TRANSLATE_RETRIES
+        and retry_backoff == DEFAULT_TRANSLATE_RETRY_BACKOFF
+    ):
+        results = _translate_batch(phrases, translate_code)
+    else:
+        results = _translate_batch(
+            phrases,
+            translate_code,
+            timeout=timeout,
+            retries=retries,
+            retry_backoff=retry_backoff,
+        )
+    for canonical, translated in zip(canonicals, results, strict=False):
+        if not translated:
+            continue
+        variants = _to_alias_variants(translated)
+        filtered = sorted(
+            v for v in variants if v not in english_aliases and len(v) > 1
+        )
+        if filtered:
+            new_translations[canonical] = filtered
+    return new_translations
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  PUBLIC API — generate_language()
 # ═══════════════════════════════════════════════════════════════════════
@@ -666,33 +713,15 @@ def generate_language(  # pylint: disable=too-many-locals
             c for c in all_canonicals if c not in existing_fields or c in force_fields
         }
 
-    new_translations: dict[str, list[str]] = {}
-    if to_translate:
-        canonicals = sorted(to_translate)
-        phrases = [field_phrases[c] for c in canonicals]
-        if (
-            timeout == DEFAULT_TRANSLATE_TIMEOUT
-            and retries == DEFAULT_TRANSLATE_RETRIES
-            and retry_backoff == DEFAULT_TRANSLATE_RETRY_BACKOFF
-        ):
-            results = _translate_batch(phrases, translate_code)
-        else:
-            results = _translate_batch(
-                phrases,
-                translate_code,
-                timeout=timeout,
-                retries=retries,
-                retry_backoff=retry_backoff,
-            )
-        for canonical, translated in zip(canonicals, results, strict=False):
-            if not translated:
-                continue
-            variants = _to_alias_variants(translated)
-            filtered = sorted(
-                v for v in variants if v not in english_aliases and len(v) > 1
-            )
-            if filtered:
-                new_translations[canonical] = filtered
+    new_translations = _translate_new_fields(
+        to_translate,
+        field_phrases,
+        translate_code,
+        english_aliases,
+        timeout=timeout,
+        retries=retries,
+        retry_backoff=retry_backoff,
+    )
 
     # Merge: keep existing, overlay new, prune obsolete fields
     merged: dict[str, list[str]] = {
@@ -753,7 +782,88 @@ def discover_cached() -> dict[str, Path]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def main() -> None:  # pylint: disable=too-many-locals
+def _print_supported_languages() -> None:
+    print(f"Supported languages ({len(SUPPORTED_LANGUAGES)}):\n")
+    for code, (_, name) in sorted(SUPPORTED_LANGUAGES.items()):
+        cached = load_cached(code)
+        status = "cached" if cached else "not generated"
+        print(f"  {code:5s}  {name:25s}  [{status}]")
+
+
+def _resolve_target_codes(args: argparse.Namespace) -> list[str]:
+    """Validate `--languages` and return the normalized target codes.
+
+    Exits with status 1 (printing which codes were unrecognized) if any
+    requested code is not in :data:`SUPPORTED_LANGUAGES`.
+    """
+    if not args.languages:
+        return sorted(SUPPORTED_LANGUAGES.keys())
+    requested = [c.strip() for c in args.languages.split(",") if c.strip()]
+    unknown = [c for c in requested if normalize_language_code(c) is None]
+    if unknown:
+        print(f"ERROR: Unknown language code(s): {unknown}")
+        print("Run with --list to see supported languages.")
+        sys.exit(1)
+    return [cast(str, normalize_language_code(c)) for c in requested]
+
+
+def _print_dry_run(target_codes: list[str]) -> None:
+    for code in target_codes:
+        _, name = SUPPORTED_LANGUAGES[code]
+        cached = load_cached(code)
+        status = "cached" if cached else "would generate"
+        n_fields = len((cached or {}).get("fields", {}))
+        print(f"  [{code}] {name}: {status} ({n_fields} fields)")
+
+
+def _process_language(
+    code: str, args: argparse.Namespace, force_fields: set[str] | None
+) -> tuple[str, dict[str, Any]]:
+    return code, generate_language(
+        code,
+        force=args.force,
+        force_fields=force_fields,
+        timeout=args.timeout,
+        retries=args.retries,
+        retry_backoff=args.retry_backoff,
+    )
+
+
+def _generate_languages(
+    target_codes: list[str], args: argparse.Namespace, force_fields: set[str] | None
+) -> None:
+    """Translate every target language in parallel and print each result.
+
+    Exits with status 1 (after printing the failing codes) if any language's
+    translation raised.
+    """
+    worker_count = _bounded_workers(args.workers, len(target_codes))
+    failures: list[tuple[str, str]] = []
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = {
+            pool.submit(_process_language, c, args, force_fields): c for c in target_codes
+        }
+        for future in as_completed(futures):
+            code = futures[future]
+            try:
+                _, data = future.result()
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                failures.append((code, str(exc)))
+                print(f"  [{code}] FAILED: {exc}")
+                continue
+            n_fields = len(data.get("fields", {}))
+            n_aliases = sum(len(v) for v in data.get("fields", {}).values())
+            print(
+                f"  [{code}] {data['language_name']}: {n_fields} fields, {n_aliases} aliases"
+            )
+    if failures:
+        print(f"\nFailed {len(failures)} language(s):")
+        for code, error in failures:
+            print(f"  [{code}] {error}")
+        sys.exit(1)
+
+
+def main() -> None:
     """Command-line entry point for i18n generation."""
     parser = argparse.ArgumentParser(
         description="Generate i18n language files for rolodexter (on-demand, cached).",
@@ -815,24 +925,11 @@ def main() -> None:  # pylint: disable=too-many-locals
     args = parser.parse_args()
 
     if args.list:
-        print(f"Supported languages ({len(SUPPORTED_LANGUAGES)}):\n")
-        for code, (_, name) in sorted(SUPPORTED_LANGUAGES.items()):
-            cached = load_cached(code)
-            status = "cached" if cached else "not generated"
-            print(f"  {code:5s}  {name:25s}  [{status}]")
+        _print_supported_languages()
         return
 
     # Determine target languages
-    if args.languages:
-        requested = [c.strip() for c in args.languages.split(",") if c.strip()]
-        unknown = [c for c in requested if normalize_language_code(c) is None]
-        if unknown:
-            print(f"ERROR: Unknown language code(s): {unknown}")
-            print("Run with --list to see supported languages.")
-            sys.exit(1)
-        target_codes = [cast(str, normalize_language_code(c)) for c in requested]
-    else:
-        target_codes = sorted(SUPPORTED_LANGUAGES.keys())
+    target_codes = _resolve_target_codes(args)
 
     # Force-fields
     force_fields: set[str] | None = None
@@ -858,46 +955,10 @@ def main() -> None:  # pylint: disable=too-many-locals
     else:
         print(f"  Cache dir: {get_cache_dir()}\n")
 
-    def _process(code: str) -> tuple[str, dict[str, Any]]:
-        return code, generate_language(
-            code,
-            force=args.force,
-            force_fields=force_fields,
-            timeout=args.timeout,
-            retries=args.retries,
-            retry_backoff=args.retry_backoff,
-        )
-
     if args.dry_run:
-        for code in target_codes:
-            _, name = SUPPORTED_LANGUAGES[code]
-            cached = load_cached(code)
-            status = "cached" if cached else "would generate"
-            n_fields = len((cached or {}).get("fields", {}))
-            print(f"  [{code}] {name}: {status} ({n_fields} fields)")
+        _print_dry_run(target_codes)
     else:
-        worker_count = _bounded_workers(args.workers, len(target_codes))
-        failures: list[tuple[str, str]] = []
-        with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            futures = {pool.submit(_process, c): c for c in target_codes}
-            for future in as_completed(futures):
-                code = futures[future]
-                try:
-                    _, data = future.result()
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    failures.append((code, str(exc)))
-                    print(f"  [{code}] FAILED: {exc}")
-                    continue
-                n_fields = len(data.get("fields", {}))
-                n_aliases = sum(len(v) for v in data.get("fields", {}).values())
-                print(
-                    f"  [{code}] {data['language_name']}: {n_fields} fields, {n_aliases} aliases"
-                )
-        if failures:
-            print(f"\nFailed {len(failures)} language(s):")
-            for code, error in failures:
-                print(f"  [{code}] {error}")
-            sys.exit(1)
+        _generate_languages(target_codes, args, force_fields)
 
     print("\nDone.")
 

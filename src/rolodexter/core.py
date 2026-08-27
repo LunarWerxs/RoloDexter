@@ -1912,7 +1912,95 @@ class NormalizedMatchStrategy(MatchStrategy):
     def _lookup(self, candidate: str) -> str | None:
         return self._registry.exact_lookup(candidate)
 
-    def _candidates(self, header: str) -> list[str]:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    def _candidates_camel_split(self, h: str, uscore: str) -> str | None:
+        """Step 2: CamelCase / PascalCase split, if it differs from `uscore`."""
+        if not any(c.isupper() for c in h[1:]):
+            return None
+        snake = _normalize_header(h)
+        if snake and snake != uscore:
+            return snake
+        return None
+
+    def _candidates_dot_path(self, h: str) -> tuple[list[str], bool]:
+        """Step 3: dot-path resolution (e.g. Account.Name, fields.last_name).
+
+        Returns the items to append, and whether "company" must be inserted
+        at the very front of the caller's accumulated candidates (a
+        company-like prefix + a 'name'/'nombre' suffix).
+        """
+        if "." not in h:
+            return [], False
+        parts = h.rsplit(".", 1)
+        prefix_raw = parts[0].lower().strip()
+        suffix_raw = parts[1].strip()
+        suffix_lower = self._SEP_RE.sub("_", suffix_raw).lower()
+        last_prefix = prefix_raw.rsplit(".", 1)[-1]
+        company_first = last_prefix in self._COMPANY_PREFIXES and suffix_lower in (
+            "name",
+            "nombre",
+        )
+        items = [suffix_lower]
+        if any(c.isupper() for c in suffix_raw[1:]):
+            snake_sfx = _normalize_header(suffix_raw)
+            if snake_sfx != suffix_lower:
+                items.append(snake_sfx)
+        return items, company_first
+
+    def _candidates_indexed(self, h: str) -> list[str]:
+        """Step 4: indexed pattern ("E-mail 1 - Value", "Organization 1 - Title")."""
+        m = self._INDEXED_RE.match(h)
+        if not m:
+            return []
+        grp = self._SEP_RE.sub("_", m.group(1).strip()).lower()
+        prop = self._SEP_RE.sub("_", m.group(2).strip()).lower()
+        return [f"{grp}_{prop}", prop, grp]  # organization_name, name, organization
+
+    def _candidates_number_stripped(self, uscore: str) -> str | None:
+        """Step 5: number stripping ("E-mail 2 Address" -> e_mail_address)."""
+        num_stripped = self._NUM_SUFFIX_RE.sub("", uscore)
+        num_stripped = _HEADER_UNDERSCORE_RUN_RE.sub("_", num_stripped).strip("_")
+        if num_stripped and num_stripped != uscore:
+            return num_stripped
+        return None
+
+    def _candidates_prefix_stripped(
+        self, uscore: str, prefixes: tuple[str, ...]
+    ) -> list[str]:
+        """Steps 6 and 7: strip a known prefix (vendor or address) off `uscore`."""
+        items = []
+        for pfx in prefixes:
+            if uscore.startswith(pfx):
+                stripped = uscore[len(pfx) :]
+                if stripped:
+                    items.append(stripped)
+        return items
+
+    def _candidates_id_stripped(self, out: list[str]) -> list[str]:
+        """Step 8: _id suffix stripping (owner_id -> owner), plus a vendor-prefix
+        strip of that result. Skips anything already present in `out` (or
+        already produced by this step), and anything value-bearing.
+        """
+        items: list[str] = []
+        id_candidates = [c for c in out if c.endswith("_id")]
+        for candidate in id_candidates:
+            base = candidate[:-3]
+            if not base or base in out or base in items or self._is_value_bearing(base):
+                continue
+            items.append(base)
+            # Also strip vendor prefix off the base
+            for pfx in self._VENDOR_PREFIXES:
+                if base.startswith(pfx):
+                    inner = base[len(pfx) :]
+                    if (
+                        inner
+                        and inner not in out
+                        and inner not in items
+                        and not self._is_value_bearing(inner)
+                    ):
+                        items.append(inner)
+        return items
+
+    def _candidates(self, header: str) -> list[str]:
         out: list[str] = []
         h = header.strip()
         if not h:
@@ -1923,78 +2011,25 @@ class NormalizedMatchStrategy(MatchStrategy):
         if uscore:
             out.append(uscore)
 
-        # 2. CamelCase / PascalCase split
-        if any(c.isupper() for c in h[1:]):
-            snake = _normalize_header(h)
-            if snake and snake != uscore:
-                out.append(snake)
+        snake = self._candidates_camel_split(h, uscore)
+        if snake:
+            out.append(snake)
 
-        # 3. Dot-path resolution  (e.g. Account.Name, fields.last_name)
-        if "." in h:
-            parts = h.rsplit(".", 1)
-            prefix_raw = parts[0].lower().strip()
-            suffix_raw = parts[1].strip()
-            suffix_lower = self._SEP_RE.sub("_", suffix_raw).lower()
-            # Context-aware: company-like prefix + 'name' → company
-            last_prefix = prefix_raw.rsplit(".", 1)[-1]
-            if last_prefix in self._COMPANY_PREFIXES and suffix_lower in (
-                "name",
-                "nombre",
-            ):
-                out.insert(0, "company")
-            # Last segment (underscore-normalised)
-            out.append(suffix_lower)
-            # CamelCase split of last segment
-            if any(c.isupper() for c in suffix_raw[1:]):
-                snake_sfx = _normalize_header(suffix_raw)
-                if snake_sfx != suffix_lower:
-                    out.append(snake_sfx)
+        dot_items, company_first = self._candidates_dot_path(h)
+        if company_first:
+            out.insert(0, "company")
+        out.extend(dot_items)
 
-        # 4. Indexed pattern:  "E-mail 1 - Value", "Organization 1 - Title"
-        m = self._INDEXED_RE.match(h)
-        if m:
-            grp = self._SEP_RE.sub("_", m.group(1).strip()).lower()
-            prop = self._SEP_RE.sub("_", m.group(2).strip()).lower()
-            out.append(f"{grp}_{prop}")  # organization_name
-            out.append(prop)  # name
-            out.append(grp)  # organization
+        out.extend(self._candidates_indexed(h))
 
-        # 5. Number stripping  ("E-mail 2 Address" → e_mail_address)
-        num_stripped = self._NUM_SUFFIX_RE.sub("", uscore)
-        num_stripped = _HEADER_UNDERSCORE_RUN_RE.sub("_", num_stripped).strip("_")
-        if num_stripped and num_stripped != uscore:
+        num_stripped = self._candidates_number_stripped(uscore)
+        if num_stripped:
             out.append(num_stripped)
 
-        # 6. Vendor prefix stripping  (hs_lead_status → lead_status)
-        for pfx in self._VENDOR_PREFIXES:
-            if uscore.startswith(pfx):
-                stripped = uscore[len(pfx) :]
-                if stripped:
-                    out.append(stripped)
+        out.extend(self._candidates_prefix_stripped(uscore, self._VENDOR_PREFIXES))
+        out.extend(self._candidates_prefix_stripped(uscore, self._address_prefixes))
 
-        # 7. Address prefix stripping  (business_city → city)
-        for pfx in self._address_prefixes:
-            if uscore.startswith(pfx):
-                stripped = uscore[len(pfx) :]
-                if stripped:
-                    out.append(stripped)
-
-        # 8.  _id suffix stripping  (owner_id → owner)
-        id_candidates = [c for c in out if c.endswith("_id")]
-        for candidate in id_candidates:
-            base = candidate[:-3]
-            if base and base not in out and not self._is_value_bearing(base):
-                out.append(base)
-                # Also strip vendor prefix off the base
-                for pfx in self._VENDOR_PREFIXES:
-                    if base.startswith(pfx):
-                        inner = base[len(pfx) :]
-                        if (
-                            inner
-                            and inner not in out
-                            and not self._is_value_bearing(inner)
-                        ):
-                            out.append(inner)
+        out.extend(self._candidates_id_stripped(out))
 
         return out
 
@@ -3147,10 +3182,31 @@ class ContactMapper:
                 "labels cannot be renamed without ambiguity"
             )
 
+        rename = self._build_rename_map(columns, schema)
+
+        out = df.rename(columns=rename)
+        warnings: list[str] = []
+        if do_norm:
+            warnings = self._normalize_dataframe_columns(out, rename, region)
+        if warnings:
+            for warning in warnings:
+                logger.warning("%s", warning)
+            if is_strict:
+                raise NormalizationError("; ".join(warnings))
+        return out
+
+    @staticmethod
+    def _build_rename_map(columns: list[Any], schema: MappingSchema) -> dict[Any, str]:
+        """Canonical rename target for each matched column, ambiguity-resolved.
+
+        Unmatched labels remain in the output. Reserve them before assigning
+        canonical names so a generated ``<canonical>__N`` label cannot
+        collide with an untouched source column and silently hide data. If
+        two source columns map to the same canonical field, the first keeps
+        the canonical name and later ones get a ``<canonical>__N`` suffix
+        (with a logged warning).
+        """
         rename: dict[Any, str] = {}
-        # Unmatched labels remain in the output. Reserve them before assigning
-        # canonical names so a generated ``<canonical>__N`` label cannot
-        # collide with an untouched source column and silently hide data.
         used_names: set[Any] = {
             col
             for col in columns
@@ -3178,24 +3234,23 @@ class ContactMapper:
                     new_name,
                 )
             rename[col] = new_name
+        return rename
 
-        out = df.rename(columns=rename)
+    @staticmethod
+    def _normalize_dataframe_columns(
+        out: Any, rename: dict[Any, str], region: str | None
+    ) -> list[str]:
+        """Normalize each renamed column of `out` in place; return any value warnings."""
         warnings: list[str] = []
-        if do_norm:
-            for old_name, new_name in rename.items():
-                canonical = new_name.split("__", 1)[0]
-                out[new_name] = out[new_name].map(
-                    lambda v, c=canonical: normalize_value(c, v, default_region=region)
-                )
-                if canonical in _PHONE_FIELDS or canonical == "email":
-                    for final in out[new_name]:
-                        warnings.extend(value_warnings(old_name, canonical, final))
-        if warnings:
-            for warning in warnings:
-                logger.warning("%s", warning)
-            if is_strict:
-                raise NormalizationError("; ".join(warnings))
-        return out
+        for old_name, new_name in rename.items():
+            canonical = new_name.split("__", 1)[0]
+            out[new_name] = out[new_name].map(
+                lambda v, c=canonical: normalize_value(c, v, default_region=region)
+            )
+            if canonical in _PHONE_FIELDS or canonical == "email":
+                for final in out[new_name]:
+                    warnings.extend(value_warnings(old_name, canonical, final))
+        return warnings
 
     @property
     def registry(self) -> PatternRegistry:
