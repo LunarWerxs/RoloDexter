@@ -585,7 +585,26 @@ function applyMapOption(
   } else if (option === "--embedded-phones") {
     rejectExplicitFlagValue("--embedded-phones", inlineValue, mapUsageLine(), "rolodexter map");
     args.embeddedPhones = true;
-  } else if (option === "--on-error") {
+  } else {
+    return applyMapOptionTail(argv, i, arg, option, inlineValue, args, positional, unknownShortOptions);
+  }
+  return i;
+}
+
+/** The remainder of `applyMapOption`'s option table, split out so neither half carries the whole
+ * option count in its own complexity score. Takes `option`/`inlineValue` already resolved by the
+ * caller so `optionToken` runs exactly once per argument, same as before the split. */
+function applyMapOptionTail(
+  argv: string[],
+  i: number,
+  arg: string,
+  option: string,
+  inlineValue: string | undefined,
+  args: MapArgs,
+  positional: string[],
+  unknownShortOptions: string[],
+): number {
+  if (option === "--on-error") {
     const [value, next] = takeResolvedValue(argv, i, "--on-error", inlineValue, mapUsageLine(), "rolodexter map");
     args.onError = validateOnError(value);
     return next;
@@ -1616,6 +1635,46 @@ async function processMapRow(
   return 0;
 }
 
+/** Resolves and validates the quarantine output path for `commandMap`, kept separate so its two
+ * collision checks don't add to the branch count of the pipeline that calls it. */
+function resolveQuarantinePath(args: MapArgs): string | undefined {
+  const quarantinePath = args.onError === "quarantine" ? defaultQuarantinePath(args) : undefined;
+  if (quarantinePath && comparablePath(quarantinePath) === comparablePath(args.input)) {
+    throw new Error("quarantine output must differ from the input path");
+  }
+  if (
+    quarantinePath &&
+    args.output &&
+    comparablePath(quarantinePath) === comparablePath(args.output)
+  ) {
+    throw new Error("quarantine output must differ from the mapped output path");
+  }
+  return quarantinePath;
+}
+
+/** Builds the final "Mapped N row(s) -> ..." status line, split out of `commandMap` so its own
+ * small decision tree doesn't compound with the ingestion/write pipeline above it. */
+function buildMapSummaryMessage(
+  count: number,
+  args: MapArgs,
+  stats: MapStats,
+  outputFormat: Format,
+  quarantinePath: string | undefined,
+): string {
+  let message = `Mapped ${count} row(s) -> ${args.output || "stdout"} (${outputFormat})`;
+  if (stats.duplicates) {
+    message += `; dropped ${stats.duplicates} duplicate row(s)`;
+  }
+  if (stats.failed) {
+    if (args.onError === "quarantine") {
+      message += `; quarantined ${stats.failed} row(s) -> ${quarantinePath}`;
+    } else {
+      message += `; skipped ${stats.failed} row(s)`;
+    }
+  }
+  return message;
+}
+
 async function commandMap(argv: string[]): Promise<number> {
   let args: MapArgs;
   try {
@@ -1660,17 +1719,7 @@ async function commandMap(argv: string[]): Promise<number> {
     MappingSchema.from_dict(data as Record<string, unknown>, mapper);
   }
 
-  const quarantinePath = args.onError === "quarantine" ? defaultQuarantinePath(args) : undefined;
-  if (quarantinePath && comparablePath(quarantinePath) === comparablePath(args.input)) {
-    throw new Error("quarantine output must differ from the input path");
-  }
-  if (
-    quarantinePath &&
-    args.output &&
-    comparablePath(quarantinePath) === comparablePath(args.output)
-  ) {
-    throw new Error("quarantine output must differ from the mapped output path");
-  }
+  const quarantinePath = resolveQuarantinePath(args);
 
   const stats: MapStats = { failed: 0, duplicates: 0, droppedHeaders: new Map(), lowConfidence: new Map() };
   const seenKeys = new Set<string>();
@@ -1720,18 +1769,7 @@ async function commandMap(argv: string[]): Promise<number> {
     "review these, then pin them with --override HEADER=field or raise --min-confidence",
   );
 
-  let message = `Mapped ${count} row(s) -> ${args.output || "stdout"} (${outputFormat})`;
-  if (stats.duplicates) {
-    message += `; dropped ${stats.duplicates} duplicate row(s)`;
-  }
-  if (stats.failed) {
-    if (args.onError === "quarantine") {
-      message += `; quarantined ${stats.failed} row(s) -> ${quarantinePath}`;
-    } else {
-      message += `; skipped ${stats.failed} row(s)`;
-    }
-  }
-  logStderr(message);
+  logStderr(buildMapSummaryMessage(count, args, stats, outputFormat, quarantinePath));
   return stats.failed ? EXIT_PARTIAL : 0;
 }
 

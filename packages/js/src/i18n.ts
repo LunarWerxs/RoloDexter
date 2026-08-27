@@ -320,6 +320,59 @@ function boundedWorkers(requested: number, targetCount: number): number {
   return Math.min(Math.max(1, requested), targetCount, MAX_I18N_WORKERS);
 }
 
+/** Handle one `i18n` CLI option token, mutating `args` in place. Returns the loop index to resume
+ * from. Pulled out of `parseArgs` so the option table's branch count isn't compounded with the
+ * loop and the `--`/`--help` handling that wraps it. */
+function applyI18nOption(
+  argv: string[],
+  i: number,
+  arg: string,
+  option: string,
+  inlineValue: string | undefined,
+  args: I18nArgs,
+): number {
+  if (option === "--languages") {
+    const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue);
+    args.languages = value;
+    return next;
+  } else if (option === "--list") {
+    rejectExplicitFlagValue("--list", inlineValue);
+    args.list = true;
+  } else if (option === "--retranslate-fields") {
+    const [value, next] = takeResolvedValue(argv, i, "--retranslate-fields", inlineValue);
+    args.retranslateFields = value;
+    return next;
+  } else if (option === "--force") {
+    rejectExplicitFlagValue("--force", inlineValue);
+    args.force = true;
+  } else if (option === "--dry-run") {
+    rejectExplicitFlagValue("--dry-run", inlineValue);
+    args.dryRun = true;
+  } else if (option === "--workers") {
+    const [value, next] = takeResolvedValue(argv, i, "--workers", inlineValue);
+    args.workers = nonNegativeInt(value, "--workers");
+    return next;
+  } else if (option === "--timeout") {
+    const [value, next] = takeResolvedValue(argv, i, "--timeout", inlineValue);
+    args.timeout = nonNegativeFloat(value, "--timeout");
+    return next;
+  } else if (option === "--retries") {
+    const [value, next] = takeResolvedValue(argv, i, "--retries", inlineValue);
+    args.retries = nonNegativeInt(value, "--retries");
+    return next;
+  } else if (option === "--retry-backoff") {
+    const [value, next] = takeResolvedValue(argv, i, "--retry-backoff", inlineValue);
+    args.retry_backoff = nonNegativeFloat(value, "--retry-backoff");
+    return next;
+  } else if (option === "--verbose" || arg === "-v") {
+    rejectExplicitFlagValue(option === "--verbose" ? "--verbose" : "-v", inlineValue);
+    // Kept for Python CLI argument parity.
+  } else {
+    throw new I18nUsageError(`unrecognized arguments: ${arg}`);
+  }
+  return i;
+}
+
 function parseArgs(argv: string[]): I18nArgs {
   const knownOptions = [
     "--languages",
@@ -359,45 +412,7 @@ function parseArgs(argv: string[]): I18nArgs {
       rejectExplicitFlagValue("--help", inlineValue);
       throw new I18nHelpError(usage());
     }
-    if (option === "--languages") {
-      const [value, next] = takeResolvedValue(argv, i, "--languages", inlineValue);
-      args.languages = value;
-      i = next;
-    } else if (option === "--list") {
-      rejectExplicitFlagValue("--list", inlineValue);
-      args.list = true;
-    } else if (option === "--retranslate-fields") {
-      const [value, next] = takeResolvedValue(argv, i, "--retranslate-fields", inlineValue);
-      args.retranslateFields = value;
-      i = next;
-    } else if (option === "--force") {
-      rejectExplicitFlagValue("--force", inlineValue);
-      args.force = true;
-    } else if (option === "--dry-run") {
-      rejectExplicitFlagValue("--dry-run", inlineValue);
-      args.dryRun = true;
-    } else if (option === "--workers") {
-      const [value, next] = takeResolvedValue(argv, i, "--workers", inlineValue);
-      args.workers = nonNegativeInt(value, "--workers");
-      i = next;
-    } else if (option === "--timeout") {
-      const [value, next] = takeResolvedValue(argv, i, "--timeout", inlineValue);
-      args.timeout = nonNegativeFloat(value, "--timeout");
-      i = next;
-    } else if (option === "--retries") {
-      const [value, next] = takeResolvedValue(argv, i, "--retries", inlineValue);
-      args.retries = nonNegativeInt(value, "--retries");
-      i = next;
-    } else if (option === "--retry-backoff") {
-      const [value, next] = takeResolvedValue(argv, i, "--retry-backoff", inlineValue);
-      args.retry_backoff = nonNegativeFloat(value, "--retry-backoff");
-      i = next;
-    } else if (option === "--verbose" || arg === "-v") {
-      rejectExplicitFlagValue(option === "--verbose" ? "--verbose" : "-v", inlineValue);
-      // Kept for Python CLI argument parity.
-    } else {
-      throw new I18nUsageError(`unrecognized arguments: ${arg}`);
-    }
+    i = applyI18nOption(argv, i, arg, option, inlineValue, args);
   }
   return args;
 }
