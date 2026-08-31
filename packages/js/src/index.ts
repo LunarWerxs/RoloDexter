@@ -1,19 +1,3 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-import {
-  findPhoneNumbersInText,
-  getCountries,
-  getCountryCallingCode,
-  parsePhoneNumberFromString,
-} from "libphonenumber-js/max";
-import type { CountryCode, PhoneNumber as LibPhoneNumber } from "libphonenumber-js/max";
-import { extract as fuzzyExtract, partial_ratio as fuzzyPartialRatio, ratio as fuzzyRatio } from "fuzzball";
-
 // Everything below was extracted into the sibling modules named here.
 // index.ts imports what it still uses and re-exports exactly what it used to
 // export, so ./public.ts, ./core.ts, ./cli.ts and ./i18n.ts see no change.
@@ -21,7 +5,7 @@ import { dataframeColumnValues, dataframeColumns, flatten, isDataFrameLike, iter
 import { CANONICAL_FIELD_MEMBERS, CanonicalField, EXACT_MATCH_CONFIDENCE, FieldMatch, NormalizationError, PHONE_FIELDS, PatternLoadError, fieldMatch, isMatched, mergeValue, unknown, valueForMatching } from "./_models.js";
 import type { CanonicalFieldMember, CompileSchemaOptions, DataFrameLike, MapDataFrameOptions, MapPayloadOptions, ProfileOptions } from "./_models.js";
 import { normalizeValue, valueWarnings } from "./_normalizers.js";
-import { PhoneNumber, extractEmbeddedPhones } from "./_phone.js";
+import { extractEmbeddedPhones } from "./_phone.js";
 import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, validateConfidenceThreshold, valueError } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
 import { MappingProfile, MappingResult, makeMappingMatches } from "./_results.js";

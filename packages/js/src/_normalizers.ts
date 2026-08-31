@@ -2,7 +2,7 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { normalizeCountry, normalizeState } from "./_geo.js";
-import { ADDRESS_FIELDS, BOOLEAN_FIELDS, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, PHONE_FIELDS, SOCIAL_FIELDS, canonicalField, canonicalFieldValue } from "./_models.js";
+import { ADDRESS_FIELDS, BOOLEAN_FIELDS, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, PHONE_FIELDS, SOCIAL_FIELDS, canonicalFieldValue } from "./_models.js";
 import type { CanonicalFieldValue } from "./_models.js";
 import { normalizeName, parseNameParts, smartTitleCase, splitNameNickname } from "./_names.js";
 import { normalizePhone } from "./_phone.js";
