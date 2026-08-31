@@ -841,7 +841,8 @@ def _generate_languages(
     failures: list[tuple[str, str]] = []
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
         futures = {
-            pool.submit(_process_language, c, args, force_fields): c for c in target_codes
+            pool.submit(_process_language, c, args, force_fields): c
+            for c in target_codes
         }
         for future in as_completed(futures):
             code = futures[future]
