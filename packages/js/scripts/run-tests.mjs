@@ -55,9 +55,9 @@ if (wantCoverage) {
     // than on a newer local Node, so a threshold set flush against the local
     // reading would fail the build for no reason.
     flags.unshift(
-      "--test-coverage-lines=80",
-      "--test-coverage-branches=78",
-      "--test-coverage-functions=86",
+      "--test-coverage-lines=82",
+      "--test-coverage-branches=80",
+      "--test-coverage-functions=89",
     );
   } else {
     console.warn(

@@ -473,19 +473,6 @@ function fileNotFoundMessage(path: string): string {
   return `[Errno 2] No such file or directory: ${pyRepr(path)}`;
 }
 
-function takeValue(argv: string[], index: number, option: string): [string, number] {
-  const current = argv[index] ?? "";
-  const equalsAt = current.indexOf("=");
-  if (equalsAt !== -1) {
-    return [current.slice(equalsAt + 1), index];
-  }
-  const value = argv[index + 1];
-  if (value === undefined) {
-    throw usageError(mapUsageLine(), "rolodexter map", `argument ${option}: expected one argument`);
-  }
-  return [value, index + 1];
-}
-
 function optionToken(
   arg: string,
   known: string[],

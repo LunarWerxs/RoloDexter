@@ -210,19 +210,6 @@ function usageLine(): string {
   ].join("\n");
 }
 
-function takeValue(argv: string[], index: number, option: string): [string, number] {
-  const current = argv[index] ?? "";
-  const equalsAt = current.indexOf("=");
-  if (equalsAt !== -1) {
-    return [current.slice(equalsAt + 1), index];
-  }
-  const value = argv[index + 1];
-  if (value === undefined) {
-    throw new I18nUsageError(`argument ${option}: expected one argument`);
-  }
-  return [value, index + 1];
-}
-
 class I18nUsageError extends Error {
   readonly exitCode = 2;
 }
@@ -241,24 +228,6 @@ function rejectExplicitFlagValue(option: string, value: string | undefined): voi
   if (value !== undefined) {
     throw new I18nUsageError(`argument ${option}: ignored explicit argument ${pyRepr(value)}`);
   }
-}
-
-function resolvedHelpOption(arg: string): boolean {
-  if (arg === "-h") {
-    return true;
-  }
-  if (!arg.startsWith("--") || arg === "--") {
-    return false;
-  }
-  const equalsAt = arg.indexOf("=");
-  const raw = equalsAt === -1 ? arg : arg.slice(0, equalsAt);
-  if (!"--help".startsWith(raw)) {
-    return false;
-  }
-  if (equalsAt !== -1) {
-    throw new I18nUsageError(`argument --help: ignored explicit argument ${pyRepr(arg.slice(equalsAt + 1))}`);
-  }
-  return true;
 }
 
 function optionToken(arg: string, known: string[]): { option: string; value?: string } | undefined {
