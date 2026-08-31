@@ -50,10 +50,14 @@ if (wantCoverage) {
     // tests and scripts/cli_parity_probe.py exercise it by spawning it as a
     // subprocess, which this instrumentation cannot see. Treat those probes,
     // not this percentage, as the real guarantee for CLI behavior.
+    // The margin below today's real numbers is deliberate but small: the same
+    // suite reports ~0.05% (lines) and ~0.25% (branches) lower on CI's Node 24
+    // than on a newer local Node, so a threshold set flush against the local
+    // reading would fail the build for no reason.
     flags.unshift(
-      "--test-coverage-lines=78",
-      "--test-coverage-branches=76",
-      "--test-coverage-functions=84",
+      "--test-coverage-lines=80",
+      "--test-coverage-branches=78",
+      "--test-coverage-functions=86",
     );
   } else {
     console.warn(
