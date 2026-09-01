@@ -6,6 +6,10 @@
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,
+    // Not implied by "strict". Turning it on caught three functions nothing
+    // could ever call and eleven imports left behind by the file splits.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "declaration": true,
     "stripInternal": true,
     "sourceMap": true,
