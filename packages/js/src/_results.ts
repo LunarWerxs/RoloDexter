@@ -2,7 +2,7 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { FieldMatch, PHONE_FIELDS, isMatched } from "./_models.js";
-import { lockPythonFrozenFields, pyRepr, pyString, pythonLiteral, setOwnProperty } from "./_pycompat.js";
+import { lockPythonFrozenFields, pyRepr, pyString, pyStrip, pythonLiteral, setOwnProperty } from "./_pycompat.js";
 
 export class MappingProfile {
   readonly rows_seen: number;
@@ -199,13 +199,13 @@ export class MappingResult {
     };
 
     for (const email of this.get_all_emails()) {
-      const text = email.trim().toLowerCase();
+      const text = pyStrip(email).toLowerCase();
       if (text) {
         add(`email:${text}`);
       }
     }
     for (const phone of this.get_all_phones()) {
-      const text = phone.trim();
+      const text = pyStrip(phone);
       if (text) {
         add(`phone:${text}`);
       }
@@ -216,7 +216,7 @@ export class MappingResult {
     const rawService = this.normalized.source_service;
     const services = Array.isArray(rawService) ? rawService : [rawService];
     const normalizedServices = services.map((value) =>
-      value == null ? "" : pyString(value).trim().toLowerCase()
+      value == null ? "" : pyStrip(pyString(value)).toLowerCase()
     );
     // Scope IDs by vendor ONLY when the payload names exactly one vendor.
     // source_id and source_service are two independent lists built by the
@@ -230,7 +230,7 @@ export class MappingResult {
       if (sourceId == null) {
         continue;
       }
-      const text = pyString(sourceId).trim();
+      const text = pyStrip(pyString(sourceId));
       if (text) {
         add(`${prefix}:${text}`);
       }

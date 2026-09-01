@@ -1,7 +1,7 @@
 // Errors, the canonical field enum, field sets, and the match record.
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
-import { lockPythonFrozenFields, pyRepr, pythonEquals, pythonIncludes, pythonLiteral, setOwnProperty } from "./_pycompat.js";
+import { lockPythonFrozenFields, pyRepr, pyStrip, pythonEquals, pythonIncludes, pythonLiteral, setOwnProperty } from "./_pycompat.js";
 
 export const EXACT_MATCH_CONFIDENCE = 1.0;
 export const NORMALIZED_MATCH_CONFIDENCE = 0.95;
@@ -438,7 +438,7 @@ function valueForMatching(value: unknown): string | undefined {
 }
 
 function normalizeAlias(alias: string): string {
-  return alias.toLowerCase().trim();
+  return pyStrip(alias.toLowerCase());
 }
 
 function mergeValue(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -474,7 +474,7 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
   // meaning the same field and only one is filled in.
   const isBlank = (candidate: unknown): boolean =>
     candidate === null || candidate === undefined ||
-    (typeof candidate === "string" && candidate.trim() === "");
+    (typeof candidate === "string" && pyStrip(candidate) === "");
   if (isBlank(value)) {
     return;
   }

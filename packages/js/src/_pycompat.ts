@@ -64,14 +64,45 @@ function pythonLiteral(value: unknown): string {
   return String(value);
 }
 
+// Python's repr() escapes every character the Unicode database calls Other or
+// Separator, the ASCII space excepted - which is exactly [\p{C}\p{Z}] minus
+// U+0020, verified against CPython over all 1,114,112 code points. Without
+// this a warning quoting a value that holds a byte-order mark printed the raw
+// character here and "﻿" in Python, so the two packages disagreed on the
+// text of a message rather than on any behavior.
+const NON_PRINTABLE_RE = /[\p{C}\p{Z}]/u;
+
+function pythonCharEscape(char: string): string {
+  const codePoint = char.codePointAt(0) ?? 0;
+  if (codePoint <= 0xff) {
+    return `\\x${codePoint.toString(16).padStart(2, "0")}`;
+  }
+  if (codePoint <= 0xffff) {
+    return `\\u${codePoint.toString(16).padStart(4, "0")}`;
+  }
+  return `\\U${codePoint.toString(16).padStart(8, "0")}`;
+}
+
 function pythonStringLiteral(value: string): string {
   const quote = value.includes("'") && !value.includes("\"") ? "\"" : "'";
-  const escaped = value
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t")
-    .replace(new RegExp(quote, "g"), `\\${quote}`);
+  let escaped = "";
+  for (const char of value) {
+    if (char === "\\") {
+      escaped += "\\\\";
+    } else if (char === quote) {
+      escaped += `\\${quote}`;
+    } else if (char === "\n") {
+      escaped += "\\n";
+    } else if (char === "\r") {
+      escaped += "\\r";
+    } else if (char === "\t") {
+      escaped += "\\t";
+    } else if (char !== " " && NON_PRINTABLE_RE.test(char)) {
+      escaped += pythonCharEscape(char);
+    } else {
+      escaped += char;
+    }
+  }
   return `${quote}${escaped}${quote}`;
 }
 
@@ -230,6 +261,58 @@ function pythonEquals(left: unknown, right: unknown): boolean {
 }
 
 
+// The 29 code points Python's str.isspace() reports True for, which is exactly
+// what str.strip() removes. JavaScript's String.prototype.trim() uses a
+// different set: it does NOT strip U+001C-001F or U+0085, and it DOES strip
+// U+FEFF, which Python keeps. So a value wrapped in a byte-order mark - what a
+// UTF-8 CSV puts on its first field - lost it in one language and kept it in
+// the other, and a value wrapped in an ASCII file separator was stripped in
+// Python and kept in JavaScript.
+//
+// Generated from CPython, not typed by hand:
+//   [hex(cp) for cp in range(0x110000) if chr(cp).isspace()]
+const PYTHON_WHITESPACE = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0,
+  0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+]);
+
+// Python's regex \s matches exactly the same 29 code points, so the character
+// class is derived from the set above rather than typed out a second time -
+// two hand-written copies of an escape-heavy list is how they drift.
+const PYTHON_WHITESPACE_CLASS = `[${[...PYTHON_WHITESPACE]
+  .map((codePoint) => `\\u${codePoint.toString(16).padStart(4, "0")}`)
+  .join("")}]+`;
+
+/** A fresh global regex per call: a /g regex carries lastIndex between uses. */
+function pySpaceRun(): RegExp {
+  return new RegExp(PYTHON_WHITESPACE_CLASS, "g");
+}
+
+/** `re.sub(r"\s+", " ", value)` with Python's whitespace set. */
+function pyCollapseSpace(value: string): string {
+  return value.replace(pySpaceRun(), " ");
+}
+
+/** `value.split()` / `re.split(r"\s+", value)` with Python's whitespace set. */
+function pySplitSpace(value: string): string[] {
+  return value.split(pySpaceRun());
+}
+
+/** `str.strip()`: trim by Python's whitespace set, not JavaScript's. */
+function pyStrip(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && PYTHON_WHITESPACE.has(value.charCodeAt(start))) {
+    start += 1;
+  }
+  while (end > start && PYTHON_WHITESPACE.has(value.charCodeAt(end - 1))) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
+
 // A key literally named "__proto__" hits the prototype setter on a plain
 // object: `target[key] = value` drops the value and replaces the object's
 // prototype with caller-supplied data, so later lookups on it can return
@@ -256,4 +339,4 @@ function setOwnProperty(target: Record<string, unknown>, key: string, value: unk
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, setOwnProperty, validateConfidenceThreshold, valueError };
+export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, pyCollapseSpace, pySplitSpace, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError };

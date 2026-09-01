@@ -5,6 +5,7 @@ import { extract as fuzzyExtract, partial_ratio as fuzzyPartialRatio, ratio as f
 import { ADDRESS_PREFIXES, COMPANY_PREFIXES, EXACT_MATCH_CONFIDENCE, FUZZY_HIGH_CONFIDENCE, FUZZY_LENGTH_RATIO, FUZZY_LOW_CONFIDENCE, FUZZY_MATCH_THRESHOLD, FieldMatch, HEURISTIC_CONFIDENCE, NORMALIZED_MATCH_CONFIDENCE, PHONE_FIELDS, SOCIAL_FIELDS, VENDOR_PREFIXES, fieldMatch } from "./_models.js";
 import type { PatternData } from "./_models.js";
 import { isPossiblePhone } from "./_phone.js";
+import { pyStrip } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
 
 export interface ContactMapperOptions {
@@ -66,8 +67,8 @@ function pushDotSuffixCandidates(h: string, out: string[]): void {
     return;
   }
   const dot = h.lastIndexOf(".");
-  const prefixRaw = h.slice(0, dot).toLowerCase().trim();
-  const suffixRaw = h.slice(dot + 1).trim();
+  const prefixRaw = pyStrip(h.slice(0, dot).toLowerCase());
+  const suffixRaw = pyStrip(h.slice(dot + 1));
   const suffixLower = suffixRaw.replace(/[\s-]+/g, "_").toLowerCase();
   const lastPrefix = prefixRaw.slice(prefixRaw.lastIndexOf(".") + 1);
   if (COMPANY_PREFIXES.has(lastPrefix) && ["name", "nombre"].includes(suffixLower)) {
@@ -90,8 +91,8 @@ function pushIndexedCandidates(h: string, out: string[]): void {
   if (!indexed) {
     return;
   }
-  const group = indexed[1]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
-  const prop = indexed[2]?.trim().replace(/[\s-]+/g, "_").toLowerCase();
+  const group = pyStrip(indexed[1] ?? "").replace(/[\s-]+/g, "_").toLowerCase();
+  const prop = pyStrip(indexed[2] ?? "").replace(/[\s-]+/g, "_").toLowerCase();
   if (group && prop) {
     out.push(`${group}_${prop}`, prop, group);
   }
@@ -134,7 +135,7 @@ function pushIdBaseCandidates(out: string[], registry: PatternRegistry): void {
 
 function normalizedCandidates(header: string, registry: PatternRegistry): string[] {
   const out: string[] = [];
-  const h = header.trim();
+  const h = pyStrip(header);
   if (!h) {
     return out;
   }
@@ -166,7 +167,7 @@ function normalizedCandidates(header: string, registry: PatternRegistry): string
 }
 
 function fuzzyClean(header: string): string {
-  return header.toLowerCase().trim().replace(/[^\w]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return pyStrip(header.toLowerCase()).replace(/[^\w]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 const PYTHON_FUZZY_COMPAT = new Map<string, { canonical: string; confidence: number } | null>([
@@ -377,7 +378,7 @@ function heuristicMatch(header: string, value: string | undefined, defaultRegion
   if (!value) {
     return undefined;
   }
-  const cleaned = value.trim();
+  const cleaned = pyStrip(value);
   if (!cleaned || cleaned.length > 512) {
     return undefined;
   }

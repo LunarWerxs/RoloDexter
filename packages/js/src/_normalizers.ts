@@ -6,7 +6,7 @@ import { ADDRESS_FIELDS, BOOLEAN_FIELDS, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, 
 import type { CanonicalFieldValue } from "./_models.js";
 import { normalizeName, parseNameParts, smartTitleCase, splitNameNickname } from "./_names.js";
 import { normalizePhone } from "./_phone.js";
-import { assertValueNormalizerArity, attributeError, pyRepr, pyString, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonTypeName } from "./_pycompat.js";
+import { assertValueNormalizerArity, attributeError, pyCollapseSpace, pyRepr, pyString, pyStrip, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonTypeName } from "./_pycompat.js";
 
 /** @internal */
 
@@ -33,7 +33,7 @@ function isoDate(year: number, month: number, day: number): string | undefined {
  * unchanged (and reported as a warning) rather than silently reordered.
  */
 function normalizeDate(value: string): string {
-  const text = value.trim();
+  const text = pyStrip(value);
   if (!text) {
     return value;
   }
@@ -57,7 +57,7 @@ function normalizeDate(value: string): string {
 }
 
 function isAmbiguousDate(value: string): boolean {
-  const text = value.trim();
+  const text = pyStrip(value);
   if (!text || normalizeDate(text) !== text) {
     return false;
   }
@@ -82,7 +82,7 @@ function valueWarnings(key: string, canonicalField: string, value: unknown): str
   if (typeof value !== "string") {
     return [];
   }
-  const text = value.trim();
+  const text = pyStrip(value);
   if (!text) {
     return [];
   }
@@ -104,25 +104,25 @@ function valueWarnings(key: string, canonicalField: string, value: unknown): str
 
 /** Normalize a boolean-field string value ("yes"/"no"/...), mirroring the Python boolean coercion. */
 function normalizeBooleanFieldValue(value: string): boolean | string {
-  const lower = value.trim().toLowerCase();
+  const lower = pyStrip(value).toLowerCase();
   if (["true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"].includes(lower)) {
     return true;
   }
   if (["false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"].includes(lower)) {
     return false;
   }
-  return value.trim();
+  return pyStrip(value);
 }
 
 /** Normalize a list-field value (array, JSON array text, or delimited text) into a string array. */
 function normalizeListFieldValue(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(pyString).map((item) => item.trim()).filter(Boolean);
+    return value.map(pyString).map(pyStrip).filter(Boolean);
   }
   if (typeof value !== "string") {
     return value;
   }
-  const text = value.trim();
+  const text = pyStrip(value);
   if (!text) {
     return value;
   }
@@ -130,7 +130,7 @@ function normalizeListFieldValue(value: unknown): unknown {
     try {
       const parsed = JSON.parse(text) as unknown;
       if (Array.isArray(parsed)) {
-        return parsed.map(pyString).map((item) => item.trim()).filter(Boolean);
+        return parsed.map(pyString).map(pyStrip).filter(Boolean);
       }
     } catch {
       // Fall through to separator-based parsing.
@@ -138,7 +138,7 @@ function normalizeListFieldValue(value: unknown): unknown {
   }
   const separator = text.includes(";") ? ";" : text.includes(",") ? "," : undefined;
   if (separator) {
-    const items = text.split(separator).map((item) => item.trim()).filter(Boolean);
+    const items = text.split(separator).map(pyStrip).filter(Boolean);
     if (items.length > 0) {
       return items;
     }
@@ -152,18 +152,18 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
     return normalizePhone(value, default_region);
   }
   if (field === "email" && typeof value === "string") {
-    return value.trim().toLowerCase();
+    return pyStrip(value).toLowerCase();
   }
   if (NAME_FIELDS.has(field) && typeof value === "string") {
-    const text = value.trim();
+    const text = pyStrip(value);
     return text ? normalizeName(text) : value;
   }
   if (ADDRESS_FIELDS.has(field) && typeof value === "string") {
-    const text = value.trim().replace(/\s+/g, " ");
+    const text = pyCollapseSpace(pyStrip(value));
     return text ? smartTitleCase(text) : value;
   }
   if (field === "postal_code" && typeof value === "string") {
-    const cleaned = value.trim().toUpperCase();
+    const cleaned = pyStrip(value).toUpperCase();
     return cleaned.replace(/^([A-Z]\d[A-Z])(\d[A-Z]\d)$/, "$1 $2");
   }
   if (DATE_FIELDS.has(field) && typeof value === "string") {
@@ -182,10 +182,10 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
     return normalizeListFieldValue(value);
   }
   if (SOCIAL_FIELDS.has(field) && typeof value === "string") {
-    return value.trim();
+    return pyStrip(value);
   }
   if (typeof value === "string") {
-    return value.trim();
+    return pyStrip(value);
   }
   return value;
 }
@@ -241,7 +241,7 @@ export class EmailNormalizer {
 
   static normalize(value: unknown): unknown {
     assertValueNormalizerArity("EmailNormalizer.normalize", arguments.length, 1);
-    return typeof value === "string" ? value.trim().toLowerCase() : value;
+    return typeof value === "string" ? pyStrip(value).toLowerCase() : value;
   }
 }
 
@@ -261,7 +261,7 @@ export class NameNormalizer {
     if (typeof value !== "string") {
       return value;
     }
-    const text = value.trim();
+    const text = pyStrip(value);
     return text ? normalizeName(text) : value;
   }
 
@@ -270,7 +270,7 @@ export class NameNormalizer {
     if (typeof value !== "string") {
       throw attributeError(`'${pythonTypeName(value)}' object has no attribute 'strip'`);
     }
-    const { text, nickname } = splitNameNickname(value.trim());
+    const { text, nickname } = splitNameNickname(pyStrip(value));
     return parseNameParts(text, nickname);
   }
 }
@@ -286,7 +286,7 @@ export class AddressNormalizer {
     if (typeof value !== "string") {
       return value;
     }
-    const text = value.trim().replace(/\s+/g, " ");
+    const text = pyCollapseSpace(pyStrip(value));
     return text ? smartTitleCase(text) : value;
   }
 }
@@ -299,7 +299,7 @@ export class StringNormalizer {
 
   static normalize(value: unknown): unknown {
     assertValueNormalizerArity("StringNormalizer.normalize", arguments.length, 1);
-    return typeof value === "string" ? value.trim() : value;
+    return typeof value === "string" ? pyStrip(value) : value;
   }
 }
 

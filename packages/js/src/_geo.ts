@@ -1,6 +1,7 @@
 // Country and state/province tables and their normalizers.
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
+import { pyCollapseSpace, pyStrip } from "./_pycompat.js";
 import { smartTitleCase } from "./_names.js";
 
 const COUNTRY_ALPHA3: Record<string, string> = {
@@ -147,7 +148,7 @@ const COUNTRY_NAMES: Record<string, string> = {
 };
 
 function normalizeCountry(value: string): string {
-  const text = value.trim().replace(/\s+/g, " ");
+  const text = pyCollapseSpace(pyStrip(value));
   if (!text) {
     return value;
   }
@@ -309,7 +310,7 @@ const STATE_NAMES: Record<string, string> = {
 };
 
 function normalizeState(value: string): string {
-  const text = value.trim().replace(/\s+/g, " ");
+  const text = pyCollapseSpace(pyStrip(value));
   if (!text) {
     return value;
   }

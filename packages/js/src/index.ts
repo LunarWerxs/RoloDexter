@@ -6,7 +6,7 @@ import { CANONICAL_FIELD_MEMBERS, CanonicalField, EXACT_MATCH_CONFIDENCE, FieldM
 import type { CanonicalFieldMember, CompileSchemaOptions, DataFrameLike, MapDataFrameOptions, MapPayloadOptions, ProfileOptions } from "./_models.js";
 import { normalizeValue, valueWarnings } from "./_normalizers.js";
 import { extractEmbeddedPhones } from "./_phone.js";
-import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, setOwnProperty, validateConfidenceThreshold, valueError } from "./_pycompat.js";
+import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
 import { MappingProfile, MappingResult, makeMappingMatches } from "./_results.js";
 import type { MappingMatches } from "./_results.js";
@@ -146,7 +146,7 @@ export class MappingSchema {
       const strategy = entry.strategy ?? "schema";
       const confidence = entry.confidence ?? EXACT_MATCH_CONFIDENCE;
       const service = entry.service;
-      if (typeof canonical !== "string" || !canonical.trim()) {
+      if (typeof canonical !== "string" || !pyStrip(canonical)) {
         throw new PatternLoadError(
           `Invalid mapping schema: column ${pyRepr(header)} has no canonical field`,
         );
@@ -312,7 +312,7 @@ export class ContactMapper {
     if (
       PHONE_FIELDS.has(match.canonical) &&
       typeof finalValue === "string" &&
-      finalValue.trim() &&
+      pyStrip(finalValue) &&
       !finalValue.startsWith("+")
     ) {
       warnings.push(
@@ -540,7 +540,7 @@ export class ContactMapper {
         for (const finalValue of iterableColumnValues(mapped)) {
           if (
             typeof finalValue === "string" &&
-            finalValue.trim() &&
+            pyStrip(finalValue) &&
             !finalValue.startsWith("+")
           ) {
             warnings.push(

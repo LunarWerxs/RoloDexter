@@ -4,7 +4,7 @@
 import { findPhoneNumbersInText, getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js/max";
 import type { CountryCode, PhoneNumber as LibPhoneNumber } from "libphonenumber-js/max";
 import { FieldMatch, HEURISTIC_CONFIDENCE, PHONE_FIELDS, fieldMatch, mergeValue } from "./_models.js";
-import { attributeError, lockPythonFrozenFields, pyRepr, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName } from "./_pycompat.js";
+import { attributeError, lockPythonFrozenFields, pyRepr, pyStrip, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName } from "./_pycompat.js";
 import { require } from "./_runtime.js";
 const phoneMetadata = require("libphonenumber-js/metadata.max.json") as {
   country_calling_codes?: Record<string, string[]>;
@@ -440,7 +440,7 @@ function asCountryCode(region: string | null | undefined): CountryCode | undefin
 }
 
 function preprocessPhoneRaw(raw: string): string {
-  let text = raw.trim();
+  let text = pyStrip(raw);
   if (TEL_URI_RE.test(text)) {
     text = text.replace(TEL_URI_RE, "");
     const extMatch = TEL_EXT_RE.exec(text);
@@ -508,7 +508,7 @@ function normalizePhone(value: unknown, defaultRegion: string | null | undefined
   if (typeof value !== "string") {
     return value;
   }
-  const raw = value.trim();
+  const raw = pyStrip(value);
   if (!raw) {
     return value;
   }

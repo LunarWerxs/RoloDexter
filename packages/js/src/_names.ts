@@ -1,6 +1,7 @@
 // Personal-name casing, particles, titles and part extraction.
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
+import { pyCollapseSpace, pySplitSpace, pyStrip } from "./_pycompat.js";
 
 
 function titleWord(word: string): string {
@@ -18,8 +19,7 @@ function titleWord(word: string): string {
 }
 
 function smartTitleCase(value: string): string {
-  return value
-    .split(/\s+/)
+  return pySplitSpace(value)
     .map((word) => {
       if (word !== word.toUpperCase() && word !== word.toLowerCase() && /[A-Z]/.test(word.slice(1))) {
         return word;
@@ -170,7 +170,7 @@ function nameWord(word: string, index = 0): string {
 }
 
 function smartNameCase(value: string): string {
-  return value.split(/\s+/).map((word, index) => nameWord(word, index)).join(" ");
+  return pySplitSpace(value).map((word, index) => nameWord(word, index)).join(" ");
 }
 
 function splitNameNickname(value: string): { text: string; nickname: string } {
@@ -178,17 +178,15 @@ function splitNameNickname(value: string): { text: string; nickname: string } {
   const text = value
     .replace(/(?:"([^"]+)"|\(([^)]+)\))/g, (_match, quoted: string | undefined, parenthesized: string | undefined) => {
       if (!nickname) {
-        nickname = (quoted ?? parenthesized ?? "").trim();
+        nickname = pyStrip(quoted ?? parenthesized ?? "");
       }
       return " ";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-  return { text, nickname };
+    });
+  return { text: pyStrip(pyCollapseSpace(text)), nickname };
 }
 
 function normalizeName(value: string): string {
-  const { text, nickname } = splitNameNickname(value.trim());
+  const { text, nickname } = splitNameNickname(pyStrip(value));
   let normalized = text ? smartNameCase(text) : "";
   if (/^the\s+hon\.\s+/i.test(text)) {
     normalized = normalized.replace(/^The\s+Hon\.\s+/, "the Hon. ");
@@ -200,7 +198,7 @@ function normalizeName(value: string): string {
     const parsed = parseNameParts(text, "");
     const components = [parsed.title, parsed.first, parsed.middle, parsed.last, parsed.suffix]
       .filter(Boolean)
-      .map((part, index) => part.split(/\s+/).map((word, wordIndex) => nameWord(word, index + wordIndex)).join(" "));
+      .map((part, index) => pySplitSpace(part).map((word, wordIndex) => nameWord(word, index + wordIndex)).join(" "));
     normalized = components.join(" ");
   }
   if (!nickname) {
@@ -261,8 +259,8 @@ function consumeNameSuffix(parts: string[]): string {
 function parseNameParts(text: string, nickname: string): Record<string, string> {
   const commaIndex = text.indexOf(",");
   if (commaIndex !== -1) {
-    let last = text.slice(0, commaIndex).trim();
-    const parts = text.slice(commaIndex + 1).trim().split(/\s+/).filter(Boolean).map((part) => part.replace(/,$/, ""));
+    let last = pyStrip(text.slice(0, commaIndex));
+    const parts = pySplitSpace(pyStrip(text.slice(commaIndex + 1))).filter(Boolean).map((part) => part.replace(/,$/, ""));
 
     if (parts.length > 0 && parts.every((part) => NAME_SUFFIXES.has(part.toLowerCase()))) {
       const parsed = parseNameParts(last, nickname);
@@ -270,7 +268,7 @@ function parseNameParts(text: string, nickname: string): Record<string, string> 
       return parsed;
     }
 
-    const lastParts = last.split(/\s+/).filter(Boolean);
+    const lastParts = pySplitSpace(last).filter(Boolean);
     const lastSuffix = consumeNameSuffix(lastParts);
     last = lastParts.join(" ");
     const title = consumeNameTitles(parts);
@@ -285,7 +283,7 @@ function parseNameParts(text: string, nickname: string): Record<string, string> 
     };
   }
 
-  const parts = text.split(/\s+/).filter(Boolean);
+  const parts = pySplitSpace(text).filter(Boolean);
   const title = consumeNameTitles(parts);
   const suffix = consumeNameSuffix(parts);
   let first = parts[0] ?? "";
