@@ -545,13 +545,22 @@ function extractEmbeddedPhones(
   let foundTotal = 0;
   let warnedPayloadLimit = false;
 
+  // The payload cap is reached from two directions - a field that overflows it,
+  // or a later candidate that finds it already spent - so both sites go through
+  // one emitter that reports it exactly once.
+  const warnPayloadLimit = (): void => {
+    if (warnedPayloadLimit) {
+      return;
+    }
+    warnings.push(
+      `embedded phone extraction stopped after ${EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches for this payload`,
+    );
+    warnedPayloadLimit = true;
+  };
+
   for (const [key, text] of candidates) {
     if (foundTotal >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD) {
-      if (!warnedPayloadLimit) {
-        warnings.push(
-          `embedded phone extraction stopped after ${EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches for this payload`,
-        );
-      }
+      warnPayloadLimit();
       break;
     }
 
@@ -579,11 +588,8 @@ function extractEmbeddedPhones(
           `${pyRepr(key)}: embedded phone extraction stopped after ${EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD} matches for this field`,
         );
       }
-      if (foundTotal >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD && !warnedPayloadLimit) {
-        warnings.push(
-          `embedded phone extraction stopped after ${EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches for this payload`,
-        );
-        warnedPayloadLimit = true;
+      if (foundTotal >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD) {
+        warnPayloadLimit();
       }
     }
   }

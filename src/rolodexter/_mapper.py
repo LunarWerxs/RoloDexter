@@ -454,18 +454,30 @@ class ContactMapper:
 
         found_total = 0
         warned_payload_limit = False
+
+        def warn_payload_limit() -> None:
+            """Report the payload cap once, whichever site reaches it first.
+
+            The cap is reached from two directions - a field that overflows it,
+            or a later candidate that finds it already spent - so both sites go
+            through one emitter.
+            """
+            nonlocal warned_payload_limit
+            if warned_payload_limit:
+                return
+            warnings.append(
+                MappingWarning(
+                    "embedded phone extraction stopped after "
+                    f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
+                    "for this payload",
+                    WarningCategory.EMBEDDED_PHONE_LIMIT,
+                )
+            )
+            warned_payload_limit = True
+
         for key, text in candidates():
             if found_total >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD:
-                if not warned_payload_limit:
-                    warnings.append(
-                        MappingWarning(
-                            "embedded phone extraction stopped after "
-                            f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
-                            "for this payload",
-                            WarningCategory.EMBEDDED_PHONE_LIMIT,
-                        )
-                    )
-                    warned_payload_limit = True
+                warn_payload_limit()
                 break
 
             scan_text = text
@@ -517,19 +529,8 @@ class ContactMapper:
                             WarningCategory.EMBEDDED_PHONE_LIMIT,
                         )
                     )
-                if (
-                    found_total >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD
-                    and not warned_payload_limit
-                ):
-                    warnings.append(
-                        MappingWarning(
-                            "embedded phone extraction stopped after "
-                            f"{EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD} matches "
-                            "for this payload",
-                            WarningCategory.EMBEDDED_PHONE_LIMIT,
-                        )
-                    )
-                    warned_payload_limit = True
+                if found_total >= EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD:
+                    warn_payload_limit()
 
     @staticmethod
     def _flatten(
