@@ -1178,6 +1178,77 @@ test("embedded phone extraction is bounded and warns", () => {
   assert.match(result.warnings[0] ?? "", /for this field/);
 });
 
+// The 20-per-payload cap is reached from two directions and reported from two
+// different places in the scan loop, so each route needs its own case. Python
+// covered only the first of them, which is what made the second look dead.
+const CAP_NUMBERS = [
+  "+12132530000", "+12133334444", "+12135550000", "+12137363100", "+12132002000",
+  "+16502530000", "+16503334444", "+16505550000", "+16507363100", "+16502002000",
+  "+12122530000", "+12123334444", "+12125550000", "+12127363100", "+12122002000",
+  "+13232530000", "+13233334444", "+13235550000", "+13237363100", "+13232002000",
+  "+14082530000", "+14083334444",
+];
+
+function capPayload(counts: number[]): Record<string, string> {
+  let cursor = 0;
+  const payload: Record<string, string> = {};
+  counts.forEach((count, index) => {
+    const numbers = CAP_NUMBERS.slice(cursor, cursor + count);
+    cursor += count;
+    payload[`blob_${index}`] = `reach ${numbers.join(" or ")} anytime`;
+  });
+  return payload;
+}
+
+function capResult(counts: number[]) {
+  const result = new ContactMapper().map_payload(capPayload(counts), {
+    extract_embedded_phones: true,
+  });
+  return {
+    embedded: result.field_matches.filter((match) => match.strategy === "embedded_phone").length,
+    payloadWarnings: result.warnings.filter((warning) => /for this payload/.test(warning)),
+    fieldWarnings: result.warnings.filter((warning) => /for this field/.test(warning)),
+  };
+}
+
+test("embedded phone payload cap warns when a later field finds it spent", () => {
+  // Four fields land exactly on 20 without any of them overflowing, so nothing
+  // has warned yet when the fifth candidate is reached.
+  const result = capResult([5, 5, 5, 5, 1]);
+
+  assert.equal(result.embedded, 20);
+  assert.equal(result.payloadWarnings.length, 1);
+  assert.deepEqual(result.fieldWarnings, []);
+});
+
+test("embedded phone payload cap warns when an overflowing field trips it", () => {
+  // A sixth number in the fourth field trips the per-field cap and the payload
+  // cap in the same iteration.
+  const result = capResult([5, 5, 5, 6]);
+
+  assert.equal(result.embedded, 20);
+  assert.equal(result.payloadWarnings.length, 1);
+  assert.equal(result.fieldWarnings.length, 1);
+});
+
+test("embedded phone payload cap warns without a field warning on a partial field", () => {
+  // The last field is allowed only four of its six numbers, so it overflows the
+  // payload cap without ever reaching the per-field cap.
+  const result = capResult([5, 5, 5, 1, 6]);
+
+  assert.equal(result.embedded, 20);
+  assert.equal(result.payloadWarnings.length, 1);
+  assert.deepEqual(result.fieldWarnings, []);
+});
+
+test("embedded phone payload cap is reported only once", () => {
+  // An overflowing field warns, and then two further candidates each find the
+  // cap already spent. One warning, not three.
+  const result = capResult([5, 5, 5, 6, 1, 1]);
+
+  assert.equal(result.payloadWarnings.length, 1);
+});
+
 test("compile_schema returns a reusable header plan", () => {
   const schema = new ContactMapper().compile_schema(["First Name", "Mobile Phone", "Whatever"]);
 

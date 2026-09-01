@@ -94,6 +94,47 @@ CASES: dict[str, Any] = {
             "payload": {"notes": "Call Ada at (202) 555-0143 or +1 202 555 0199"},
             "options": {"extract_embedded_phones": True},
         },
+        # The 20-per-payload cap is reached from two directions, and each one
+        # reports it from a different place in the scan loop.  Both must warn
+        # exactly once, and both runtimes must agree on which warnings appear.
+        # embedded_cap_exact: four fields land on the cap without overflowing,
+        # so a fifth candidate is what discovers it is spent.
+        {
+            "id": "embedded_cap_exact",
+            "payload": {
+                "blob_0": "reach +12132530000 or +12133334444 or +12135550000 or +12137363100 or +12132002000 anytime",
+                "blob_1": "reach +16502530000 or +16503334444 or +16505550000 or +16507363100 or +16502002000 anytime",
+                "blob_2": "reach +12122530000 or +12123334444 or +12125550000 or +12127363100 or +12122002000 anytime",
+                "blob_3": "reach +13232530000 or +13233334444 or +13235550000 or +13237363100 or +13232002000 anytime",
+                "blob_4": "reach +14082530000 anytime",
+            },
+            "options": {"extract_embedded_phones": True},
+        },
+        # embedded_cap_overflow: a sixth number in the fourth field trips the
+        # per-field cap and the payload cap together, so both warnings appear.
+        {
+            "id": "embedded_cap_overflow",
+            "payload": {
+                "blob_0": "reach +12132530000 or +12133334444 or +12135550000 or +12137363100 or +12132002000 anytime",
+                "blob_1": "reach +16502530000 or +16503334444 or +16505550000 or +16507363100 or +16502002000 anytime",
+                "blob_2": "reach +12122530000 or +12123334444 or +12125550000 or +12127363100 or +12122002000 anytime",
+                "blob_3": "reach +13232530000 or +13233334444 or +13235550000 or +13237363100 or +13232002000 or +14082530000 anytime",
+            },
+            "options": {"extract_embedded_phones": True},
+        },
+        # embedded_cap_partial: the last field is allowed only four of its six
+        # numbers, so the payload cap warns without the per-field one.
+        {
+            "id": "embedded_cap_partial",
+            "payload": {
+                "blob_0": "reach +12132530000 or +12133334444 or +12135550000 or +12137363100 or +12132002000 anytime",
+                "blob_1": "reach +16502530000 or +16503334444 or +16505550000 or +16507363100 or +16502002000 anytime",
+                "blob_2": "reach +12122530000 or +12123334444 or +12125550000 or +12127363100 or +12122002000 anytime",
+                "blob_3": "reach +13232530000 anytime",
+                "blob_4": "reach +13233334444 or +13235550000 or +13237363100 or +13232002000 or +14082530000 or +14083334444 anytime",
+            },
+            "options": {"extract_embedded_phones": True},
+        },
         {"id": "duplicate_names", "payload": {"fname": "Ada", "first": "Augusta"}},
         {"id": "list_collision", "payload": {"tags": "alpha,beta", "labels": ["beta", "gamma"]}},
         {"id": "list_duplicate_incoming", "payload": {"tags": [], "tag": ["a", "a"]}, "mapper_options": {"overrides": {"tag": "tags"}}},

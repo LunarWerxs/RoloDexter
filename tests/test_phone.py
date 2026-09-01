@@ -127,6 +127,50 @@ class TestPhoneNormalizerE164:
 #  v2.6.0 — EMBEDDED PHONE EXTRACTION
 # ═══════════════════════════════════════════════════════════════
 
+# The 20-per-payload cap is reached from two directions and reported from two
+# different places in the scan loop, so each route needs its own case.  These
+# mirror the JavaScript suite's cases one-for-one.
+_CAP_NUMBERS = [
+    "+12132530000",
+    "+12133334444",
+    "+12135550000",
+    "+12137363100",
+    "+12132002000",
+    "+16502530000",
+    "+16503334444",
+    "+16505550000",
+    "+16507363100",
+    "+16502002000",
+    "+12122530000",
+    "+12123334444",
+    "+12125550000",
+    "+12127363100",
+    "+12122002000",
+    "+13232530000",
+    "+13233334444",
+    "+13235550000",
+    "+13237363100",
+    "+13232002000",
+    "+14082530000",
+    "+14083334444",
+]
+
+
+def _cap_result(counts: list[int]) -> tuple[int, list[str], list[str]]:
+    """Map a payload whose fields hold *counts* embedded numbers each."""
+    cursor = 0
+    payload: dict[str, str] = {}
+    for index, count in enumerate(counts):
+        numbers = _CAP_NUMBERS[cursor : cursor + count]
+        cursor += count
+        payload[f"blob_{index}"] = "reach " + " or ".join(numbers) + " anytime"
+    result = ContactMapper().map_payload(payload, extract_embedded_phones=True)
+    return (
+        sum(1 for m in result.field_matches if m.strategy == "embedded_phone"),
+        [str(w) for w in result.warnings if "for this payload" in str(w)],
+        [str(w) for w in result.warnings if "for this field" in str(w)],
+    )
+
 
 class TestEmbeddedPhoneExtraction:
     """Test extract_embedded_phones flag on map_payload."""
@@ -227,6 +271,40 @@ class TestEmbeddedPhoneExtraction:
         ]
         assert len(embedded_matches) == 20
         assert any("for this payload" in warning for warning in result.warnings)
+
+    def test_embedded_phone_payload_limit_from_a_later_field(self) -> None:
+        # Four fields land exactly on 20 without any of them overflowing, so
+        # nothing has warned yet when the fifth candidate is reached.
+        embedded, payload_warnings, field_warnings = _cap_result([5, 5, 5, 5, 1])
+
+        assert embedded == 20
+        assert len(payload_warnings) == 1
+        assert field_warnings == []
+
+    def test_embedded_phone_payload_limit_from_an_overflowing_field(self) -> None:
+        # A sixth number in the fourth field trips the per-field cap and the
+        # payload cap in the same iteration.
+        embedded, payload_warnings, field_warnings = _cap_result([5, 5, 5, 6])
+
+        assert embedded == 20
+        assert len(payload_warnings) == 1
+        assert len(field_warnings) == 1
+
+    def test_embedded_phone_payload_limit_without_a_field_warning(self) -> None:
+        # The last field is allowed only four of its six numbers, so it
+        # overflows the payload cap without ever reaching the per-field cap.
+        embedded, payload_warnings, field_warnings = _cap_result([5, 5, 5, 1, 6])
+
+        assert embedded == 20
+        assert len(payload_warnings) == 1
+        assert field_warnings == []
+
+    def test_embedded_phone_payload_limit_warns_only_once(self) -> None:
+        # An overflowing field warns, and then two further candidates each find
+        # the cap already spent.  One warning, not three.
+        _, payload_warnings, _ = _cap_result([5, 5, 5, 6, 1, 1])
+
+        assert len(payload_warnings) == 1
 
 
 # ═══════════════════════════════════════════════════════════════
