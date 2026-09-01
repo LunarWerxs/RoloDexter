@@ -132,6 +132,9 @@ exclude = ["build"]
 [tool.deptry.per_rule_ignores]
 DEP002 = ["pytest-cov", "ruff", "mypy", "deptry", "vulture", "pylint", "numpy"]
 DEP003 = ["rolodexter"]
+# parity_sweep_values is a sibling of scripts/parity_sweep.py, imported off
+# sys.path[0] rather than installed, so deptry reads it as a third party.
+DEP001 = ["parity_sweep_values"]
 
 # ── Mypy ──────────────────────────────────────────────────────────────
 
