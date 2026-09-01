@@ -2,7 +2,7 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { FieldMatch, PHONE_FIELDS, isMatched } from "./_models.js";
-import { lockPythonFrozenFields, pyRepr, pyString, pythonLiteral } from "./_pycompat.js";
+import { lockPythonFrozenFields, pyRepr, pyString, pythonLiteral, setOwnProperty } from "./_pycompat.js";
 
 export class MappingProfile {
   readonly rows_seen: number;
@@ -283,7 +283,7 @@ function makeMappingMatches(
       : Object.entries(source as Record<string, FieldMatch>);
 
   for (const [header, match] of entries) {
-    out[header] = match;
+    setOwnProperty(out, header, match);
   }
 
   Object.defineProperties(out, {
@@ -294,7 +294,7 @@ function makeMappingMatches(
     },
     set: {
       value(header: string, match: FieldMatch): MappingMatches {
-        out[header] = match;
+        setOwnProperty(out, header, match);
         return out;
       },
     },

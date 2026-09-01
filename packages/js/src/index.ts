@@ -6,11 +6,11 @@ import { CANONICAL_FIELD_MEMBERS, CanonicalField, EXACT_MATCH_CONFIDENCE, FieldM
 import type { CanonicalFieldMember, CompileSchemaOptions, DataFrameLike, MapDataFrameOptions, MapPayloadOptions, ProfileOptions } from "./_models.js";
 import { normalizeValue, valueWarnings } from "./_normalizers.js";
 import { extractEmbeddedPhones } from "./_phone.js";
-import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, validateConfidenceThreshold, valueError } from "./_pycompat.js";
+import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, setOwnProperty, validateConfidenceThreshold, valueError } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
 import { MappingProfile, MappingResult, makeMappingMatches } from "./_results.js";
 import type { MappingMatches } from "./_results.js";
-import { ExactMatchStrategy, FuzzyMatchStrategy, HeuristicMatchStrategy, MatchStrategy, NormalizedMatchStrategy, isHeaderOnlyStrategy, setOwnProperty } from "./_strategies.js";
+import { ExactMatchStrategy, FuzzyMatchStrategy, HeuristicMatchStrategy, MatchStrategy, NormalizedMatchStrategy, isHeaderOnlyStrategy } from "./_strategies.js";
 import type { ContactMapperOptions } from "./_strategies.js";
 
 export { SUPPORTED_LANGUAGES, discoverCachedLanguages, discover_cached, getAllCacheDirs, getCacheDir, getWritableCacheDir, get_all_cache_dirs, get_cache_dir, get_writable_cache_dir, loadCachedLanguage, load_cached, normalizeLanguageCode } from "./_i18n_cache.js";
@@ -57,7 +57,7 @@ export class MappingSchema {
     const out: Record<string, string> = {};
     for (const [header, match] of this.matches.entries()) {
       if (isMatched(match)) {
-        out[header] = match.canonical;
+        setOwnProperty(out, header, match.canonical);
       }
     }
     return out;
@@ -93,12 +93,12 @@ export class MappingSchema {
   to_dict(): Record<string, unknown> {
     const columns: Record<string, unknown> = {};
     for (const [header, match] of this.matches.entries()) {
-      columns[header] = {
+      setOwnProperty(columns, header, {
         canonical: match.canonical,
         confidence: match.confidence,
         strategy: match.strategy,
         service: match.service ?? null,
-      };
+      });
     }
     return {
       schema_version: MappingSchema.SCHEMA_VERSION,
@@ -156,13 +156,13 @@ export class MappingSchema {
           `Invalid mapping schema: column ${pyRepr(header)} has a malformed strategy or confidence`,
         );
       }
-      matches[header] = fieldMatch(
+      setOwnProperty(matches, header, fieldMatch(
         header,
         canonical,
         confidence,
         strategy,
         typeof service === "string" ? service : null,
-      );
+      ));
     }
 
     let region = options.default_region;

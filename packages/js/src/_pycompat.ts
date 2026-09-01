@@ -230,7 +230,30 @@ function pythonEquals(left: unknown, right: unknown): boolean {
 }
 
 
+// A key literally named "__proto__" hits the prototype setter on a plain
+// object: `target[key] = value` drops the value and replaces the object's
+// prototype with caller-supplied data, so later lookups on it can return
+// injected values. Python's dict has no such key, so every place that copies a
+// user-supplied header, column or canonical name into a plain object is a
+// place where one language silently loses a column and the other keeps it.
+// Defining it as an own property preserves the data, matches Python, and
+// leaves the prototype alone - while keeping a normal object literal so
+// deepStrictEqual and spread still behave.
+function setOwnProperty(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === "__proto__") {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    return;
+  }
+  target[key] = value;
+}
+
+
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, validateConfidenceThreshold, valueError };
+export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, setOwnProperty, validateConfidenceThreshold, valueError };

@@ -1,7 +1,7 @@
 // Errors, the canonical field enum, field sets, and the match record.
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
-import { lockPythonFrozenFields, pyRepr, pythonEquals, pythonIncludes, pythonLiteral } from "./_pycompat.js";
+import { lockPythonFrozenFields, pyRepr, pythonEquals, pythonIncludes, pythonLiteral, setOwnProperty } from "./_pycompat.js";
 
 export const EXACT_MATCH_CONFIDENCE = 1.0;
 export const NORMALIZED_MATCH_CONFIDENCE = 0.95;
@@ -442,25 +442,31 @@ function normalizeAlias(alias: string): string {
 }
 
 function mergeValue(target: Record<string, unknown>, key: string, value: unknown): void {
+  // Own-property semantics throughout: `"__proto__" in target` is true for
+  // every plain object, so a plain `in` test would take the merge branch and
+  // read Object.prototype as the existing value. Python's dict has no such key.
+  const present = Object.prototype.hasOwnProperty.call(target, key);
+  const current = present ? target[key] : undefined;
+
   if (LIST_FIELDS.has(key)) {
-    if (!(key in target)) {
-      target[key] = Array.isArray(value) ? [...value] : value;
+    if (!present) {
+      setOwnProperty(target, key, Array.isArray(value) ? [...value] : value);
       return;
     }
     const incoming = Array.isArray(value) ? value : [value];
-    const existing = Array.isArray(target[key]) ? target[key] : [target[key]];
+    const existing = Array.isArray(current) ? current : [current];
     const merged = [...existing];
     for (const item of incoming) {
       if (!pythonIncludes(merged, item)) {
         merged.push(item);
       }
     }
-    target[key] = merged;
+    setOwnProperty(target, key, merged);
     return;
   }
 
-  if (!(key in target)) {
-    target[key] = value;
+  if (!present) {
+    setOwnProperty(target, key, value);
     return;
   }
   // An empty cell carries no information, so it must not turn a good value
@@ -472,9 +478,9 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
   if (isBlank(value)) {
     return;
   }
-  const existing = target[key];
+  const existing = current;
   if (isBlank(existing)) {
-    target[key] = value;
+    setOwnProperty(target, key, value);
     return;
   }
   if (Array.isArray(existing)) {
@@ -482,7 +488,7 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
       existing.push(value);
     }
   } else if (!pythonEquals(existing, value)) {
-    target[key] = [existing, value];
+    setOwnProperty(target, key, [existing, value]);
   }
 }
 

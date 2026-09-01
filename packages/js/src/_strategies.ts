@@ -40,25 +40,6 @@ function underscore(value: string): string {
 // A header like "primary_phone_id" names a foreign key, so the _id-suffix
 // stripping below must not route it to `phone` -- that stores an internal ID
 // as the contact's number at 0.95 confidence, where no threshold catches it.
-// A payload key literally named "__proto__" hits the prototype setter on a
-// plain object: the value is silently dropped (Python's dict keeps it) and the
-// returned object's prototype is replaced with caller-supplied data, so later
-// lookups on it can return injected values. Defining it as an own property
-// preserves the data, matches Python, and leaves the prototype alone -- while
-// keeping a normal object literal so deepStrictEqual and spread still behave.
-function setOwnProperty(target: Record<string, unknown>, key: string, value: unknown): void {
-  if (key === "__proto__") {
-    Object.defineProperty(target, key, {
-      value,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-    return;
-  }
-  target[key] = value;
-}
-
 function valueBearingFields(): Set<string> {
   return new Set([...PHONE_FIELDS, ...SOCIAL_FIELDS, "email"]);
 }
@@ -564,4 +545,4 @@ export class HeuristicMatchStrategy extends MatchStrategy {
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { isHeaderOnlyStrategy, setOwnProperty };
+export { isHeaderOnlyStrategy };

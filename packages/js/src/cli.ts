@@ -10,6 +10,7 @@ import { inspect } from "node:util";
 
 import { stringify as stringifyCsv } from "csv-stringify/sync";
 
+import { setOwnProperty } from "./_pycompat.js";
 import {
   CanonicalField,
   ContactMapper,
@@ -435,7 +436,7 @@ function parseOverrides(raw: string[] | undefined): Record<string, string> | und
     if (!valid.has(canonical)) {
       throw new Error(`--override ${pyRepr(entry)}: ${pyRepr(canonical)} is not a canonical field (run 'rolodexter fields' to list them)`);
     }
-    overrides[header] = canonical;
+    setOwnProperty(overrides, header, canonical);
   }
   return overrides;
 }
@@ -1087,7 +1088,7 @@ async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerato
     }
     const data: Record<string, unknown> = {};
     for (const [index, header] of headers.entries()) {
-      data[header] = index < record.length ? record[index] : "";
+      setOwnProperty(data, header, index < record.length ? record[index] : "");
     }
     yield { kind: "row", rowNumber: lineNumber, data };
   }

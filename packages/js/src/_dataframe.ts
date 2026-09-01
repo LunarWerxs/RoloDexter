@@ -1,16 +1,22 @@
 // Reading and writing the dataframe-like objects map_dataframe accepts.
 // Extracted verbatim from index.ts, which re-exports every public name here.
-
 import type { DataFrameLike } from "./_models.js";
+import { setOwnProperty } from "./_pycompat.js";
 
 function flatten(payload: Record<string, unknown>, depth: number, prefix = "", current = 1): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
     const fullKey = prefix ? `${prefix}${key}` : key;
     if (value && typeof value === "object" && !Array.isArray(value) && current < depth) {
-      Object.assign(result, flatten(value as Record<string, unknown>, depth, `${fullKey}.`, current + 1));
+      // Object.assign copies through [[Set]], which would treat a nested key
+      // named "__proto__" as the prototype setter just as a plain assignment
+      // does. Copy key by key instead.
+      const nested = flatten(value as Record<string, unknown>, depth, `${fullKey}.`, current + 1);
+      for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+        setOwnProperty(result, nestedKey, nestedValue);
+      }
     } else {
-      result[fullKey] = value;
+      setOwnProperty(result, fullKey, value);
     }
   }
   return result;
@@ -56,7 +62,7 @@ function setDataframeColumn(frame: DataFrameLike, column: string, values: unknow
     frame.set(column, values);
     return;
   }
-  frame[column] = values;
+  setOwnProperty(frame as Record<string, unknown>, column, values);
 }
 
 function iterableColumnValues(values: unknown): Iterable<unknown> {
