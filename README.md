@@ -485,7 +485,7 @@ rolodexter/
 ├── packages/js/package.json    # JavaScript/NPM package metadata
 ├── packages/js/src/            # TypeScript package source
 ├── packages/js/test/           # JavaScript package tests
-└── scripts/                    # Cross-language release/parity probes
+└── scripts/                    # Cross-language release/parity probes and sweep
 ```
 
 ## Python Package Architecture
