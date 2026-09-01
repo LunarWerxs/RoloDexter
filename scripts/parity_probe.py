@@ -16,6 +16,13 @@ import rolodexter as r  # noqa: E402
 import rolodexter.i18n as i18n  # noqa: E402
 
 
+# Built with chr() rather than pasted: a source file carrying a real NUL,
+# BOM or C1 control is one no reviewer can see, and mangling them in transit
+# is the class of bug these very cases exist to catch.
+_BOM = chr(0xFEFF)
+_FILE_SEPARATOR = chr(0x1C)
+_NEL = chr(0x85)
+
 CASES: dict[str, Any] = {
     "normalize": [
         {"id": "email_spaces", "field": "email", "value": " A@EXAMPLE.COM "},
@@ -37,6 +44,15 @@ CASES: dict[str, Any] = {
         {"id": "revenue_bad", "field": "revenue", "value": "12 bucks"},
         {"id": "metadata_object", "field": "metadata", "value": {"a": 1}},
         {"id": "unknown_string", "field": "unknown", "value": " X "},
+        # Python's str.strip() and JavaScript's trim() disagree on what
+        # whitespace is: trim() strips U+FEFF and Python does not, Python
+        # strips U+001C-001F and U+0085 and trim() does not. A UTF-8 CSV
+        # puts a byte-order mark on its first field, so this reached data.
+        {"id": "ws_bom_alone", "field": "unknown", "value": _BOM},
+        {"id": "ws_bom_email", "field": "email", "value": _BOM},
+        {"id": "ws_bom_wrapped", "field": "notes", "value": f"{_BOM}hi{_BOM}"},
+        {"id": "ws_file_separator", "field": "unknown", "value": f"{_FILE_SEPARATOR}hi{_NEL}"},
+        {"id": "ws_nel_name", "field": "first_name", "value": f"ada{_NEL}lovelace"},
     ],
     "payloads": [
         {"id": "basic", "payload": {"fname": "Ada", "surname": "Lovelace", "mobile": "(202) 555-0143"}},
@@ -71,6 +87,12 @@ CASES: dict[str, Any] = {
         {"id": "state_province", "payload": {"state": "Ontario"}},
         {"id": "state_foreign", "payload": {"state": "Bavaria"}},
         {"id": "email_shape_warning", "payload": {"email": "see notes"}},
+        # A warning quotes the offending value with Python's repr, which
+        # escapes every non-printable character. JavaScript printed the raw
+        # one, so the two packages disagreed on the text of a message.
+        {"id": "repr_bom_value", "payload": {"email": _BOM}},
+        {"id": "repr_control_value", "payload": {"email": f"a{_FILE_SEPARATOR}b@x"}},
+        {"id": "ws_bom_header", "payload": {f"{_BOM}fname": "Ada"}},
         # Rare name particles: these diverged before 2.11.0.
         {"id": "particle_dos", "payload": {"full_name": "maria dos santos"}},
         {"id": "particle_den", "payload": {"full_name": "anna van den heuvel"}},
@@ -720,6 +742,12 @@ def js_results() -> dict[str, Any]:
         cwd=ROOT,
         input=json.dumps(CASES),
         text=True,
+        # Not the platform default: on Windows that is cp1252, so the JS side's
+        # UTF-8 output came back as mojibake and the probe reported a mismatch
+        # that was not there. Linux CI defaults to UTF-8, which is why this only
+        # ever went wrong locally - and the worse shape of the same bug is a
+        # real mismatch it could have hidden.
+        encoding="utf-8",
         capture_output=True,
         check=False,
         env=env,

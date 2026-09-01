@@ -17,7 +17,12 @@ JS_I18N = ["node", str(ROOT / "packages/js/dist/src/i18n.js")]
 
 
 def run(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> dict[str, Any]:
-    proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+    # encoding is explicit for the same reason as in parity_probe.py: the
+    # platform default is cp1252 on Windows, which mangles any non-ASCII output
+    # the CLI prints.
+    proc = subprocess.run(
+        cmd, cwd=cwd, env=env, text=True, encoding="utf-8", capture_output=True, check=False
+    )
     return {"code": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
 

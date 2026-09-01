@@ -449,9 +449,12 @@ def classify(section: str, item: dict[str, Any]) -> str:
         return PHONE_LIBS
     if section == "schemas":
         return FUZZY
-    if chr(0xFEFF) in json.dumps(item, ensure_ascii=False):
-        return BOM
     if section == "normalize":
+        # The whitespace test belongs to this branch only. Tested first, it
+        # claimed every payload that merely CARRIED a byte-order mark - five
+        # cases whose real disagreement was which field the header resolved to.
+        if chr(0xFEFF) in json.dumps(item, ensure_ascii=False):
+            return BOM
         if item["field"] in PHONE_FIELDS:
             return PHONE_LIBS
         if item["field"] in NAME_FIELDS:
