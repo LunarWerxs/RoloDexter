@@ -78,6 +78,14 @@ CASES: dict[str, Any] = {
         {"id": "particle_op_den", "payload": {"full_name": "sven op den kamp"}},
         # A key literally named __proto__ must survive as data in both runtimes.
         {"id": "proto_key_is_data", "payload": {"__proto__": "x", "fname": "Ada"}},
+        # ... and it must survive as a CANONICAL field name too, not just as a
+        # payload key: the merge step writes canonical names into a plain
+        # object, where "__proto__" is the prototype setter rather than a key.
+        {
+            "id": "proto_key_as_canonical",
+            "payload": {"weird": "v"},
+            "mapper_options": {"overrides": {"weird": "__proto__"}},
+        },
         # An empty duplicate column must not turn a good value into a list.
         {"id": "merge_blank_second", "payload": {"E-Mail": "bob@y.co.uk", "E-Mail__2": ""}},
         {"id": "merge_blank_first", "payload": {"E-Mail": "", "E-Mail__2": "bob@y.co.uk"}},
@@ -145,6 +153,16 @@ CASES: dict[str, Any] = {
         {"id": "schema_threshold", "headers": ["Compny"], "mapper_options": {"confidence_threshold": 0.99}},
         {"id": "schema_strict", "headers": ["Compny"], "mapper_options": {"confidence_threshold": 0.99, "strict": True}},
         {"id": "schema_nonstring_headers", "headers": [1, True, None, ["x"]]},
+        # A header literally named __proto__ must reach the plan, the lockfile
+        # and column_map. JavaScript built all three with plain assignment, so
+        # the column vanished there and stayed here - and the mapping lockfile
+        # exists precisely to make routing reproducible.
+        {"id": "schema_proto_header", "headers": ["__proto__", "fname"]},
+        {
+            "id": "schema_proto_header_matched",
+            "headers": ["__proto__", "fname"],
+            "mapper_options": {"overrides": {"__proto__": "email"}},
+        },
     ],
     "phones": [
         {"id": "parse_us", "fn": "parse", "value": "(202) 555-0143", "default_region": "US"},
@@ -201,6 +219,23 @@ CASES: dict[str, Any] = {
             "kind": "schema_helpers",
             "headers": ["fname", "mobile", "Mystery"],
             "row": {"fname": "Ada", "mobile": "(202) 555-0143", "Mystery": "???"},
+        },
+        # A header literally named __proto__ must reach column_map, the
+        # unmatched list, the lockfile and the lockfile's round trip.  In
+        # JavaScript each of those was built with plain assignment, where that
+        # key is the prototype setter, so the column vanished.
+        {
+            "id": "schema_helpers_proto_unmatched",
+            "kind": "schema_helpers",
+            "headers": ["__proto__", "fname"],
+            "row": {"__proto__": "kept", "fname": "Ada"},
+        },
+        {
+            "id": "schema_helpers_proto_matched",
+            "kind": "schema_helpers",
+            "headers": ["__proto__", "fname"],
+            "row": {"__proto__": "ada@example.com", "fname": "Ada"},
+            "mapper_options": {"overrides": {"__proto__": "email"}},
         },
         {
             "id": "registry_helpers",
@@ -396,6 +431,13 @@ def python_results() -> dict[str, Any]:
                     "apply_positional_options": capture_value(lambda: schema.apply(item["row"], 2)),  # type: ignore[call-arg]
                     "apply_unknown_kw": capture_value(lambda: schema.apply(item["row"], bogus=True)),  # type: ignore[call-arg]
                     "apply_extra_positional": capture_value(lambda: schema.apply(item["row"], {}, "extra")),  # type: ignore[call-arg]
+                    # The lockfile is the reproducibility contract, so it and
+                    # its round trip belong in the probe, not only in each
+                    # language's own suite.
+                    "to_dict": simplify(schema.to_dict()),
+                    "from_dict_matches": simplify(
+                        r.MappingSchema.from_dict(schema.to_dict(), r.ContactMapper()).matches
+                    ),
                 }
         elif item["kind"] == "registry_helpers":
             def fn(item: dict[str, Any] = item) -> dict[str, Any]:

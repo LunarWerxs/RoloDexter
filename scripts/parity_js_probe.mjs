@@ -161,6 +161,8 @@ for (const item of input.objects ?? []) {
         apply_positional_options: captureValue(() => schema.apply(item.row, 2)),
         apply_unknown_kw: captureValue(() => schema.apply(item.row, { bogus: true })),
         apply_extra_positional: captureValue(() => schema.apply(item.row, {}, "extra")),
+        to_dict: simplify(schema.to_dict()),
+        from_dict_matches: simplify(r.MappingSchema.from_dict(schema.to_dict(), new r.ContactMapper()).matches),
       };
     }
     if (item.kind === "registry_helpers") {
