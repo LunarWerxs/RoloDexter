@@ -77,6 +77,21 @@ class TestNameDeliberateCapitals:
             ("DiCaprio, LaToya", "LaToya DiCaprio"),
             # Unicode-aware: an inner capital outside ASCII is still one.
             ("DeÁngelo", "DeÁngelo"),
+            # nameparser cases the runs around an apostrophe separately and
+            # builds Mc/Mac names by its own rule; the source's casing still
+            # wins over both, as it does in the JavaScript package.
+            ("O'DeAngelo", "O'DeAngelo"),
+            ("Smith, O'DeAngelo", "O'DeAngelo Smith"),
+            ("McDeAngelo", "McDeAngelo"),
+            ("Anne-Marie McDeAngelo", "Anne-Marie McDeAngelo"),
+            ("MacARTHUR", "MacARTHUR"),
+            ("MacIntyre-Smith", "MacIntyre-Smith"),
+            # A token nameparser cannot case at all (no first letter to
+            # raise) is still the source's call. The sweep caught this one
+            # when the restore rule was tightened to "nameparser capitalized
+            # it": nameparser leaves "0x1f" as "0x1f".
+            ("0x1F", "0x1F"),
+            ("toString", "toString"),
         ],
     )
     def test_inner_capital_survives(self, raw: str, expected: str) -> None:
@@ -92,6 +107,8 @@ class TestNameDeliberateCapitals:
             # nameparser's own casing still wins where it applies a rule:
             # Mac-names, expanded suffixes, lowercased particles.
             ("MCDONALD", "McDonald"),
+            ("macarthur", "MacArthur"),
+            ("MACINTYRE-SMITH", "MacIntyre-Smith"),
             ("MacArthur PhD", "MacArthur Ph.D."),
             ("jane DeAngelo phd", "Jane DeAngelo Ph.D."),
             ("jane van der berg", "Jane van der Berg"),

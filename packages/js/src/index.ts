@@ -13,10 +13,20 @@ import type { MappingMatches } from "./_results.js";
 import { ExactMatchStrategy, FuzzyMatchStrategy, HeuristicMatchStrategy, MatchStrategy, NormalizedMatchStrategy, isHeaderOnlyStrategy } from "./_strategies.js";
 import type { ContactMapperOptions } from "./_strategies.js";
 
-export { SUPPORTED_LANGUAGES, discoverCachedLanguages, discover_cached, getAllCacheDirs, getCacheDir, getWritableCacheDir, get_all_cache_dirs, get_cache_dir, get_writable_cache_dir, loadCachedLanguage, load_cached, normalizeLanguageCode } from "./_i18n_cache.js";
-export { generateLanguage, generateLanguageAsync, generate_language } from "./_i18n_generate.js";
+// Only names that survive `stripInternal` are re-exported here. The camelCase
+// i18n helpers (generateLanguage, loadCachedLanguage, ...) and the translator
+// function types carry the internal tag in their own modules and are stripped
+// from those modules' .d.ts, so a re-export of them from this file would name
+// members that do not exist in the shipped declarations, and every consumer's
+// `tsc` would fail with skipLibCheck at its default. Tests import them from
+// the owning module. (Do not write the tag itself in this comment: TypeScript
+// reads it from ANY leading comment, and a re-export line beneath a comment
+// that merely mentions it is stripped too - which is how SUPPORTED_LANGUAGES
+// briefly vanished from index.d.ts.)
+export { SUPPORTED_LANGUAGES, discover_cached, get_all_cache_dirs, get_cache_dir, get_writable_cache_dir, load_cached, normalizeLanguageCode } from "./_i18n_cache.js";
+export { generate_language } from "./_i18n_generate.js";
 export { CanonicalField, EXACT_MATCH_CONFIDENCE, FUZZY_HIGH_CONFIDENCE, FUZZY_LENGTH_RATIO, FUZZY_LOW_CONFIDENCE, FUZZY_MATCH_THRESHOLD, FieldMatch, HEURISTIC_CONFIDENCE, NORMALIZED_MATCH_CONFIDENCE, NormalizationError, PatternLoadError, RolodexterError } from "./_models.js";
-export type { AsyncTranslateFunction, CanonicalFieldValue, CompileSchemaOptions, DataFrameLike, GenerateLanguageOptions, LanguageData, MapDataFrameOptions, MapPayloadOptions, PatternData, ProfileOptions, TranslateFunction } from "./_models.js";
+export type { CanonicalFieldValue, CompileSchemaOptions, DataFrameLike, GenerateLanguageOptions, LanguageData, MapDataFrameOptions, MapPayloadOptions, PatternData, ProfileOptions } from "./_models.js";
 export { AddressNormalizer, BooleanNormalizer, EmailNormalizer, ListNormalizer, NameNormalizer, PhoneNormalizer, PostalCodeNormalizer, StringNormalizer, normalizeValue, normalize_value } from "./_normalizers.js";
 export { EMBEDDED_PHONE_MAX_MATCHES_PER_FIELD, EMBEDDED_PHONE_MAX_MATCHES_PER_PAYLOAD, EMBEDDED_PHONE_MAX_TEXT_CHARS, MatchType, NumberType, PhoneNumber, PhoneNumberMatch, PhoneNumberMatcher, format_e164, format_international, format_national, is_number_match, is_valid, number_type, parse } from "./_phone.js";
 export { PatternRegistry } from "./_registry.js";
@@ -747,5 +757,5 @@ export const __all__ = [
 // scripts/check_release_versions.py, which the publish workflows run before
 // building. This literal silently shipped 2.10.0 inside the 2.11.0 package
 // because nothing compared the two.
-export const version = "2.11.1";
+export const version = "2.12.0";
 export const __version__ = version;

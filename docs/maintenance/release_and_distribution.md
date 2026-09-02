@@ -1,14 +1,19 @@
 # Release And Distribution Notes
 
-Last checked: 2026-07-23.
+Last checked: 2026-09-02.
 
 ## Current Package Status
 
-- PyPI project: <https://pypi.org/project/rolodexter/> — latest published `2.9.1`.
-- NPM package: <https://www.npmjs.com/package/rolodexter> — latest published
-  `2.9.1`, published from `packages/js` with Sigstore provenance.
-- Local release-candidate versions in `pyproject.toml` and
-  `packages/js/package.json`: `2.10.0`.
+- PyPI project: <https://pypi.org/project/rolodexter/>, latest published `2.12.0`
+  (2026-09-02).
+- NPM package: <https://www.npmjs.com/package/rolodexter>, latest published
+  `2.12.0`, published from `packages/js` with Sigstore provenance.
+- Local release-candidate versions in `pyproject.toml`,
+  `packages/js/package.json`, `packages/js/package-lock.json` and the
+  `version` literal in `packages/js/src/index.ts`: `2.12.0`. All four are
+  bumped together (the lockfile sat at `2.10.0` through two releases because
+  nothing checked it; `npm version X --no-git-tag-version` bumps it with
+  `package.json`).
 - Python requirement: `>=3.10`; Node requirement: `>=20`.
 
 Both registries are back in step at `2.9.1`. They were not between 2026-07-10
@@ -111,6 +116,32 @@ npm pack --dry-run
 npm publish --dry-run
 npm audit --omit=dev
 ```
+
+Release verification for 2.12.0 on 2026-09-02, which added one gate to the
+list above and is the one to copy next time:
+
+- Everything under "Before publishing" passed: ruff, mypy, 1,098 pytest cases
+  on 3.10-3.14, deptry/vulture/pylint by hand (CI runs them on one OS only),
+  `python -m build` + `twine check` for both artifacts, and a fresh-venv
+  install of the built wheel from outside the repo. JS: typecheck, 130 tests
+  on Node 20 and 24, both parity probes at zero mismatches, `npm pack
+  --dry-run`. The whole workflow ran in a Linux container first via
+  `localci --docker` (35 steps), then on GitHub.
+- **The new gate: an adversarial pre-release review of everything since the
+  last tag**, run as seven independent finders (Python API surface, JS API
+  surface, Python packaging, JS packaging, a 37,705-case behavior diff against
+  the published 2.11.1, a 300-name attack on the changed normalizer, and
+  changelog-vs-code) with every finding attacked by two refuters and a
+  completeness critic at the end. It found one release-blocker that no test
+  or CI step could see: the shipped `.d.ts` files did not type-check for a
+  consumer with `skipLibCheck` at its default, because the `index.ts` split
+  re-exported names `stripInternal` had removed. It also found the CJS
+  `require("rolodexter/i18n")` crash that had shipped in every release since
+  the bundles existed, an unbounded `nameparser` pin over a deprecated code
+  path, and two changelog omissions. Each is fixed and has a test that was
+  shown to fail on the previous sources. `test/declarations.test.ts` is the
+  permanent form of the blocker's check; the review itself is worth
+  re-running before any release that touches module layout or packaging.
 
 Latest local release verification on 2026-06-30:
 

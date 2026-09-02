@@ -34,7 +34,7 @@ edition. Every feature described on the product page (the four-layer
 matching pipeline, confidence scoring, value normalization, batch and
 streaming processing, pandas DataFrame support, the CLI, schema
 compile-once, and 40-language alias generation) ships in the open-source
-package at v2.11.1.
+package at v2.12.0.
 
 ## Support
 

@@ -119,12 +119,20 @@ export interface GenerateLanguageOptions {
   retry_backoff?: number;
 }
 
-interface InternalGenerateLanguageOptions extends GenerateLanguageOptions {
+// Both extend the public options with the internal-only translator hooks, so
+// they carry the same tag: `stripInternal` removes TranslateFunction and
+// AsyncTranslateFunction from the shipped .d.ts, and an emitted interface
+// that still names them makes every consumer's `tsc` fail unless they run
+// with skipLibCheck. Exported here, on the declaration, rather than from the
+// footer list below, so the tag travels with the declaration it strips.
+/** @internal */
+export interface InternalGenerateLanguageOptions extends GenerateLanguageOptions {
   cache_dir?: string;
   translator?: TranslateFunction;
 }
 
-interface GenerateLanguageAsyncOptions extends Omit<InternalGenerateLanguageOptions, "translator"> {
+/** @internal */
+export interface GenerateLanguageAsyncOptions extends Omit<InternalGenerateLanguageOptions, "translator"> {
   translator?: AsyncTranslateFunction;
 }
 
@@ -497,4 +505,4 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
 export { ADDRESS_FIELDS, ADDRESS_PREFIXES, BOOLEAN_FIELDS, CANONICAL_FIELD_MEMBERS, COMPANY_PREFIXES, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, PHONE_FIELDS, SOCIAL_FIELDS, VENDOR_PREFIXES, canonicalField, canonicalFieldValue, fieldMatch, isMatched, mergeValue, normalizeAlias, unknown, valueForMatching };
-export type { CanonicalFieldMember, GenerateLanguageAsyncOptions, InternalGenerateLanguageOptions, PatternRegistryOptions };
+export type { CanonicalFieldMember, PatternRegistryOptions };

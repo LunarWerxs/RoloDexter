@@ -39,6 +39,14 @@ CASES: dict[str, Any] = {
         {"id": "name_inner_capital_comma", "field": "full_name", "value": "DiCaprio, LaToya"},
         {"id": "name_inner_capital_unicode", "field": "first_name", "value": "DeÁngelo"},
         {"id": "name_all_caps_recased", "field": "first_name", "value": "DEANGELO"},
+        # The source's casing wins over nameparser's per-run rule around an
+        # apostrophe and over both packages' Mc/Mac rules; a hyphenated Mac
+        # surname keeps its second half cased (JS once lowercased it).
+        {"id": "name_apostrophe_inner_capital", "field": "full_name", "value": "Smith, O'DeAngelo"},
+        {"id": "name_mc_inner_capital", "field": "first_name", "value": "McDeAngelo"},
+        {"id": "name_mac_deliberate", "field": "last_name", "value": "MacARTHUR"},
+        {"id": "name_mac_hyphen", "field": "last_name", "value": "MacIntyre-Smith"},
+        {"id": "name_mac_hyphen_upper", "field": "last_name", "value": "MACINTYRE-SMITH"},
         {"id": "address_hyphen", "field": "address_line1", "value": " 123 main-st apt 4 "},
         {"id": "address_mac_word", "field": "address_line1", "value": "machine shop rd"},
         {"id": "postal_numeric", "field": "postal_code", "value": 1234},

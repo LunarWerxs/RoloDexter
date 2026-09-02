@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { writeSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
+import { generateLanguageAsync } from "./_i18n_generate.js";
+import { runningAsMain } from "./_runtime.js";
 import {
   SUPPORTED_LANGUAGES,
   normalizeLanguageCode,
   discover_cached as coreDiscoverCached,
-  generateLanguageAsync,
   generate_language as generateLanguageSync,
   get_all_cache_dirs as coreGetAllCacheDirs,
   get_cache_dir as coreGetCacheDir,
@@ -486,7 +486,7 @@ export function main(): Promise<number> {
   return mainWithArgs();
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (runningAsMain(import.meta.url)) {
   installBrokenPipeHandler();
   mainWithArgs()
     .then((code) => {

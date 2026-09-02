@@ -5,12 +5,12 @@ import { createReadStream, createWriteStream, existsSync, readFileSync, realpath
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { WriteStream } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 
 import { stringify as stringifyCsv } from "csv-stringify/sync";
 
 import { setOwnProperty } from "./_pycompat.js";
+import { runningAsMain } from "./_runtime.js";
 import {
   CanonicalField,
   ContactMapper,
@@ -1880,7 +1880,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   throw usageError(rootUsageLine(), "rolodexter", `argument command: invalid choice: ${inspect(command)} (choose from map, explain, profile, fields)`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (runningAsMain(import.meta.url)) {
   main()
     .then((code) => {
       process.exitCode = code;

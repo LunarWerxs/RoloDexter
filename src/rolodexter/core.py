@@ -674,3 +674,23 @@ class MappingSchema:
             )
         mapper.seed_header_cache(matches)
         return cls(matches=matches, mapper=mapper, default_region=region)
+
+
+# Everything this module re-exports is defined in the private modules the
+# 2.12.0 split created, but 2.11.1 defined every one of them HERE, and that is
+# the module path a user sees: in a traceback ("rolodexter.core.
+# NormalizationError: ..."), in a class repr, in a Sphinx cross-reference, and
+# in a pickle - a MappingResult pickled by 2.11.1 names
+# rolodexter.core.MappingResult, and one pickled after the split must still
+# load on a 2.11.1 rollback.  So each re-exported class and function is
+# re-homed to this module.  Two things this does NOT do: it does not change
+# where the code lives (inspect.getsource still needs the owning module), and
+# it does not redirect attribute lookups, so a unittest.mock.patch target must
+# name the owning module (rolodexter._mapper.normalize_value), as the 2.12.0
+# changelog says.  Last in the file because ContactMapper and MappingSchema
+# above are in __all__ too and must exist before the loop reads them.
+for _name in __all__:
+    _obj = globals()[_name]
+    if callable(_obj) and getattr(_obj, "__module__", "").startswith("rolodexter._"):
+        _obj.__module__ = __name__
+del _name, _obj

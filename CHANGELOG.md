@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-02
+
 ### Changed
 
 - **Python: a name that arrives with a deliberate inner capital keeps it.**
@@ -21,13 +23,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `iPhone Way`. The trade-off is that `DeAngelo` and `deangelo` no longer
   normalize to one string; compare names case-insensitively, as the identity
   keys already compare emails. This is a behavior change for a common field
-  and is versioned as a minor release.
+  and is versioned as a minor release. The rule holds through an apostrophe
+  (`O'DeAngelo`), a Mc/Mac prefix (`McDeAngelo`, `MacARTHUR`) and a token
+  with no first letter to raise (`0x1F`); only a particle nameparser
+  lowercases on purpose inside a name (`Jane vander Berg`) and a suffix it
+  expands (`PhD` to `Ph.D.`) are left as nameparser made them, which is what
+  the JavaScript package does too.
 - **JS: the inner-capital test is Unicode-aware.** `smartTitleCase` looked
   for an ASCII `[A-Z]` after the first letter, so `DeÁngelo` flattened to
   `Deángelo` while `DeAngelo` was kept. It uses `\p{Lu}` now, matching
-  Python's `str.isupper()`.
+  Python's `str.isupper()`. The same test now guards the Mac rule, so
+  `MacARTHUR` is kept as written rather than re-cased to `MacArthur`.
+- **Module layout.** `src/rolodexter/core.py` (3,454 lines) is split into
+  `_geo`, `_models`, `_normalizers`, `_patterns`, `_strategies`, `_mapper` and
+  `_text`; `rolodexter.core` re-exports the whole surface, so every existing
+  `from rolodexter.core import ...` keeps working, and each re-exported class
+  and function still reports `rolodexter.core` as its `__module__`, so
+  tracebacks, reprs and pickles read exactly as they did in 2.11.1 (a
+  `MappingResult` pickled by 2.12.0 loads on a 2.11.1 rollback).
+  `packages/js/src/index.ts` (4,855 lines) is split the same way into `_*.ts`
+  modules; the package entry points (`rolodexter`, `rolodexter/core`,
+  `rolodexter/i18n`) and their exports are unchanged. Every statement moved
+  verbatim; the parity probes and the 37,705-case sweep report no behavior
+  change from the move. One thing does change: a `unittest.mock.patch`
+  target on `rolodexter.core.<name>` no longer reaches the code that runs,
+  because the code now looks its collaborators up in the owning module. Patch
+  that module instead: `rolodexter._mapper.normalize_value`,
+  `rolodexter._mapper.PatternRegistry`, `rolodexter._mapper.FuzzyMatchStrategy`
+  (and the other strategies), `rolodexter._normalizers.<Normalizer>`.
+- **Python: nameparser's particle set is a private `Constants`, not the
+  shared singleton.** `NameNormalizer` used to add its extra particles to
+  `nameparser.config.CONSTANTS` on first use. nameparser 2.2 deprecates
+  mutating the singleton for removal in 3.0, so every first `map_payload`
+  raised `DeprecationWarning` under `-W error` (or `filterwarnings = error`
+  in a pytest config), and the particles leaked into every other `HumanName`
+  in the process. A private `Constants` instance is built once and passed to
+  each `HumanName`; output is unchanged. The dependency is pinned
+  `nameparser>=1.1,<3` so the untested major cannot arrive through a fresh
+  install, the same way `phonenumbers<10` already is.
 
 ### Fixed
+
+- **JS: the shipped type declarations did not type-check.** After the
+  `index.ts` split, `index.d.ts` re-exported names that `stripInternal` had
+  just removed from the modules that own them (the camelCase i18n helpers and
+  the translator function types), and two emitted interfaces named the
+  stripped types. Any TypeScript consumer with `skipLibCheck` at its default
+  of `false` got eleven errors inside `node_modules` on
+  `import { ContactMapper } from "rolodexter"`; 2.11.1 type-checked clean.
+  Found by the pre-release review, not by CI, because `tsc` checks the
+  sources and this package's own tsconfig skips lib checks. A test now runs
+  `tsc` over the emitted entry-point declarations with `skipLibCheck: false`,
+  and `index.ts` re-exports only what survives stripping.
+- **JS: `require("rolodexter/i18n")` crashed at load time.** Both CLIs
+  guarded their "am I the entrypoint?" check with
+  `fileURLToPath(import.meta.url) === process.argv[1]`, which is right under
+  ESM and fatal in the esbuild CommonJS bundles, where `import.meta` is an
+  empty object: `fileURLToPath(undefined)` threw `ERR_INVALID_ARG_TYPE` at
+  require-time in every file-invoked Node process. Only `node -e`, which has
+  no `argv[1]`, short-circuited before the throw, and `node -e` was how the
+  existing test exercised the bundles. Present since the CJS bundles first
+  shipped. The guard lives in one helper now (`__filename` under CommonJS, the
+  caller's `import.meta.url` under ESM), and a test requires every bundle
+  from a real script.
+- **JS: a hyphenated Mac surname lost the casing of its second half.** The
+  Mac rule ran before the hyphen split and lowercased everything after
+  `Mac`, hyphen included: `MacIntyre-Smith` came back `MacIntyre-smith` where
+  Python kept `Smith`. The split runs first now. Pre-existing.
+- **JS: a column literally named `__proto__` is kept.** In JavaScript
+  `obj[key] = value` treats that key as the prototype setter, so the value is
+  discarded and the object's prototype replaced. `map_payload` was hardened
+  against this in 2.11.0; everything built from `compile_schema` was not, and
+  a differential run over every public entry point found eight sites that
+  lost the column: `MappingSchema.matches`, `column_map()`,
+  `unmatched_headers()` (which reported `[]` against Python's
+  `["__proto__"]`), `to_dict()` (the mapping lockfile, so a saved plan
+  silently omitted the column it exists to pin), `from_dict()`, a canonical
+  field named `__proto__` via `overrides`, a nested `__proto__` key under
+  depth-flattening, and the CLI's `--override HEADER=field` map and its CSV
+  header row. Python's `dict` has no such key and kept the column throughout.
+  Pinned by tests in both languages and five cases in the CI probe.
+- **JS: strip, split and collapse on Python's whitespace set.** Python's
+  `str.strip()` and JavaScript's `trim()` disagree in both directions:
+  `trim()` strips U+FEFF and Python does not; Python strips U+001C-001F and
+  U+0085 and `trim()` does not. A UTF-8 CSV puts a byte-order mark on its
+  first field, so this reached ordinary data: the same column normalized to
+  `""` in one package and kept its mark in the other, and a BOM-prefixed
+  header (what Excel writes) resolved at 1.0/`exact` in JavaScript against
+  0.95/`normalized` in Python, so a confidence threshold above 0.95 kept the
+  column in one package and dropped it in the other. The JavaScript package
+  now uses Python's 29-code-point whitespace set, derived from CPython rather
+  than typed by hand, in every value and header path; a BOM-prefixed header
+  therefore resolves at 0.95/`normalized` in both. Two things fell out of the
+  same work: `repr` output in warnings escapes non-printable characters the
+  way Python's `repr()` does, so a warning quoting a value that holds a
+  control character reads the same in both packages; and the phone-value
+  warning in `map_payload` and `map_dataframe` no longer treats a value that
+  is only a byte-order mark as blank.
 
 - **JS: a country or state value that names an `Object.prototype` member
   returned an object or a function instead of a string.** The geo lookup tables

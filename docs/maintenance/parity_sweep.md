@@ -116,6 +116,22 @@ now files them separately. The inner-capital class should read zero from here
 on, and a case landing in it again is a regression on one side rather than a
 preference.
 
+The 2.12.0 pre-release review then attacked the rule with a 300-name
+adversarial corpus and found two places the two packages still parted:
+Python did not restore a capital that nameparser had cased by its
+per-run-around-an-apostrophe rule (`O'DeAngelo` came back `O'Deangelo`) or its
+Mc/Mac rule (`McDeAngelo` came back `McDeangelo`), and JavaScript's Mac rule
+ran before its hyphen split and lowercased the second half of
+`MacIntyre-Smith`. Both are closed: Python restores wherever nameparser
+capitalized, and only leaves alone a particle nameparser lowercased on purpose
+or a suffix it expanded; JavaScript splits on the hyphen first and lets a
+deliberately cased Mac-name stand. The sweep count did not move, because none
+of those shapes were in its value list; the curated probe now carries five of
+them so CI does. The sweep did catch the one thing the tightened Python rule
+briefly broke - `0x1F`, a token nameparser cannot case at all, which the rule
+"restore where nameparser capitalized" wrongly left as `0x1f` - which is the
+sweep doing precisely the job it exists for.
+
 ### Open
 
 | cases | class |

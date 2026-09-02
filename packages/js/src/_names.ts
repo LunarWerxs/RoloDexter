@@ -18,6 +18,14 @@ function titleWord(word: string): string {
   return `${lower.slice(0, 1).toUpperCase()}${lower.slice(1)}`;
 }
 
+// A mixed-case word with a capital after its first letter was cased on
+// purpose: "DeAngelo", "LaToya", "eBay". All-upper, all-lower and
+// conventionally-cased words carry no such signal. Unicode-aware, like
+// Python's str.isupper(), which is the same test on the Python side.
+function hasDeliberateCapital(word: string): boolean {
+  return word !== word.toUpperCase() && word !== word.toLowerCase() && /\p{Lu}/u.test(word.slice(1));
+}
+
 function smartTitleCase(value: string): string {
   return pySplitSpace(value)
     .map((word) => {
@@ -29,9 +37,8 @@ function smartTitleCase(value: string): string {
       // Python package applies the same rule (it restores these capitals
       // after nameparser has flattened them; the decision and its trade-off
       // are written on _restore_deliberate_capitals in
-      // src/rolodexter/_normalizers.py). The test is Unicode-aware, as
-      // Python's str.isupper() is, so "DeÁngelo" is kept in both packages.
-      if (word !== word.toUpperCase() && word !== word.toLowerCase() && /\p{Lu}/u.test(word.slice(1))) {
+      // src/rolodexter/_normalizers.py).
+      if (hasDeliberateCapital(word)) {
         return word;
       }
       if (word.includes("'")) {
@@ -170,11 +177,18 @@ function nameWord(word: string, index = 0): string {
   if (word.includes("@")) {
     return word.split("@").map((part) => nameWord(part, index)).join("@");
   }
-  if (lower.startsWith("mac") && lower.length > 3) {
-    return `Mac${lower[3]?.toUpperCase() ?? ""}${lower.slice(4)}`;
-  }
+  // Split on the hyphen BEFORE the Mac rule, so each half is cased on its
+  // own. The rule used to run first and lowercased everything after "Mac",
+  // hyphen included: "MacIntyre-Smith" came back "MacIntyre-smith" while
+  // Python, whose nameparser cases each word run separately, kept "Smith".
   if (word.includes("-")) {
     return word.split("-").map((part) => nameWord(part, index)).join("-");
+  }
+  // A deliberately cased Mac-name ("MacARTHUR", and "MacArthur" itself) is
+  // the source's call, the same as any other deliberate inner capital; the
+  // rule only re-cases an all-upper or all-lower one.
+  if (lower.startsWith("mac") && lower.length > 3 && !hasDeliberateCapital(word)) {
+    return `Mac${lower[3]?.toUpperCase() ?? ""}${lower.slice(4)}`;
   }
   return smartTitleCase(word);
 }

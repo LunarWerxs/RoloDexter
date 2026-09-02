@@ -31,8 +31,6 @@ import {
   format_international,
   format_national,
   FuzzyMatchStrategy,
-  generateLanguage,
-  generateLanguageAsync,
   generate_language,
   get_all_cache_dirs,
   get_cache_dir,
@@ -65,10 +63,14 @@ import {
   normalize_value,
   parse,
   version,
-  discoverCachedLanguages,
-  loadCachedLanguage,
   normalizeLanguageCode,
 } from "../src/index.js";
+// Internal-only helpers are imported from the module that owns them. index.ts
+// no longer re-exports them: `stripInternal` drops them from that module's
+// .d.ts, and a re-export of a stripped name is a dangling reference that
+// fails every consumer's tsc (see test/declarations.test.ts).
+import { discoverCachedLanguages, loadCachedLanguage } from "../src/_i18n_cache.js";
+import { generateLanguage, generateLanguageAsync } from "../src/_i18n_generate.js";
 
 const CLI_EOL = process.platform === "win32" ? "\r\n" : "\n";
 
@@ -1444,6 +1446,17 @@ test("NameNormalizer keeps a deliberate inner capital and re-cases words without
   assert.equal(NameNormalizer.normalize("DiCaprio, LaToya"), "LaToya DiCaprio");
   // Unicode-aware: an inner capital outside ASCII is still one.
   assert.equal(NameNormalizer.normalize("DeÁngelo"), "DeÁngelo");
+  // The source's casing wins over the apostrophe and Mc/Mac rules too, and a
+  // hyphenated Mac surname keeps its second half cased: the Mac rule used to
+  // run before the hyphen split and returned "MacIntyre-smith".
+  assert.equal(NameNormalizer.normalize("O'DeAngelo"), "O'DeAngelo");
+  assert.equal(NameNormalizer.normalize("Smith, O'DeAngelo"), "O'DeAngelo Smith");
+  assert.equal(NameNormalizer.normalize("McDeAngelo"), "McDeAngelo");
+  assert.equal(NameNormalizer.normalize("Anne-Marie McDeAngelo"), "Anne-Marie McDeAngelo");
+  assert.equal(NameNormalizer.normalize("MacARTHUR"), "MacARTHUR");
+  assert.equal(NameNormalizer.normalize("MacIntyre-Smith"), "MacIntyre-Smith");
+  assert.equal(NameNormalizer.normalize("MACINTYRE-SMITH"), "MacIntyre-Smith");
+  assert.equal(NameNormalizer.normalize("macarthur"), "MacArthur");
   // All-upper and all-lower carry no signal and are re-cased from rules.
   assert.equal(NameNormalizer.normalize("DEANGELO"), "Deangelo");
   assert.equal(NameNormalizer.normalize("deangelo"), "Deangelo");

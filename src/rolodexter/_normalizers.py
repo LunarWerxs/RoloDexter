@@ -98,11 +98,15 @@ def _restore_deliberate_capitals(source: str, result: str) -> str:
 
     ``nameparser`` may reorder words (``"Smith, DeAngelo"`` becomes
     ``"DeAngelo Smith"``) and drop punctuation, so restoration matches by
-    lowercase form rather than by position.  A piece is restored only when
-    nameparser cased it by its generic rule (``"deangelo".capitalize()``): a
-    particle it lowercased, a suffix it expanded (``Ph.D.``) or a Mac-name it
-    built are left as nameparser made them, which is also what the
-    JavaScript package does with the same input.
+    lowercase form rather than by position.  A piece is restored wherever
+    nameparser *capitalized* it, whichever rule it used - the generic one
+    (``Deangelo``), the per-run one around an apostrophe (``O'Deangelo``) or
+    the Mac/Mc one (``McDeangelo``) - because in each case the source's own
+    casing is the better authority.  A piece nameparser deliberately
+    lowercased (a particle inside the name: ``"jane VanDer berg"`` stays
+    ``"Jane vander Berg"``) is left alone, and a suffix it expanded (``PhD``
+    to ``Ph.D.``) no longer matches by lowercase form and is left expanded.
+    Both are what the JavaScript package does with the same input.
     """
     preserved: dict[str, str] = {}
     for word in source.split():
@@ -121,7 +125,13 @@ def _restore_deliberate_capitals(source: str, result: str) -> str:
         pieces = _NAME_SEGMENT_RE.split(chunk)
         for i, piece in enumerate(pieces):
             original = preserved.get(piece.lower())
-            if original is not None and piece == piece.lower().capitalize():
+            # nameparser lowercased this piece on purpose (a particle or a
+            # conjunction inside the name) when it is all-lower yet has a
+            # letter it could have capitalized.  Everything else it either
+            # cased or could not case ("0x1f" has no first letter to raise),
+            # and there the source's own casing wins.
+            lowered_on_purpose = piece == piece.lower() and piece != piece.capitalize()
+            if original is not None and not lowered_on_purpose:
                 pieces[i] = original
         out.append("".join(pieces))
     return "".join(out)
@@ -150,25 +160,32 @@ class NameNormalizer:
         "el",
         "af",
     )
-    _prefixes_patched: bool = False
-    _prefix_lock = threading.Lock()
+    _constants: Any = None
+    _constants_lock = threading.Lock()
 
     @classmethod
-    def _ensure_prefixes(cls) -> None:
-        """Add missing particles to nameparser on first use (once).
+    def _nameparser_constants(cls) -> Any:
+        """A private ``nameparser`` ``Constants`` carrying our extra particles.
 
-        Thread-safe — the i18n CLI uses a worker pool that may invoke
-        ``NameNormalizer`` concurrently from multiple threads.
+        Built once, under a lock - the i18n CLI calls this from a worker pool.
+        A private instance rather than the shared ``CONSTANTS`` singleton:
+        mutating the singleton is deprecated in nameparser 2.2 for removal in
+        3.0 (it raised under ``-W error`` on every first ``map_payload``), and
+        it leaked this package's particle set into every other ``HumanName``
+        in the process.
+
+        .. versionchanged:: 2.12.0
+           Was ``_ensure_prefixes()``, which mutated the shared singleton.
         """
-        if cls._prefixes_patched:
-            return
-        with cls._prefix_lock:
-            if cls._prefixes_patched:
-                return
-            from nameparser.config import CONSTANTS
+        if cls._constants is None:
+            with cls._constants_lock:
+                if cls._constants is None:
+                    from nameparser.config import Constants
 
-            CONSTANTS.prefixes.add(*cls._EXTRA_PREFIXES)
-            cls._prefixes_patched = True
+                    constants = Constants()
+                    constants.prefixes.add(*cls._EXTRA_PREFIXES)
+                    cls._constants = constants
+        return cls._constants
 
     @classmethod
     def normalize(cls, value: str) -> str:
@@ -189,7 +206,6 @@ class NameNormalizer:
         if not text:
             return value
 
-        cls._ensure_prefixes()
         from nameparser import HumanName
 
         # nameparser re-derives casing from an all-lowercase copy.  That is
@@ -200,7 +216,7 @@ class NameNormalizer:
         # a better authority on it than a rule is.  Those capitals are put
         # back afterwards by _restore_deliberate_capitals(); the decision and
         # its trade-off are written on that function.
-        hn = HumanName(text.lower())
+        hn = HumanName(text.lower(), constants=cls._nameparser_constants())
         hn.capitalize()
         result = str(hn)
         # ``nameparser`` >= 1.2 leaves a *leading* recognized particle
@@ -221,10 +237,9 @@ class NameNormalizer:
 
         .. versionadded:: 2.5.0
         """
-        cls._ensure_prefixes()
         from nameparser import HumanName
 
-        hn = HumanName(value.strip())
+        hn = HumanName(value.strip(), constants=cls._nameparser_constants())
         return {
             "title": str(hn.title),
             "first": str(hn.first),
