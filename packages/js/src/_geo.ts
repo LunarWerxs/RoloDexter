@@ -4,7 +4,23 @@
 import { pyCollapseSpace, pyStrip } from "./_pycompat.js";
 import { smartTitleCase } from "./_names.js";
 
-const COUNTRY_ALPHA3: Record<string, string> = {
+// The three tables below are prototype-free, and that is load-bearing rather
+// than stylistic.  They are indexed with contact data, and a plain object
+// answers for keys nobody put in it: COUNTRY_NAMES["constructor"] is the
+// Object function and COUNTRY_NAMES["__proto__"] is Object.prototype, so a row
+// whose country column read "constructor" normalized to a *function* here and
+// to the string "constructor" in Python.  Python dicts have no such inherited
+// members, so this was a type confusion in JavaScript and a cross-language
+// divergence at the same time.
+//
+// Only member names that survive the lookup's own .toLowerCase() can collide,
+// which is why "__proto__" and "constructor" leaked and "toString" did not -
+// a distinction far too subtle to leave standing as the reason it is safe.
+// Object.create(null) removes the inherited keys instead of enumerating which
+// ones happen to be reachable today, so a lookup added later is safe by
+// construction.  This is the read-side counterpart of setOwnProperty() in
+// _pycompat.ts, which already does the same job for writes.
+const COUNTRY_ALPHA3: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   "arg": "AR",
   "aus": "AU",
   "aut": "AT",
@@ -61,9 +77,9 @@ const COUNTRY_ALPHA3: Record<string, string> = {
   "usa": "US",
   "vnm": "VN",
   "zaf": "ZA",
-};
+});
 
-const COUNTRY_NAMES: Record<string, string> = {
+const COUNTRY_NAMES: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   "america": "US",
   "argentina": "AR",
   "australia": "AU",
@@ -145,7 +161,7 @@ const COUNTRY_NAMES: Record<string, string> = {
   "viet nam": "VN",
   "vietnam": "VN",
   "wales": "GB",
-};
+});
 
 function normalizeCountry(value: string): string {
   const text = pyCollapseSpace(pyStrip(value));
@@ -240,7 +256,7 @@ const STATE_CODES = new Set([
   "YT",
 ]);
 
-const STATE_NAMES: Record<string, string> = {
+const STATE_NAMES: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   "alabama": "AL",
   "alaska": "AK",
   "alberta": "AB",
@@ -307,7 +323,7 @@ const STATE_NAMES: Record<string, string> = {
   "wisconsin": "WI",
   "wyoming": "WY",
   "yukon": "YT",
-};
+});
 
 function normalizeState(value: string): string {
   const text = pyCollapseSpace(pyStrip(value));

@@ -1432,6 +1432,28 @@ test("standalone normalize_value covers public normalizers", () => {
   assert.deepEqual(normalize_value("tags", '[{"a":1},["x"],true,null]'), ["{'a': 1}", "['x']", "True", "None"]);
 });
 
+test("NameNormalizer keeps a deliberate inner capital and re-cases words without one", () => {
+  // Mirrors tests/test_normalizers.py::TestNameDeliberateCapitals. Since
+  // 2.12.0 both packages apply this rule; every expectation here is also
+  // what the Python package returns for the same input.
+  assert.equal(NameNormalizer.normalize("DeAngelo"), "DeAngelo");
+  assert.equal(NameNormalizer.normalize("LaToya Jackson"), "LaToya Jackson");
+  assert.equal(NameNormalizer.normalize("leonardo DiCaprio"), "Leonardo DiCaprio");
+  assert.equal(NameNormalizer.normalize("JoAnne Smith-DeAngelo"), "JoAnne Smith-DeAngelo");
+  assert.equal(NameNormalizer.normalize("smith, DeAngelo"), "DeAngelo Smith");
+  assert.equal(NameNormalizer.normalize("DiCaprio, LaToya"), "LaToya DiCaprio");
+  // Unicode-aware: an inner capital outside ASCII is still one.
+  assert.equal(NameNormalizer.normalize("DeÁngelo"), "DeÁngelo");
+  // All-upper and all-lower carry no signal and are re-cased from rules.
+  assert.equal(NameNormalizer.normalize("DEANGELO"), "Deangelo");
+  assert.equal(NameNormalizer.normalize("deangelo"), "Deangelo");
+  assert.equal(NameNormalizer.normalize("LATOYA JACKSON"), "Latoya Jackson");
+  assert.equal(NameNormalizer.normalize("MCDONALD"), "McDonald");
+  assert.equal(NameNormalizer.normalize("MacArthur PhD"), "MacArthur Ph.D.");
+  assert.equal(NameNormalizer.normalize("jane DeAngelo phd"), "Jane DeAngelo Ph.D.");
+  assert.equal(NameNormalizer.normalize("DR. jane van doe jr."), "Dr. Jane van Doe Jr.");
+});
+
 test("NameNormalizer mirrors Python title, suffix, particle, and hyphen handling", () => {
   assert.equal(NameNormalizer.normalize("jane van der berg"), "Jane van der Berg");
   assert.equal(NameNormalizer.normalize("jean-pierre"), "Jean-Pierre");

@@ -264,6 +264,14 @@ for (const item of input.objects ?? []) {
         generate_positional_bool: captureValue(() => i18n.generate_language("__missing__", true)),
         generate_keyword_options: captureValue(() => i18n.generate_language("__missing__", { force: true })),
         generate_badkw: captureValue(() => i18n.generate_language("__missing__", { cache_dir: "x" })),
+        // `langCode in SUPPORTED_LANGUAGES` walked the prototype chain, so
+        // these passed the "is it supported" gate and then died destructuring
+        // Object.prototype as a [code, name] pair. Python's dict membership
+        // has no inherited keys and raised a clean unsupported-language error.
+        generate_proto: captureValue(() => i18n.generate_language("__proto__")),
+        generate_constructor: captureValue(() => i18n.generate_language("constructor")),
+        load_proto: captureValue(() => i18n.load_cached("__proto__")),
+        load_constructor: captureValue(() => i18n.load_cached("constructor")),
       };
     }
     if (item.kind === "mapper_runtime_rejections") {

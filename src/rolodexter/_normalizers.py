@@ -57,6 +57,76 @@ class EmailNormalizer:
         return value.strip().lower()
 
 
+# The JavaScript package splits a name word on "@" and "-" before deciding
+# how to case each piece, so "Smith-DeAngelo" keeps its second half and
+# re-cases its first, and "ada@EXAMPLE.com" (an email that landed in a name
+# field) keeps only the part that was cased on purpose.  Kept identical so
+# both packages restore the same pieces.  The comma is here because
+# nameparser consumes it: "DiCaprio, LaToya" reaches the result as
+# "LaToya Dicaprio", and the piece to restore is "dicaprio", not "dicaprio,".
+_NAME_SEGMENT_RE = re.compile(r"([@,-])")
+
+
+def _has_deliberate_capital(segment: str) -> bool:
+    """True when *segment* mixes case with a capital after its first letter.
+
+    That is the signal both packages read as "cased on purpose": ``DeAngelo``,
+    ``LaToya``, ``eBay``.  All-upper (``DEANGELO``), all-lower and
+    conventionally-cased (``Jane``) words return False and are re-cased from
+    rules.  Same test :func:`_smart_titlecase` applies to address tokens.
+    """
+    return (
+        not segment.isupper()
+        and not segment.islower()
+        and any(c.isupper() for c in segment[1:])
+    )
+
+
+def _restore_deliberate_capitals(source: str, result: str) -> str:
+    """Put back the inner capitals that lowercasing *source* discarded.
+
+    **The decision.**  A source system that wrote ``DeAngelo`` is a better
+    authority on that name than a casing rule is, and flattening it to
+    ``Deangelo`` is a visible error in anything user-facing.  The cost is
+    that ``DeAngelo`` and ``deangelo`` no longer normalize to one string, so
+    a caller who compares names for equality must compare them
+    case-insensitively - which is how names should be compared anyway, and
+    is how this package's own identity keys already compare emails.  It was
+    an open question between the two packages until 2.12.0; JavaScript and
+    :class:`AddressNormalizer` had both answered it this way already, and
+    ``nameparser``'s own default is to leave a mixed-case name alone.
+
+    ``nameparser`` may reorder words (``"Smith, DeAngelo"`` becomes
+    ``"DeAngelo Smith"``) and drop punctuation, so restoration matches by
+    lowercase form rather than by position.  A piece is restored only when
+    nameparser cased it by its generic rule (``"deangelo".capitalize()``): a
+    particle it lowercased, a suffix it expanded (``Ph.D.``) or a Mac-name it
+    built are left as nameparser made them, which is also what the
+    JavaScript package does with the same input.
+    """
+    preserved: dict[str, str] = {}
+    for word in source.split():
+        for segment in _NAME_SEGMENT_RE.split(word):
+            if _has_deliberate_capital(segment):
+                preserved.setdefault(segment.lower(), segment)
+    if not preserved:
+        return result
+    # Split keeping the whitespace nameparser emitted, so nothing but the
+    # cased pieces changes.
+    out: list[str] = []
+    for chunk in re.split(r"(\s+)", result):
+        if not chunk or chunk.isspace():
+            out.append(chunk)
+            continue
+        pieces = _NAME_SEGMENT_RE.split(chunk)
+        for i, piece in enumerate(pieces):
+            original = preserved.get(piece.lower())
+            if original is not None and piece == piece.lower().capitalize():
+                pieces[i] = original
+        out.append("".join(pieces))
+    return "".join(out)
+
+
 class NameNormalizer:
     """Normalize and parse names via ``nameparser``.
 
@@ -102,7 +172,17 @@ class NameNormalizer:
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        """Capitalize a name string with culturally-aware rules."""
+        """Capitalize a name string with culturally-aware rules.
+
+        .. versionchanged:: 2.12.0
+           A word that arrives with a deliberate inner capital keeps the
+           casing it arrived with: ``DeAngelo``, ``LaToya`` and ``DiCaprio``
+           no longer flatten to ``Deangelo``, ``Latoya`` and ``Dicaprio``.
+           All-lower and all-upper input is still re-cased from rules, so
+           ``deangelo`` and ``DEANGELO`` both normalize to ``Deangelo``.
+           This is the rule the JavaScript package and this package's own
+           :class:`AddressNormalizer` already applied.
+        """
         if not value or not isinstance(value, str):
             return value
         text = value.strip()
@@ -112,6 +192,14 @@ class NameNormalizer:
         cls._ensure_prefixes()
         from nameparser import HumanName
 
+        # nameparser re-derives casing from an all-lowercase copy.  That is
+        # what turns "JANE DOE" and "jane doe" into "Jane Doe" and what gives
+        # us its particle, Mc/Mac, title and suffix handling.  Lowercasing
+        # first also discards a capital the source system placed on purpose
+        # ("DeAngelo"), and a source that took the trouble to case a name is
+        # a better authority on it than a rule is.  Those capitals are put
+        # back afterwards by _restore_deliberate_capitals(); the decision and
+        # its trade-off are written on that function.
         hn = HumanName(text.lower())
         hn.capitalize()
         result = str(hn)
@@ -122,7 +210,7 @@ class NameNormalizer:
         # without disturbing internal particle casing ("Jan van der Berg").
         if result[:1].islower():
             result = result[:1].upper() + result[1:]
-        return result
+        return _restore_deliberate_capitals(text, result)
 
     @classmethod
     def parse(cls, value: str) -> dict[str, str]:

@@ -31,6 +31,14 @@ CASES: dict[str, Any] = {
         {"id": "phone_blank", "field": "phone", "value": "   ", "default_region": "US"},
         {"id": "phone_bool", "field": "phone", "value": True, "default_region": "US"},
         {"id": "name_particle", "field": "full_name", "value": "DR. jane van doe jr."},
+        # A deliberate inner capital survives in both packages since 2.12.0;
+        # all-upper and all-lower input is still re-cased. The comma form
+        # reaches Python's nameparser reordered, so the capital is restored
+        # by lowercase form rather than by position.
+        {"id": "name_inner_capital", "field": "full_name", "value": "LaToya DeAngelo-DiCaprio"},
+        {"id": "name_inner_capital_comma", "field": "full_name", "value": "DiCaprio, LaToya"},
+        {"id": "name_inner_capital_unicode", "field": "first_name", "value": "DeÁngelo"},
+        {"id": "name_all_caps_recased", "field": "first_name", "value": "DEANGELO"},
         {"id": "address_hyphen", "field": "address_line1", "value": " 123 main-st apt 4 "},
         {"id": "address_mac_word", "field": "address_line1", "value": "machine shop rd"},
         {"id": "postal_numeric", "field": "postal_code", "value": 1234},
@@ -53,6 +61,18 @@ CASES: dict[str, Any] = {
         {"id": "ws_bom_wrapped", "field": "notes", "value": f"{_BOM}hi{_BOM}"},
         {"id": "ws_file_separator", "field": "unknown", "value": f"{_FILE_SEPARATOR}hi{_NEL}"},
         {"id": "ws_nel_name", "field": "first_name", "value": f"ada{_NEL}lovelace"},
+        # A prototype member name is ordinary contact data, not a lookup.
+        # JavaScript's country and state tables were plain objects, so they
+        # answered for keys nobody put in them: "constructor" normalized to the
+        # Object *function* and "__proto__" to Object.prototype, from an API
+        # typed to return a string. Only names that survive the lookup's own
+        # lowercasing could collide, which is why these two and not "toString".
+        {"id": "proto_country_dunder", "field": "country", "value": "__proto__"},
+        {"id": "proto_country_constructor", "field": "country", "value": "constructor"},
+        {"id": "proto_state_dunder", "field": "state", "value": "__proto__"},
+        {"id": "proto_state_constructor", "field": "state", "value": "constructor"},
+        {"id": "proto_country_real_still_resolves", "field": "country", "value": "deutschland"},
+        {"id": "proto_state_real_still_resolves", "field": "state", "value": "california"},
     ],
     "payloads": [
         {"id": "basic", "payload": {"fname": "Ada", "surname": "Lovelace", "mobile": "(202) 555-0143"}},
@@ -565,6 +585,13 @@ def python_results() -> dict[str, Any]:
                     ),
                     "generate_keyword_options": capture_value(lambda: i18n.generate_language("__missing__", force=True)),
                     "generate_badkw": capture_value(lambda: i18n.generate_language("__missing__", cache_dir="x")),  # type: ignore[call-arg]
+                    # See the note beside these in parity_js_probe.mjs: the
+                    # JavaScript gate accepted every Object.prototype member
+                    # name as a supported language code.
+                    "generate_proto": capture_value(lambda: i18n.generate_language("__proto__")),
+                    "generate_constructor": capture_value(lambda: i18n.generate_language("constructor")),
+                    "load_proto": capture_value(lambda: i18n.load_cached("__proto__")),
+                    "load_constructor": capture_value(lambda: i18n.load_cached("constructor")),
                 }
         elif item["kind"] == "mapper_runtime_rejections":
             def fn() -> dict[str, Any]:

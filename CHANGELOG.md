@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Python: a name that arrives with a deliberate inner capital keeps it.**
+  `NameNormalizer.normalize("DeAngelo")` returns `"DeAngelo"`, where every
+  earlier release returned `"Deangelo"`; likewise `LaToya`, `DiCaprio`,
+  `JoAnne`, `Smith-DeAngelo` and `DeÁngelo`. All-lower and all-upper input is
+  still re-cased from rules, so `deangelo` and `DEANGELO` both normalize to
+  `Deangelo`, and nameparser's particle, Mc/Mac, title and suffix handling is
+  unchanged. This was the last open behavioral disagreement with the
+  JavaScript package, which had preserved these capitals since its first
+  release, and it is the rule `AddressNormalizer` already applied to
+  `iPhone Way`. The trade-off is that `DeAngelo` and `deangelo` no longer
+  normalize to one string; compare names case-insensitively, as the identity
+  keys already compare emails. This is a behavior change for a common field
+  and is versioned as a minor release.
+- **JS: the inner-capital test is Unicode-aware.** `smartTitleCase` looked
+  for an ASCII `[A-Z]` after the first letter, so `DeÁngelo` flattened to
+  `Deángelo` while `DeAngelo` was kept. It uses `\p{Lu}` now, matching
+  Python's `str.isupper()`.
+
+### Fixed
+
+- **JS: a country or state value that names an `Object.prototype` member
+  returned an object or a function instead of a string.** The geo lookup tables
+  were plain objects, which inherit `Object.prototype`, so
+  `normalize_value("country", "constructor")` returned the `Object` *function*
+  and `"__proto__"` returned `Object.prototype`, from an API typed to return a
+  string. `JSON.stringify` encodes a function as nothing, so the field vanished
+  from `to_dict()` output rather than failing loudly. Python `dict` lookups
+  have no inherited members and were never affected. The three tables are now
+  built with `Object.create(null)`, so reads are safe by construction rather
+  than by the accident that only lowercase member names could collide. This is
+  the read-side counterpart of the 2.11.0 `__proto__`-as-a-column fix.
+- **JS: `generate_language()` accepted any `Object.prototype` member name as a
+  supported language code.** The gate used `in`, which walks the prototype
+  chain, so `generate_language("constructor")` passed validation and then threw
+  `TypeError: function is not iterable` while destructuring `Object` as a
+  `[code, name]` pair. Python raised a clean `ValueError` naming the unsupported
+  language. Both gates and `normalizeLanguageCode()` now use `Object.hasOwn`,
+  so the two packages report the same error for the same input.
+- **`scripts/parity_sweep.py --show` crashed with `UnicodeEncodeError` on a
+  Windows console.** It printed diverging values unescaped, so the tool for
+  inspecting a divergence died on exactly the non-English cases it exists to
+  explain. It escapes to ASCII now, which also makes invisible characters
+  visible rather than rendering two different ones identically. The sweep's
+  subprocess encoding is pinned to UTF-8 for the same reason the probes' is.
+
 ## [2.11.1] - 2026-08-09
 
 ### Fixed

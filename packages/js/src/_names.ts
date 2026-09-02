@@ -21,7 +21,17 @@ function titleWord(word: string): string {
 function smartTitleCase(value: string): string {
   return pySplitSpace(value)
     .map((word) => {
-      if (word !== word.toUpperCase() && word !== word.toLowerCase() && /[A-Z]/.test(word.slice(1))) {
+      // A mixed-case word with a capital after the first letter is left
+      // exactly as it arrived: "DeAngelo", "LaToya", "eBay". A source that
+      // took the trouble to case a name is a better authority on it than a
+      // rule is. All-upper and all-lower words are re-cased from rules, so
+      // "DEANGELO" and "deangelo" both become "Deangelo". Since 2.12.0 the
+      // Python package applies the same rule (it restores these capitals
+      // after nameparser has flattened them; the decision and its trade-off
+      // are written on _restore_deliberate_capitals in
+      // src/rolodexter/_normalizers.py). The test is Unicode-aware, as
+      // Python's str.isupper() is, so "DeÁngelo" is kept in both packages.
+      if (word !== word.toUpperCase() && word !== word.toLowerCase() && /\p{Lu}/u.test(word.slice(1))) {
         return word;
       }
       if (word.includes("'")) {

@@ -387,7 +387,10 @@ process.stdout.write(JSON.stringify(data));
 
 /** @internal */
 export async function generateLanguageAsync(langCode: string, options: GenerateLanguageAsyncOptions = {}): Promise<LanguageData> {
-  if (!(langCode in SUPPORTED_LANGUAGES)) {
+  // hasOwn rather than `in`, for the reason spelled out on
+  // normalizeLanguageCode: `in` accepts inherited members, so
+  // "constructor" reached the generator as a supported language.
+  if (!Object.hasOwn(SUPPORTED_LANGUAGES, langCode)) {
     throw unsupportedLanguageError(langCode);
   }
   const forceFields = normalizeForceFields(options);
@@ -403,7 +406,10 @@ export async function generateLanguageAsync(langCode: string, options: GenerateL
 
 /** @internal */
 export function generateLanguage(langCode: string, options: InternalGenerateLanguageOptions = {}): LanguageData {
-  if (!(langCode in SUPPORTED_LANGUAGES)) {
+  // hasOwn rather than `in`, for the reason spelled out on
+  // normalizeLanguageCode: `in` accepts inherited members, so
+  // "constructor" reached the generator as a supported language.
+  if (!Object.hasOwn(SUPPORTED_LANGUAGES, langCode)) {
     throw unsupportedLanguageError(langCode);
   }
   const forceFields = normalizeForceFields(options);

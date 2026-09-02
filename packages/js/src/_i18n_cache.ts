@@ -145,7 +145,13 @@ export function normalizeLanguageCode(langCode: unknown): string | undefined {
     return undefined;
   }
   const candidate = langCode.trim().toLowerCase();
-  return candidate in SUPPORTED_LANGUAGES ? candidate : undefined;
+  // Object.hasOwn, not `in`: `in` walks the prototype chain, so "constructor"
+  // and "__proto__" passed this gate as valid language codes and then blew up
+  // downstream destructuring Object / Object.prototype as a [code, name] pair.
+  // Python's `in` on a dict has no such inherited members and raised a clean
+  // "Unsupported language" instead.  SUPPORTED_LANGUAGES is public API, so the
+  // check is fixed here rather than by changing that object's prototype.
+  return Object.hasOwn(SUPPORTED_LANGUAGES, candidate) ? candidate : undefined;
 }
 
 /**

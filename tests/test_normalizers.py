@@ -54,6 +54,54 @@ class TestNameNormalizer:
         assert NameNormalizer.normalize(None) is None  # type: ignore[arg-type]
 
 
+class TestNameDeliberateCapitals:
+    """A capital placed after a word's first letter is kept (2.12.0).
+
+    Before 2.12.0 the normalizer lowercased the whole string before re-casing
+    it, so ``DeAngelo`` came out ``Deangelo``. The JavaScript package and
+    ``AddressNormalizer`` already read an inner capital as "cased on purpose";
+    this pins the Python name normalizer to the same rule. Every expectation
+    here is also what ``packages/js`` returns for the same input.
+    """
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("DeAngelo", "DeAngelo"),
+            ("LaToya Jackson", "LaToya Jackson"),
+            ("leonardo DiCaprio", "Leonardo DiCaprio"),
+            ("JoAnne Smith-DeAngelo", "JoAnne Smith-DeAngelo"),
+            # nameparser reorders "Last, First" and drops the comma; the
+            # capital is restored by lowercase form, not by position.
+            ("smith, DeAngelo", "DeAngelo Smith"),
+            ("DiCaprio, LaToya", "LaToya DiCaprio"),
+            # Unicode-aware: an inner capital outside ASCII is still one.
+            ("DeÁngelo", "DeÁngelo"),
+        ],
+    )
+    def test_inner_capital_survives(self, raw: str, expected: str) -> None:
+        assert NameNormalizer.normalize(raw) == expected
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            # All-upper and all-lower carry no signal and are re-cased.
+            ("DEANGELO", "Deangelo"),
+            ("deangelo", "Deangelo"),
+            ("LATOYA JACKSON", "Latoya Jackson"),
+            # nameparser's own casing still wins where it applies a rule:
+            # Mac-names, expanded suffixes, lowercased particles.
+            ("MCDONALD", "McDonald"),
+            ("MacArthur PhD", "MacArthur Ph.D."),
+            ("jane DeAngelo phd", "Jane DeAngelo Ph.D."),
+            ("jane van der berg", "Jane van der Berg"),
+            ("DR. jane van doe jr.", "Dr. Jane van Doe Jr."),
+        ],
+    )
+    def test_rules_still_apply_without_a_signal(self, raw: str, expected: str) -> None:
+        assert NameNormalizer.normalize(raw) == expected
+
+
 class TestAddressNormalizer:
     def test_normalize(self) -> None:
         assert AddressNormalizer.normalize("  123  main   st  ") == "123 Main St"

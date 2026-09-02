@@ -425,6 +425,12 @@ def js_results(corpus: dict[str, list[dict[str, Any]]], out_path: Path) -> dict[
         [_node(), str(JS_SWEEP), str(out_path)],
         input=json.dumps(corpus),
         text=True,
+        # Pinned for the same reason as in parity_probe.py, and pinned even
+        # though json.dumps escapes to ASCII by default: this corpus is mostly
+        # invisible and control characters, so the day someone passes
+        # ensure_ascii=False the platform default would quietly mangle the
+        # inputs on Windows and the sweep would compare the wrong values.
+        encoding="utf-8",
         check=True,
         cwd=ROOT,
     )
@@ -438,10 +444,34 @@ def _node() -> str:
 # ── Classification ────────────────────────────────────────────────────
 
 PHONE_LIBS = "phone libraries disagree on inputs that are not phone numbers"
-NAME_CASE = "name casing rules"
+# Name divergences are split three ways because one label ("name casing
+# rules") hid three different causes, one of which was a decision waiting to
+# be taken.  It was taken in 2.12.0 - both packages now keep a deliberate
+# inner capital ("DeAngelo") - so NAME_INNER_CAPITAL should read zero, and a
+# case landing there again is a regression on one side, not a preference.
+NAME_INNER_CAPITAL = "name: deliberate inner capital dropped by one side"
+# Python's str.upper()/title() and JavaScript's String.toUpperCase() disagree
+# on a few code points: U+00DF title-cases to "Ss" in Python and "SS" in
+# JavaScript, U+01C5 (Dz with caron, a titlecase letter) to itself and to
+# U+01C4, and Python's title() treats any non-letter as a word boundary.
+NAME_UNICODE = "name: Unicode case mapping differs between the runtimes"
+# URLs, emails, addresses and separator-joined tokens that landed in a name
+# field.  nameparser cases every \w+ run ("Https://Example.com/Path"), the
+# JavaScript port cases whitespace-separated words ("Https://example.com/path"),
+# and the two parse commas and emoji differently.  Neither output is a name;
+# closing this class means agreeing on how to case a value that is not what
+# the field is for, which is not worth a behavior change to either package.
+NAME_NOT_A_NAME = "name: non-name text in a name field (URL, email, address, separators)"
 BOM = "JS trim() strips U+FEFF, Python strip() does not"
 FUZZY = "fuzzy header tie-break on headers that match nothing"
 DOWNSTREAM = "payload result, downstream of a normalizer or matcher"
+
+
+def _has_inner_capital(value: str) -> bool:
+    return any(
+        not word.isupper() and not word.islower() and any(c.isupper() for c in word[1:])
+        for word in value.split()
+    )
 
 
 def classify(section: str, item: dict[str, Any]) -> str:
@@ -458,7 +488,12 @@ def classify(section: str, item: dict[str, Any]) -> str:
         if item["field"] in PHONE_FIELDS:
             return PHONE_LIBS
         if item["field"] in NAME_FIELDS:
-            return NAME_CASE
+            value = item["value"] if isinstance(item["value"], str) else ""
+            if _has_inner_capital(value):
+                return NAME_INNER_CAPITAL
+            if not value.isascii():
+                return NAME_UNICODE
+            return NAME_NOT_A_NAME
         return "other string normalizer"
     if section == "payloads":
         return DOWNSTREAM
@@ -530,10 +565,17 @@ def main() -> int:
             section, case_id = entry.split("/", 1)
             if section != args.show:
                 continue
+            # Escaped to ASCII, deliberately.  This printed raw until 2.11.1 and
+            # died with UnicodeEncodeError on a cp1252 console - the tool you
+            # reach for *after* the gate reports a divergence, crashing on
+            # exactly the non-English cases it exists to explain.  Escaping also
+            # beats a UTF-8 console here: most of this corpus is invisible, and
+            # a U+200B rendered as nothing looks identical to a U+FEFF rendered
+            # as nothing, which is the same defect as mojibake, only quieter.
             print(f"\n-- {case_id}")
-            print(f"   in : {json.dumps(index[case_id][1], ensure_ascii=False)[:200]}")
-            print(f"   py : {json.dumps(python_side[section][case_id], ensure_ascii=False)[:200]}")
-            print(f"   js : {json.dumps(js_side[section][case_id], ensure_ascii=False)[:200]}")
+            print(f"   in : {json.dumps(index[case_id][1])[:200]}")
+            print(f"   py : {json.dumps(python_side[section][case_id])[:200]}")
+            print(f"   js : {json.dumps(js_side[section][case_id])[:200]}")
             shown += 1
             if shown >= 10:
                 break
