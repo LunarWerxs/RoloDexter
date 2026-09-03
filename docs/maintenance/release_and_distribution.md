@@ -16,8 +16,10 @@ Last checked: 2026-09-02.
   `package.json`).
 - Python requirement: `>=3.10`; Node requirement: `>=20`.
 
-Both registries are back in step at `2.9.1`. They were not between 2026-07-10
-and 2026-07-18; see "The 2.9.1 npm gap" below for the cause and the fix.
+Both registries are in step at `2.12.0`, and have been at every release since
+`2.9.1`, because one GitHub Release now publishes both. They were not between
+2026-07-10 and 2026-07-18; see "The 2.9.1 npm gap" below for the cause and the
+fix.
 
 npm `2.9.1` was published from `main` rather than from the `v2.9.1` tag,
 because the tag predates the owner move and still carries the old
@@ -75,34 +77,58 @@ After a meaningful maintenance stint or behavior change, do not leave the reposi
 
 Before publishing a new version:
 
-1. Run the full local quality gate:
+1. Run the full local quality gate, which is exactly what CI runs plus the
+   step CI runs on one OS only:
 
    ```powershell
-   $env:PYTHONPATH='src'; python -m ruff check src tests
-   $env:PYTHONPATH='src'; python -m pytest -q
+   ruff check src tests; ruff format --check src tests; mypy src
+   pytest -q
+   deptry .; vulture src scripts --min-confidence 80; pylint --errors-only src/rolodexter
    ```
 
-2. Confirm package metadata and docs are current:
+   Then the whole workflow in a Linux container, which is faster than the
+   host and is the leg CI actually runs: `python ~/.claude/tools/localci.py
+   --docker` (35 steps for this repo, about six minutes).
 
-   - `pyproject.toml` version
-   - `CHANGELOG.md`
+2. If the release touches module layout, packaging, or a normalizer, run the
+   adversarial pre-release review described under "Release verification for
+   2.12.0" below. It is the only gate that looks at the shipped artifacts the
+   way a consumer does, and it found a release-blocker that every other gate
+   passed.
+
+3. Confirm package metadata and docs are current:
+
+   - `CHANGELOG.md`: `[Unreleased]` becomes `[X.Y.Z] - date`, with an empty
+     `[Unreleased]` left above it. Walk `git log <last tag>..HEAD` and check
+     every user-observable change has an entry; two were missing at 2.12.0.
    - README examples and feature wording
-   - Any generated/cache behavior notes
+   - `docs/pricing.md`, which names the shipped version
 
-3. Bump the version using semver intent:
+4. Bump the version using semver intent, in all five sites named under
+   "Current Package Status", and run `python scripts/check_release_versions.py`:
 
    - Patch: bug fixes and internal maintenance with compatible behavior
-   - Minor: new public features or meaningful API additions
+   - Minor: new public features or meaningful API additions, or a behavior
+     change on a common field (2.12.0's name casing)
    - Major: breaking API or behavior changes
 
-4. Build and inspect the package before publishing:
+5. Build and inspect the Python package before publishing, outside the
+   repository so the checkout cannot leak into the artifact:
 
    ```powershell
-   python -m build
-   python -m twine check dist/*
+   python -m build --outdir <scratch>/dist .
+   python -m twine check <scratch>/dist/*
+   python -m venv <scratch>/venv; <scratch>/venv/Scripts/pip install <scratch>/dist/*.whl
+   cd <scratch>; <scratch>/venv/Scripts/python -W error -c "import rolodexter; print(rolodexter.__version__)"
    ```
 
-5. Publish only after lint, tests, build, and metadata checks pass.
+6. Publish only after every gate above passes: commit, push, then
+   `gh release create vX.Y.Z --title "RoloDexter X.Y.Z" --notes-file <notes>`.
+   The Release event publishes to PyPI and npm at once. Watch both runs, then
+   verify from the registries, not the logs: `pip install rolodexter==X.Y.Z`
+   into a fresh venv and `npm install rolodexter@X.Y.Z` into a fresh consumer,
+   with a file-invoked `require("rolodexter/i18n")` and a `tsc` run at
+   `skipLibCheck: false`. PyPI's JSON index lags pip by a few minutes.
 
 For the JavaScript/TypeScript package:
 
@@ -157,31 +183,56 @@ Latest local release verification on 2026-06-30:
 - `npm audit --json`: 0 vulnerabilities; audit metadata reports 7 production dependencies and 39 optional dependencies after generation-only translation/transliteration packages moved to `optionalDependencies`.
 - Current release parity note: package root, `rolodexter/core`, and `rolodexter/i18n` exports are Python-shaped; packed declarations no longer advertise the previously audited camelCase helper/option aliases; installed public class instances no longer expose the previously audited JS-only camelCase prototype methods; mapper/schema/DataFrame warning messages are silent by default and observable through a package-specific Node process event when hosts opt in; importing `rolodexter/i18n` has no global stdout listener side effect; closed-stdout CLI behavior now matches the audited Python broken-pipe diagnostic/exit shape; manually constructed phone formatting, phone helper edge cases, normalizer runtime edge cases, `FieldMatch.service`, registry/schema/i18n missing-value semantics, mapper argument/shape errors, `MappingSchema.apply()` errors, public i18n helper arity/keyword-equivalent options, Python JSON constants, CSV file bytes, clean quarantine side effects, `-.5` CLI value validation, and model/strategy constructor arity errors are covered by the tracked parity probes; and tracked mapper/API plus CLI parity probes report zero mismatches. Ongoing parity probe expansion is tracked internally.
 
-## NPM Package Possibility
+## The NPM Package
 
-Yes, RoloDexter can also become an NPM package, but the best path depends on the intended JavaScript audience.
+`rolodexter` on npm is a real TypeScript package under `packages/js`, shipped
+since 2.9.0 (2026-07-08), not a wrapper around Python. It mirrors the Python
+package's behavior and ships its own types. What keeps the two from drifting:
 
-Recommended approach:
-
-- Create a real TypeScript package that mirrors the Python core behavior and ships types.
-- Keep the canonical alias/pattern data in a shared JSON source so Python and NPM packages do not drift.
-- Keep cross-language golden tests pointed at `tests/fixtures/golden_corpora.json`
-  so Python and TypeScript exercise the same fixture corpus.
-- Publish Python to PyPI and JavaScript/TypeScript to NPM with matching version numbers when behavior is equivalent.
-
-Other options:
-
-- A thin NPM CLI wrapper around Python is faster to create, but it is less useful for browser/serverless users and requires Python at runtime.
-- A generated/WASM approach is possible, but probably too heavy for this package right now.
-
-The NPM package lives under `packages/js`. It syncs
-`src/rolodexter/patterns.json` before build so Python remains the canonical
-alias source in this repository. The local package now uses the same `2.9.0`
-version as the Python release candidate, but publishing should still wait for
-CI, credentials/trusted publishing, and explicit release approval.
+- `src/rolodexter/patterns.json` is the canonical alias source; the JS build
+  syncs it before compiling, so the two packages read one file.
+- Both packages exercise the same fixture corpus in
+  `tests/fixtures/golden_corpora.json`.
+- `scripts/parity_probe.py` and `scripts/cli_parity_probe.py` run the same
+  curated cases through both packages in CI and fail on any mismatch;
+  `scripts/parity_sweep.py` runs a generated 37,705-case corpus on demand (see
+  `docs/maintenance/parity_sweep.md`).
+- The two packages are published with matching version numbers from one
+  GitHub Release, and `scripts/check_release_versions.py` refuses a mismatch.
 
 The CI workflow tests the JavaScript package on Node 20 and Node 24 so the
 declared `>=20` engine floor is covered before release.
+
+### Moving npm to trusted publishing (open)
+
+PyPI publishes through OIDC trusted publishing and holds no token. npm still
+publishes with `NPM_TOKEN`, an environment secret on the `npm` environment,
+and that token was pasted into a chat when it was created on 2026-07-08, so it
+should be treated as exposed. The right fix is not a fresh token but the same
+model PyPI uses: npm's trusted publishing, which the workflow is already
+shaped for (`permissions: id-token: write`, `npm publish --provenance`). It
+needs one action on npmjs.com that only a package owner can take, then one
+workflow edit:
+
+1. On npmjs.com, signed in as an owner of `rolodexter`: package settings,
+   "Trusted publishing", add a GitHub Actions publisher with organization or
+   user `LunarWerxs`, repository `RoloDexter`, workflow filename
+   `npm-publish.yml`, environment `npm`. These must match the workflow file's
+   name and the environment it declares exactly, the way the PyPI publisher
+   table above does.
+2. In `.github/workflows/npm-publish.yml`, delete the `env: NODE_AUTH_TOKEN`
+   line from the publish step, and add `npm install -g npm@latest` before it:
+   trusted publishing needs npm CLI 11.5.1 or newer, and the npm bundled with
+   the runner's Node 24 is not guaranteed to be that new. With no token in the
+   environment, `npm publish --provenance` exchanges the runner's OIDC token
+   for a short-lived publish credential on its own.
+3. Verify with a `workflow_dispatch` of `npm-publish.yml` at the default
+   `dry_run: true` (which exercises everything but the upload), then trust
+   the next real release, and only then delete the `NPM_TOKEN` secret and
+   revoke the token on npmjs.com.
+
+Do step 1 before step 2: with the token removed and no publisher configured,
+the next release's npm half fails and the registries fall out of step again.
 
 ### The 2.9.1 npm gap
 
