@@ -108,7 +108,7 @@ def header_variants(root: str) -> list[str]:
     return sorted(out)
 
 
-def build_corpus() -> dict[str, list[dict[str, Any]]]:
+def _build_normalize_corpus() -> list[dict[str, Any]]:
     normalize = [
         {"id": f"nv|{field}|{index}", "field": field, "value": value}
         for field in canonical_fields()
@@ -128,10 +128,17 @@ def build_corpus() -> dict[str, list[dict[str, Any]]]:
         for region in REGIONS
         for index, value in enumerate(phoneish)
     )
+    return normalize
 
+
+def _all_headers() -> list[str]:
     all_headers: list[str] = []
     for root in HEADER_ROOTS:
         all_headers.extend(header_variants(root))
+    return all_headers
+
+
+def _build_schema_corpus(all_headers: list[str]) -> list[dict[str, Any]]:
     unique_headers = sorted(set(all_headers))
 
     schemas: list[dict[str, Any]] = [
@@ -152,6 +159,11 @@ def build_corpus() -> dict[str, list[dict[str, Any]]]:
         }
         for threshold in (0.0, 0.5, 0.8, 0.95, 0.99, 1.0)
     )
+    return schemas
+
+
+def _build_payload_corpus(all_headers: list[str]) -> list[dict[str, Any]]:
+    unique_headers = sorted(set(all_headers))
 
     payloads: list[dict[str, Any]] = [
         {"id": f"pl|{hindex}|{vindex}", "payload": {header: value}}
@@ -177,7 +189,10 @@ def build_corpus() -> dict[str, list[dict[str, Any]]]:
         for oindex, options in enumerate(option_sets)
         for mindex, mapper_options in enumerate(mapper_sets)
     )
+    return payloads
 
+
+def _build_phone_corpus() -> list[dict[str, Any]]:
     phone_values = [v for v in VALUES if isinstance(v, str)] + [None, 123, True, [], {}]
     phones: list[dict[str, Any]] = [
         {"id": f"ph|{fn}|{region}|{index}", "fn": fn, "value": value, "default_region": region}
@@ -218,7 +233,10 @@ def build_corpus() -> dict[str, list[dict[str, Any]]]:
         for region in (None, "US", "GB")
         for max_matches in (None, 0, 1, 2, 5)
     )
+    return phones
 
+
+def _build_object_corpus() -> list[dict[str, Any]]:
     objects = [
         {"id": f"obj|{index}", "payload": fixture}
         for index, fixture in enumerate(FIXTURES)
@@ -227,16 +245,22 @@ def build_corpus() -> dict[str, list[dict[str, Any]]]:
         {"id": f"objemb|{index}", "payload": fixture, "options": {"extract_embedded_phones": True}}
         for index, fixture in enumerate(FIXTURES)
     )
+    return objects
 
-    languages = [{"id": f"lang|{code}", "lang_code": code} for code in sorted(r.SUPPORTED_LANGUAGES)]
 
+def _build_language_corpus() -> list[dict[str, Any]]:
+    return [{"id": f"lang|{code}", "lang_code": code} for code in sorted(r.SUPPORTED_LANGUAGES)]
+
+
+def build_corpus() -> dict[str, list[dict[str, Any]]]:
+    all_headers = _all_headers()
     return {
-        "normalize": normalize,
-        "schemas": schemas,
-        "payloads": payloads,
-        "phones": phones,
-        "objects": objects,
-        "languages": languages,
+        "normalize": _build_normalize_corpus(),
+        "schemas": _build_schema_corpus(all_headers),
+        "payloads": _build_payload_corpus(all_headers),
+        "phones": _build_phone_corpus(),
+        "objects": _build_object_corpus(),
+        "languages": _build_language_corpus(),
     }
 
 
