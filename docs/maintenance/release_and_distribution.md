@@ -137,7 +137,7 @@ cd packages/js
 npm ci
 npm run typecheck
 npm test
-npm run test:parity
+npm run check:parity
 npm pack --dry-run
 npm publish --dry-run
 npm audit --omit=dev
@@ -176,8 +176,8 @@ Latest local release verification on 2026-06-30:
   sdist and wheel, and `py -3 -m twine check .tmp\dist-check\*` passed for both.
 - `npm run typecheck`: passed.
 - `npm test`: 56 passed.
-- `npm run test:parity`: release versions match `2.8.1`; expanded mapper/API and CLI parity probes reported zero mismatches.
-- `npm pack --dry-run --json`: passed for `rolodexter@2.8.1`; packed size 407.1 kB, unpacked size 1.9 MB, 24 files. Tarball includes ESM/CJS library files, both CLIs, `patterns.json`, README, LICENSE, declaration files, and package metadata; `cli.d.ts` is not packed. The package `prepack` lifecycle runs both `npm test` and `npm run test:parity`, so local pack/publish commands cannot skip parity accidentally.
+- `npm run check:parity`: release versions match `2.8.1`; expanded mapper/API and CLI parity probes reported zero mismatches.
+- `npm pack --dry-run --json`: passed for `rolodexter@2.8.1`; packed size 407.1 kB, unpacked size 1.9 MB, 24 files. Tarball includes ESM/CJS library files, both CLIs, `patterns.json`, README, LICENSE, declaration files, and package metadata; `cli.d.ts` is not packed. The package `prepack` lifecycle runs both `npm test` and `npm run check:parity`, so local pack/publish commands cannot skip parity accidentally.
 - Fresh throwaway install from the packed tarball: ESM import, CommonJS require, `ContactMapper.map_payload()`, Python-shaped root/core/i18n exports, i18n `load_cached()`/`generate_language()` parity edges, `npx rolodexter fields`, and `npx rolodexter-i18n --list` worked. A cache-only install with `--omit=optional` also worked, proving mapper construction and both CLIs do not require generation-only translation/transliteration packages.
 - `npm publish --dry-run`: passed for `rolodexter@2.8.1` with the CLI `bin` metadata accepted as-is.
 - `npm audit --json`: 0 vulnerabilities; audit metadata reports 7 production dependencies and 39 optional dependencies after generation-only translation/transliteration packages moved to `optionalDependencies`.

@@ -115,8 +115,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
     "coverage": "npm run build && node scripts/run-tests.mjs --coverage",
-    "test:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
-    "prepack": "npm test && npm run test:parity"
+    "check:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
+    "prepack": "npm test && npm run check:parity"
   },
   "dependencies": {
     "csv-stringify": "^6.8.0",

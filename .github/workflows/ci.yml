@@ -137,7 +137,7 @@ jobs:
 
       - name: Python/NPM parity probes
         working-directory: packages/js
-        run: npm run test:parity
+        run: npm run check:parity
 
       - name: Pack check
         working-directory: packages/js
