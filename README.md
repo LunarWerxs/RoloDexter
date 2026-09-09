@@ -11,6 +11,7 @@ Route messy, inconsistent contact data from *any* source to a clean, canonical s
 [![npm](https://img.shields.io/npm/v/rolodexter)](https://www.npmjs.com/package/rolodexter)
 [![Python](https://img.shields.io/pypi/pyversions/rolodexter)](https://pypi.org/project/rolodexter/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join_the_community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PsWpeNUzhk)
 
 </div>
 
