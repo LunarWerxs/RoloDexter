@@ -57,38 +57,38 @@ edit the dossier, not this block. Everything ABOVE the marker is yours.
 
 ### Features
 
-19 recorded - 19 shipped, 0 partial, 0 planned. Each `path:line` is where the feature is DEFINED, checked by `odin codex check`.
+19 recorded - 19 shipped, 0 partial, 0 planned. Each path is where the feature is DEFINED; the exact lines live in the Codex entry, which `odin codex check` re-verifies and repairs.
 
 **Shipped**
 
-- **Four-layer header matching pipeline** - Resolves each input header to a canonical field through exact, normalized, fuzzy, then heuristic (data-shape) matching, in priority order. - `src/rolodexter/_mapper.py:187`, `src/rolodexter/_strategies.py:47`
-- **Confidence scoring** - Every header match returns a 0.0-1.0 confidence score and which strategy produced it (exact/normalized/fuzzy/heuristic). - `src/rolodexter/_models.py:230`
-- **Value normalization** - Matched values are cleaned per field type: phone to E.164, email lowercased, names title-cased with particle awareness, addresses whitespace-collapsed, dates to ISO-8601, tags to a list. - `src/rolodexter/_normalizers.py:541`, `src/rolodexter/_normalizers.py:475`
-- **Pre-flight profiling** - `rolodexter profile` reports match rate, populated/unmapped fields, and categorized warnings for a file before any mapped output is written. - `src/rolodexter/_mapper.py:630`, `src/rolodexter/__main__.py:709`
-- **Batch and streaming processing** - map_batch processes a list of payloads; map_stream lazily yields results in constant memory for large CSV/JSONL exports. - `src/rolodexter/_mapper.py:560`, `src/rolodexter/_mapper.py:593`
-- **Pandas DataFrame support** - map_dataframe renames a DataFrame's columns to canonical fields and normalizes values in place, guaranteeing unique output labels. - `src/rolodexter/core.py:399`
-- **Command-line interface** - `rolodexter map/profile/explain/fields` maps CSV/JSON/JSONL files from the shell with region, language, confidence, and override flags. - `src/rolodexter/__main__.py:966`, `src/rolodexter/__main__.py:599`
-- **Strict mode and confidence-threshold gating** - Callers can demand high-confidence-only matches and raise on any normalization warning instead of silently degrading. - `src/rolodexter/_mapper.py:304`
-- **Quarantine handling for bad rows** - `--on-error quarantine` keeps processing a file while writing failing rows to a separate JSONL file instead of aborting the run. - `src/rolodexter/__main__.py:413`, `src/rolodexter/__main__.py:452`
-- **Schema compile-once / mapping lockfile** - compile_schema resolves a header set once into a reusable MappingSchema; `--schema-out`/`--schema-in` save and replay that plan so later imports route identically even after a patterns.json change. - `src/rolodexter/core.py:343`, `src/rolodexter/core.py:534`
-- **Embedded phone number extraction** - Finds and extracts phone numbers embedded inside free-text field values (e.g. a notes field), bounded per field and per payload. - `src/rolodexter/_mapper.py:428`
-- **Per-caller field overrides** - Callers can force specific vendor headers (e.g. a Mailchimp merge-field code) to a canonical field without editing the shared alias table. - `src/rolodexter/_patterns.py:232`
-- **Custom pattern tables** - A ContactMapper can be constructed from a caller-supplied patterns dict or patterns.json file instead of the built-in 600+ alias table, with validation on load. - `src/rolodexter/_patterns.py:76`
-- **Row deduplication via identity keys** - Each mapped result exposes stable email/phone/source identity keys, and the CLI's `--dedupe` flag drops later rows that share one with an earlier row. - `src/rolodexter/_models.py:359`
-- **On-demand i18n alias generation** - Generates and caches header-alias tables for 40 languages via an explicit, one-time CLI/API call; runtime loading of a language is then cache-only with no further network access. - `src/rolodexter/i18n.py:629`, `src/rolodexter/i18n.py:515`
-- **E.164 phone parsing and formatting** - Wraps libphonenumber to parse, validate, and format matched phone values to E.164/international/national forms and detect number type. - `src/rolodexter/_phone.py:156`
-- **Country and state/province normalization** - Normalizes free-text country and state/province values to ISO 3166-1 alpha-2 and 2-letter US/Canadian codes. - `src/rolodexter/_geo.py:14`, `src/rolodexter/_geo.py:188`
-- **Dual Python + TypeScript packages with parity** - The full pipeline is maintained as two packages, a canonical Python implementation and a parity-tested TypeScript port sharing the same alias table, published separately to PyPI and npm. - `packages/js/src/index.ts:209`, `packages/js/src/index.ts:45`
-- **explain command** - `rolodexter explain "Header" --value X` prints exactly how one header resolved (strategy, confidence) without processing a file. - `src/rolodexter/__main__.py:730`
+- **Four-layer header matching pipeline** - Resolves each input header to a canonical field through exact, normalized, fuzzy, then heuristic (data-shape) matching, in priority order. - `src/rolodexter/_mapper.py`, `src/rolodexter/_strategies.py`
+- **Confidence scoring** - Every header match returns a 0.0-1.0 confidence score and which strategy produced it (exact/normalized/fuzzy/heuristic). - `src/rolodexter/_models.py`
+- **Value normalization** - Matched values are cleaned per field type: phone to E.164, email lowercased, names title-cased with particle awareness, addresses whitespace-collapsed, dates to ISO-8601, tags to a list. - `src/rolodexter/_normalizers.py`
+- **Pre-flight profiling** - `rolodexter profile` reports match rate, populated/unmapped fields, and categorized warnings for a file before any mapped output is written. - `src/rolodexter/_mapper.py`, `src/rolodexter/__main__.py`
+- **Batch and streaming processing** - map_batch processes a list of payloads; map_stream lazily yields results in constant memory for large CSV/JSONL exports. - `src/rolodexter/_mapper.py`
+- **Pandas DataFrame support** - map_dataframe renames a DataFrame's columns to canonical fields and normalizes values in place, guaranteeing unique output labels. - `src/rolodexter/core.py`
+- **Command-line interface** - `rolodexter map/profile/explain/fields` maps CSV/JSON/JSONL files from the shell with region, language, confidence, and override flags. - `src/rolodexter/__main__.py`
+- **Strict mode and confidence-threshold gating** - Callers can demand high-confidence-only matches and raise on any normalization warning instead of silently degrading. - `src/rolodexter/_mapper.py`
+- **Quarantine handling for bad rows** - `--on-error quarantine` keeps processing a file while writing failing rows to a separate JSONL file instead of aborting the run. - `src/rolodexter/__main__.py`
+- **Schema compile-once / mapping lockfile** - compile_schema resolves a header set once into a reusable MappingSchema; `--schema-out`/`--schema-in` save and replay that plan so later imports route identically even after a patterns.json change. - `src/rolodexter/core.py`
+- **Embedded phone number extraction** - Finds and extracts phone numbers embedded inside free-text field values (e.g. a notes field), bounded per field and per payload. - `src/rolodexter/_mapper.py`
+- **Per-caller field overrides** - Callers can force specific vendor headers (e.g. a Mailchimp merge-field code) to a canonical field without editing the shared alias table. - `src/rolodexter/_patterns.py`
+- **Custom pattern tables** - A ContactMapper can be constructed from a caller-supplied patterns dict or patterns.json file instead of the built-in 600+ alias table, with validation on load. - `src/rolodexter/_patterns.py`
+- **Row deduplication via identity keys** - Each mapped result exposes stable email/phone/source identity keys, and the CLI's `--dedupe` flag drops later rows that share one with an earlier row. - `src/rolodexter/_models.py`
+- **On-demand i18n alias generation** - Generates and caches header-alias tables for 40 languages via an explicit, one-time CLI/API call; runtime loading of a language is then cache-only with no further network access. - `src/rolodexter/i18n.py`
+- **E.164 phone parsing and formatting** - Wraps libphonenumber to parse, validate, and format matched phone values to E.164/international/national forms and detect number type. - `src/rolodexter/_phone.py`
+- **Country and state/province normalization** - Normalizes free-text country and state/province values to ISO 3166-1 alpha-2 and 2-letter US/Canadian codes. - `src/rolodexter/_geo.py`
+- **Dual Python + TypeScript packages with parity** - The full pipeline is maintained as two packages, a canonical Python implementation and a parity-tested TypeScript port sharing the same alias table, published separately to PyPI and npm. - `packages/js/src/index.ts`
+- **explain command** - `rolodexter explain "Header" --value X` prints exactly how one header resolved (strategy, confidence) without processing a file. - `src/rolodexter/__main__.py`
 
 ### Where to add a new one
 
-- **a new canonical field** - add it to the CanonicalField enum in _models.py and the parity CanonicalFieldMember table in packages/js/src/_models.ts, add its aliases to patterns.json, then run sync-patterns.mjs so the JS package's copy matches anchors: `src/rolodexter/_models.py:121`, `packages/js/src/_models.ts:329`
-- **a new match strategy (a fifth pipeline layer)** - subclass MatchStrategy in _strategies.py (Python) and the parallel MatchStrategy in packages/js/src/_strategies.ts, then register it in the default strategy list both packages build anchors: `src/rolodexter/_strategies.py:47`, `packages/js/src/_strategies.ts:431`
-- **a new value normalizer for a field type** - add a normalizer class and register it in the _FIELD_NORMALIZERS dispatch table (_normalizers.py) and the parity normalizeValue dispatch in packages/js/src/_normalizers.ts anchors: `src/rolodexter/_normalizers.py:372`, `packages/js/src/_normalizers.ts:149`
-- **a new CLI subcommand** - add a `_cmd_*` handler and wire it into the argparse subparsers built in _build_parser (__main__.py); mirror it in packages/js/src/cli.ts for parity anchors: `src/rolodexter/__main__.py:752`
-- **a new supported i18n language** - add the language code/name to SUPPORTED_LANGUAGES in i18n.py and the parity table in packages/js/src/_i18n_cache.ts, so both the generator and the cache loader recognize it anchors: `src/rolodexter/i18n.py:87`, `packages/js/src/_i18n_cache.ts:12`
-- **a new normalization warning category** - add a member to WarningCategory in _models.py and raise/emit it from the relevant normalizer anchors: `src/rolodexter/_models.py:50`
+- **a new canonical field** - add it to the CanonicalField enum in _models.py and the parity CanonicalFieldMember table in packages/js/src/_models.ts, add its aliases to patterns.json, then run sync-patterns.mjs so the JS package's copy matches anchors: `src/rolodexter/_models.py`, `packages/js/src/_models.ts`
+- **a new match strategy (a fifth pipeline layer)** - subclass MatchStrategy in _strategies.py (Python) and the parallel MatchStrategy in packages/js/src/_strategies.ts, then register it in the default strategy list both packages build anchors: `src/rolodexter/_strategies.py`, `packages/js/src/_strategies.ts`
+- **a new value normalizer for a field type** - add a normalizer class and register it in the _FIELD_NORMALIZERS dispatch table (_normalizers.py) and the parity normalizeValue dispatch in packages/js/src/_normalizers.ts anchors: `src/rolodexter/_normalizers.py`, `packages/js/src/_normalizers.ts`
+- **a new CLI subcommand** - add a `_cmd_*` handler and wire it into the argparse subparsers built in _build_parser (__main__.py); mirror it in packages/js/src/cli.ts for parity anchors: `src/rolodexter/__main__.py`
+- **a new supported i18n language** - add the language code/name to SUPPORTED_LANGUAGES in i18n.py and the parity table in packages/js/src/_i18n_cache.ts, so both the generator and the cache loader recognize it anchors: `src/rolodexter/i18n.py`, `packages/js/src/_i18n_cache.ts`
+- **a new normalization warning category** - add a member to WarningCategory in _models.py and raise/emit it from the relevant normalizer anchors: `src/rolodexter/_models.py`
 
 ### Gaps and wants
 
@@ -98,4 +98,4 @@ _Read it with `python odin.py codex brief rolodexter` in the Odin clone._
 ---
 
 _Generated by `odin codex about --publish rolodexter` on 2026-09-16 from a Codex dossier stamped 2026-09-15. Regenerate after the product moves; `odin codex about` reports drift._
-<!-- odin:about GENERATED END sha=3f5dbb00653f -->
+<!-- odin:about GENERATED END sha=c46a48af5c12 -->
