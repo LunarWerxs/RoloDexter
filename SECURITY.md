@@ -17,7 +17,7 @@ to the most recent release before reporting.
 ## Supply-chain Hardening
 
 - **Releases use PyPI [trusted publishing](https://docs.pypi.org/trusted-publishers/)
-  (OIDC)** — no long-lived API tokens are stored anywhere. Published
+  (OIDC)** - no long-lived API tokens are stored anywhere. Published
   artifacts include [PEP 740](https://peps.python.org/pep-0740/) provenance
   attestations.
 - **NPM releases are published from GitHub Actions with
