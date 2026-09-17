@@ -604,7 +604,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
       <div>
         <p class="eyebrow">rolodexter · v2.11.1 · python + typescript</p>
         <h1 id="hero-heading">Every export names the same field differently. <span class="accent">Map them all to one schema.</span></h1>
-        <p class="hero-sub">Point RoloDexter at a CRM payload, a form post, or a CSV nobody has looked at since 2019, and get back clean canonical fields with a confidence score on every match.</p>
+        <p class="hero-sub">Point it at a CRM payload, a form post, or a CSV nobody has opened since 2019, and get canonical fields with a confidence score.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="https://pypi.org/project/rolodexter/">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19.5h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -660,7 +660,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
       <div class="section-head">
         <p class="eyebrow">// the problem</p>
         <h2 id="problem-heading">Nobody agrees on what to call a phone number.</h2>
-        <p>Every CRM, email platform, and CSV export invents its own names for the same five pieces of information. Writing the mapping by hand works right up until the next integration.</p>
+        <p>Every CRM and CSV export invents its own names for the same five fields. Hand-written mapping works until the next integration.</p>
       </div>
 
       <div class="mess-wrap">
@@ -681,7 +681,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
 
       <div class="note">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" stroke="currentColor" stroke-width="1.6"/></svg>
-        <p><b>Even <code class="cls">Column A</code> is recoverable.</b> When a header carries no meaning at all, RoloDexter reads the value's shape instead, and an email address in an unnamed column still lands on <code class="cls">email</code>.</p>
+        <p><b>Even <code class="cls">Column A</code> is recoverable.</b> With a meaningless header it reads the value's shape instead, so an email still lands on <code class="cls">email</code>.</p>
       </div>
     </div>
   </section>
@@ -726,7 +726,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
 
       <div class="note">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-        <p><b>Nothing is silent.</b> Non-fatal issues come back as warnings rather than disappearing, and strict mode turns a low-confidence guess or an unparseable value into a loud failure instead of a quietly wrong row.</p>
+        <p><b>Nothing is silent.</b> Non-fatal issues come back as warnings; strict mode turns a low-confidence guess into a loud failure.</p>
       </div>
     </div>
   </section>
@@ -739,7 +739,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
       <div class="split-copy">
         <p class="eyebrow">// value normalization</p>
         <h2 id="normalize-heading">Matching the field is only half of it.</h2>
-        <p>The value gets cleaned too, so what comes out the other side is ready to store rather than ready for another round of regexes.</p>
+        <p>The value is cleaned too, so what comes out is ready to store, not ready for more regexes.</p>
         <ul>
           <li>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -796,17 +796,17 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
         <div class="card">
           <div class="card-icon">≫</div>
           <h3>Batch and streaming</h3>
-          <p>Map a list in one call, or stream a huge CSV or JSONL export in constant memory. There is a preview mode that reports import readiness without retaining a single mapped row.</p>
+          <p>Map a list in one call, or stream a huge CSV or JSONL in constant memory. Preview mode retains nothing.</p>
         </div>
         <div class="card glassy">
           <div class="card-icon">🐼</div>
           <h3>DataFrames</h3>
-          <p>Hand it a DataFrame and get the columns renamed to canonical fields with values normalized. Columns it does not recognise are kept, not dropped.</p>
+          <p>Hand it a DataFrame and get canonical columns with normalized values. Unrecognised columns are kept, not dropped.</p>
         </div>
         <div class="card">
           <div class="card-icon">▶</div>
           <h3>Command line</h3>
-          <p>Map a CSV, JSON, or JSONL export straight from a shell, quarantine bad rows to a JSONL file instead of stopping, and ask it to explain exactly how one header resolved.</p>
+          <p>Map a CSV, JSON or JSONL export from a shell, quarantine bad rows to JSONL, and ask how any header resolved.</p>
         </div>
         <div class="card glassy">
           <div class="card-icon">◇</div>
@@ -821,7 +821,7 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
         <div class="card">
           <div class="card-icon">TS</div>
           <h3>Python and TypeScript</h3>
-          <p>The Python package is the canonical implementation and owns the shared alias table. The npm package syncs that same table at build time, so both ecosystems agree.</p>
+          <p>The Python package is canonical and owns the alias table; the npm package syncs it at build time.</p>
         </div>
       </div>
     </div>
@@ -858,17 +858,17 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
         <div class="card">
           <div class="card-icon">{ }</div>
           <h3>Hand-written mapping code</h3>
-          <p>A dict or regex per integration, expanded by hand every time a new CRM field appears. Fine until the next unexpected header, which it silently drops or misroutes with no warning.</p>
+          <p>A dict or regex per integration, extended by hand forever, that silently misroutes the next unexpected header.</p>
         </div>
         <div class="card glassy">
           <div class="card-icon">OR</div>
           <h3>OpenRefine</h3>
-          <p>A free, open-source GUI for cleaning one dataset at a time by hand. Not a library you call from code, and no maintained cross-CRM alias table.</p>
+          <p>A free GUI for cleaning one dataset by hand. Not a library, and no maintained cross-CRM alias table.</p>
         </div>
         <div class="card">
           <div class="card-icon">⚡</div>
           <h3>Zapier / Make field mapping</h3>
-          <p>Map one app's fields to another by hand, inside a single workflow step. Fine for a one-off; no reusable alias table, no confidence scores, nothing you can call from your own code.</p>
+          <p>Hand-mapped fields inside one workflow step. No reusable alias table, no confidence scores, nothing callable from code.</p>
         </div>
       </div>
     </div>
