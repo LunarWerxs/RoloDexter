@@ -42,23 +42,33 @@ classifiers = [
 # nameparser 2.2 deprecates mutating its shared CONSTANTS singleton for removal
 # in 3.0; this package uses a private Constants instance since 2.12.0, but 3.0
 # is an untested major and is blocked the same way phonenumbers' next one is.
-dependencies = ["phonenumbers>=9.0.39,<10", "nameparser>=2.3.0,<3"]
+#
+# A FLOOR MUST NOT EXCLUDE THIS PACKAGE'S OWN MINIMUM PYTHON. nameparser 2.x,
+# rapidfuzz 3.14.6 and pandas 3.x all require Python>=3.11, so raising their
+# floors to "current" on 2026-09-14 made the package uninstallable on the 3.10
+# this project supports and advertises - `pip install -e .[dev]` on the 3.10 leg
+# failed to RESOLVE, and CI went red on the next push. The floors below are the
+# highest release of each that still installs on 3.10 (nameparser 1.4.0,
+# rapidfuzz 3.14.5, pandas 2.3.3); a floor is a minimum, so 3.11+ still resolves
+# to the current 2.3.0 / 3.14.6 / 3.0.5. `python odin.py deps --floors` (odin's
+# pyfloors.py) is the check that says so without waiting for a red run.
+dependencies = ["phonenumbers>=9.0.39,<10", "nameparser>=1.4.0,<3"]
 
 [project.optional-dependencies]
-fuzzy = ["rapidfuzz>=3.14.6"]
+fuzzy = ["rapidfuzz>=3.14.5"]
 i18n-generate = ["deep-translator>=1.11.4", "unidecode>=1.4.0"]
-pandas = ["pandas>=3.0.5"]
+pandas = ["pandas>=2.3.3"]
 all = [
-    "rapidfuzz>=3.14.6",
+    "rapidfuzz>=3.14.5",
     "deep-translator>=1.11.4",
     "unidecode>=1.4.0",
-    "pandas>=3.0.5",
+    "pandas>=2.3.3",
 ]
 dev = [
-    "rapidfuzz>=3.14.6",
+    "rapidfuzz>=3.14.5",
     "deep-translator>=1.11.4",
     "unidecode>=1.4.0",
-    "pandas>=3.0.5",
+    "pandas>=2.3.3",
     # Keep mypy's Python 3.10 target compatible with NumPy stubs in CI.
     # numpy>=2.3 requires Python>=3.11, so the floor stays on the last 2.2.x
     # patch that still installs on the 3.10 floor; <2.5 keeps the cap this
