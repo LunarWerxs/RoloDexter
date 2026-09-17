@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RoloDexter — The universal contact field mapper</title>
-<meta name="description" content="RoloDexter maps messy CRM, form, and CSV contact fields to one schema — 600+ aliases, 62 fields, confidence scores. Free, MIT-licensed, Python and TypeScript.">
+<title>RoloDexter: The universal contact field mapper</title>
+<meta name="description" content="RoloDexter maps messy CRM, form, and CSV contact fields to one schema: 600+ aliases, 62 fields, confidence scores. Free, MIT-licensed, Python and TypeScript.">
 <link rel="icon" href="assets/icon-256.png" type="image/png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="RoloDexter">
 <link rel="canonical" href="https://rolodexter.lunarwerx.com/">
 <meta property="og:url" content="https://rolodexter.lunarwerx.com/">
-<meta property="og:title" content="RoloDexter — The universal contact field mapper">
+<meta property="og:title" content="RoloDexter: The universal contact field mapper">
 <meta property="og:description" content="Every CRM names the same field differently. RoloDexter maps them all to one canonical schema, with confidence scores and value normalization. Python and TypeScript, MIT-licensed.">
 <meta property="og:image" content="https://rolodexter.lunarwerx.com/assets/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="RoloDexter — the universal contact field mapper">
+<meta property="og:image:alt" content="RoloDexter: the universal contact field mapper">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="RoloDexter — The universal contact field mapper">
+<meta name="twitter:title" content="RoloDexter: The universal contact field mapper">
 <meta name="twitter:description" content="Every CRM names the same field differently. RoloDexter maps them all to one canonical schema. Python and TypeScript, MIT-licensed.">
 <meta name="twitter:image" content="https://rolodexter.lunarwerx.com/assets/og-image.png">
 <style>
@@ -886,11 +886,11 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
       <div class="faq-list">
               <details class="faq-item">
         <summary>Is RoloDexter free to use?</summary>
-        <p class="faq-a">Yes — RoloDexter is free, open-source software released under the MIT license. The Python package installs with <code class="cls">pip install rolodexter</code> and the JavaScript/TypeScript package installs with <code class="cls">npm install rolodexter</code>; both are maintained as one dual-package, MIT-licensed project.</p>
+        <p class="faq-a">Yes, RoloDexter is free, open-source software released under the MIT license. The Python package installs with <code class="cls">pip install rolodexter</code> and the JavaScript/TypeScript package installs with <code class="cls">npm install rolodexter</code>; both are maintained as one dual-package, MIT-licensed project.</p>
       </details>
               <details class="faq-item">
         <summary>What does RoloDexter do?</summary>
-        <p class="faq-a">RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields — like <code class="cls">first_name</code>, <code class="cls">email</code>, and <code class="cls">phone</code> — and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns.</p>
+        <p class="faq-a">RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields, like <code class="cls">first_name</code>, <code class="cls">email</code>, and <code class="cls">phone</code>, and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns.</p>
       </details>
               <details class="faq-item">
         <summary>How does RoloDexter figure out what a messy column name means?</summary>
@@ -902,19 +902,19 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
       </details>
               <details class="faq-item">
         <summary>Does RoloDexter support languages other than English?</summary>
-        <p class="faq-a">Yes. English ships by default, and alias tables for 40 languages — including Spanish, French, German, and Japanese — generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts.</p>
+        <p class="faq-a">Yes. English ships by default, and alias tables for 40 languages, including Spanish, French, German, and Japanese, generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts.</p>
       </details>
               <details class="faq-item">
         <summary>Does RoloDexter fail silently on bad data?</summary>
-        <p class="faq-a">No — non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text.</p>
+        <p class="faq-a">No, non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text.</p>
       </details>
               <details class="faq-item">
         <summary>Does RoloDexter work offline?</summary>
-        <p class="faq-a">Yes — matching and normalization for the default English alias table run entirely locally, with no network calls. Only generating alias caches for the other 40 supported languages needs a one-time network fetch, via the optional <code class="cls">i18n-generate</code> extra; once cached, those load and match offline too.</p>
+        <p class="faq-a">Yes, matching and normalization for the default English alias table run entirely locally, with no network calls. Only generating alias caches for the other 40 supported languages needs a one-time network fetch, via the optional <code class="cls">i18n-generate</code> extra; once cached, those load and match offline too.</p>
       </details>
               <details class="faq-item">
         <summary>How is RoloDexter different from a no-code tool like Zapier?</summary>
-        <p class="faq-a">Zapier and Make let you map one app's fields to another by hand, inside a single workflow step. RoloDexter is a library: call it from Python or TypeScript to resolve any header automatically against 600+ known aliases, with a confidence score on every match — no per-workflow mapping UI required.</p>
+        <p class="faq-a">Zapier and Make let you map one app's fields to another by hand, inside a single workflow step. RoloDexter is a library: call it from Python or TypeScript to resolve any header automatically against 600+ known aliases, with a confidence score on every match, no per-workflow mapping UI required.</p>
       </details>
       </div>
     </div>
