@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "project": {
+    "name": "rolodexter"
+  },
+  "checks": {
+    "supply-chain-posture-declared": {
+      "$reason": "This repository's bun project lives in `packages/js/`, not at the root. Bun reads bunfig.toml from the directory the install runs in and never walks up, so `packages/js/bunfig.toml` is the file that actually governs `bun install` here - a root bunfig.toml would be inert and declaring one would make this check green without making the install any safer. The check resolves a single `bunfigPath` against the repo root and defaults it to the root file, so this points it at the real declaration. The cooldown itself is not weakened: `packages/js/bunfig.toml` is measured exactly as a root one would be.",
+      "bunfigPath": "packages/js/bunfig.toml"
+    }
+  }
+}
