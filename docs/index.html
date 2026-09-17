@@ -349,18 +349,6 @@
   .faq-item>summary:hover{color:var(--plum)}
   .faq-item>summary:focus-visible{outline:2px solid var(--plum);outline-offset:-2px;border-radius:10px}
   .faq-a{padding:0 16px 15px;margin:0;color:var(--muted);line-height:1.6;max-width:72ch}
-
-  /* Progressive disclosure for the specialist half of the page: the heading and its one
-     line stay visible, the body is one click away. Nothing is removed from the DOM. */
-  details.more{margin-top:18px}
-  details.more>summary{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
-    list-style:none;font:inherit;font-size:.92rem;font-weight:600;opacity:.75;
-    padding:7px 13px;border:1px solid currentColor;border-radius:999px;width:auto}
-  details.more>summary::-webkit-details-marker{display:none}
-  details.more>summary::after{content:"+";font-weight:700;line-height:1}
-  details.more[open]>summary::after{content:"\2013"}
-  details.more>summary:hover{opacity:1}
-  details.more[open]>summary{margin-bottom:18px}
 </style>
 <style>
 /* Back to the parent studio: a bare arrow at the top left of the page.
@@ -709,8 +697,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
         <p>Every field walks the chain until something matches, and the strategy that caught it sets the confidence you get back.</p>
       </div>
 
-      <details class="more"><summary>See the four strategies</summary>
-<div class="feature-grid">
+      <div class="feature-grid">
         <div class="card">
           <div class="card-icon">1</div>
           <h3>Exact</h3>
@@ -741,7 +728,6 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
         <p><b>Nothing is silent.</b> Non-fatal issues come back as warnings; strict mode turns a low-confidence guess into a loud failure.</p>
       </div>
-</details>
     </div>
   </section>
 
@@ -755,8 +741,7 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
         <h2 id="normalize-heading">Matching the field is only half of it.</h2>
         <p>The value is cleaned too, so what comes out is ready to store, not ready for more regexes.</p>
         <ul>
-          <details class="more"><summary>How normalizing works</summary>
-<li>
+          <li>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span><b>Phones</b> to E.164 via libphonenumber, and phone numbers buried inside a free-text field can be extracted on their own.</span>
           </li>
@@ -772,7 +757,6 @@ result <span class="tok-punc">=</span> mapper<span class="tok-punc">.</span><spa
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span><b>Your own names too.</b> Per-caller overrides map a vendor's <code class="cls">MMERGE6</code> or <code class="cls">cf_lead_score</code> onto a canonical field without patching the alias table.</span>
           </li>
-</details>
         </ul>
       </div>
 
@@ -809,8 +793,7 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
       </div>
 
       <div class="feature-grid three">
-        <details class="more"><summary>Using it at scale</summary>
-<div class="card">
+        <div class="card">
           <div class="card-icon">≫</div>
           <h3>Batch and streaming</h3>
           <p>Map a list in one call, or stream a huge CSV or JSONL in constant memory. Preview mode retains nothing.</p>
@@ -840,7 +823,6 @@ mapper<span class="tok-punc">.</span><span class="tok-fn">identify</span><span c
           <h3>Python and TypeScript</h3>
           <p>The Python package is canonical and owns the alias table; the npm package syncs it at build time.</p>
         </div>
-</details>
       </div>
     </div>
   </section>
