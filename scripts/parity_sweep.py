@@ -42,8 +42,9 @@ sys.path.insert(0, str(ROOT / "src"))
 # runs as a script. The value corpus lives there because it is the only part
 # that needs invisible and control characters, and it builds them with chr()
 # so neither file holds a literal NUL, ESC or BOM.
-import rolodexter as r  # noqa: E402
 from parity_sweep_values import VALUES  # noqa: E402
+
+import rolodexter as r  # noqa: E402
 
 REGIONS = [None, "US", "GB", "DE", "AU", "IN", "BR", "JP", "ZZ", "", "us"]
 

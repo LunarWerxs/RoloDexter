@@ -144,6 +144,11 @@ ignore = ["E501"] # line length handled by formatter
 
 [tool.ruff.lint.isort]
 known-first-party = ["rolodexter"]
+# tomllib IS the standard library - it just arrived in 3.11, and this package still promises
+# 3.10, so a py310-targeted isort files it under third-party and keeps moving the import out
+# of the stdlib block. Saying so here is the accurate statement; letting the import drift is
+# a diff that reads as wrong to every human who opens the file.
+extra-standard-library = ["tomllib"]
 
 # ── Deptry ───────────────────────────────────────────────────────────
 

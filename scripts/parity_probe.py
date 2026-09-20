@@ -15,7 +15,6 @@ sys.path.insert(0, str(ROOT / "src"))
 import rolodexter as r  # noqa: E402
 import rolodexter.i18n as i18n  # noqa: E402
 
-
 # Built with chr() rather than pasted: a source file carrying a real NUL,
 # BOM or C1 control is one no reviewer can see, and mangling them in transit
 # is the class of bug these very cases exist to catch.
@@ -385,14 +384,14 @@ def simplify(value: Any) -> Any:
 def capture(fn: Any) -> dict[str, Any]:
     try:
         return {"ok": True, "value": simplify(fn())}
-    except Exception as exc:  # noqa: BLE001 - parity probe needs exact exception shape
+    except Exception as exc:  # broad on purpose: a parity probe needs the exact exception shape
         return {"ok": False, "error": simplify(exc)}
 
 
 def capture_value(fn: Any) -> Any:
     try:
         return simplify(fn())
-    except Exception as exc:  # noqa: BLE001 - parity probe needs exact exception shape
+    except Exception as exc:  # broad on purpose: a parity probe needs the exact exception shape
         return simplify(exc)
 
 
@@ -418,21 +417,26 @@ def python_results() -> dict[str, Any]:
         )
     for item in CASES["phones"]:
         if item["fn"] == "parse":
-            fn = lambda item=item: r.parse(item["value"], item.get("default_region"))
+            def fn(item=item):
+                return r.parse(item["value"], item.get("default_region"))
         elif item["fn"] == "format_e164":
-            fn = lambda item=item: r.format_e164(item["value"], item.get("default_region"))
+            def fn(item=item):
+                return r.format_e164(item["value"], item.get("default_region"))
         elif item["fn"] == "is_valid":
-            fn = lambda item=item: r.is_valid(item["value"], item.get("default_region"))
+            def fn(item=item):
+                return r.is_valid(item["value"], item.get("default_region"))
         elif item["fn"] == "is_number_match":
-            fn = lambda item=item: r.is_number_match(item["a"], item["b"], item.get("default_region"))
+            def fn(item=item):
+                return r.is_number_match(item["a"], item["b"], item.get("default_region"))
         elif item["fn"] == "matcher":
-            fn = lambda item=item: list(
-                r.PhoneNumberMatcher(
-                    item["value"],
-                    item.get("default_region"),
-                    max_matches=item.get("max_matches"),
+            def fn(item=item):
+                return list(
+                    r.PhoneNumberMatcher(
+                        item["value"],
+                        item.get("default_region"),
+                        max_matches=item.get("max_matches"),
+                    )
                 )
-            )
         else:
             raise AssertionError(item["fn"])
         output["phones"][item["id"]] = capture(fn)
