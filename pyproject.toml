@@ -52,23 +52,23 @@ classifiers = [
 # rapidfuzz 3.14.5, pandas 2.3.3); a floor is a minimum, so 3.11+ still resolves
 # to the current 2.3.0 / 3.14.6 / 3.0.5. `python odin.py deps --floors` (odin's
 # pyfloors.py) is the check that says so without waiting for a red run.
-dependencies = ["phonenumbers>=9.0.39,<10", "nameparser>=2.3.0,<3"]
+dependencies = ["phonenumbers>=9.0.39,<10", "nameparser>=1.4.0,<3"]
 
 [project.optional-dependencies]
-fuzzy = ["rapidfuzz>=3.14.6"]
+fuzzy = ["rapidfuzz>=3.14.5"]
 i18n-generate = ["deep-translator>=1.11.4", "unidecode>=1.4.0"]
-pandas = ["pandas>=3.0.6"]
+pandas = ["pandas>=2.3.3"]
 all = [
-    "rapidfuzz>=3.14.6",
+    "rapidfuzz>=3.14.5",
     "deep-translator>=1.11.4",
     "unidecode>=1.4.0",
-    "pandas>=3.0.6",
+    "pandas>=2.3.3",
 ]
 dev = [
-    "rapidfuzz>=3.14.6",
+    "rapidfuzz>=3.14.5",
     "deep-translator>=1.11.4",
     "unidecode>=1.4.0",
-    "pandas>=3.0.6",
+    "pandas>=2.3.3",
     # Keep mypy's Python 3.10 target compatible with NumPy stubs in CI.
     # numpy>=2.3 requires Python>=3.11, so the floor stays on the last 2.2.x
     # patch that still installs on the 3.10 floor; <2.5 keeps the cap this
