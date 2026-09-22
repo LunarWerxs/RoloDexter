@@ -51,7 +51,7 @@ edit the dossier, not this block. Everything ABOVE the marker is yours.
 - `packages/js/scripts/` - Build/release tooling: build-cjs.mjs (esbuild dual ESM+CJS build), sync-patterns.mjs (copies Python's patterns.json into the JS package), run-tests.mjs, copy-assets.mjs
 - `tests/` - Python test suite (pytest), 43 test files across both packages per derived counts
 - `packages/js/test/` - JavaScript/TypeScript test suite, run across supported Node versions by run-tests.mjs
-- `scripts/` - Cross-language release/parity probes and a sweep script that compares Python and JS output for the same inputs
+- `scripts/` - Cross-language release/parity probes and a sweep script that compares Python and JS output for the same inputs, plus optimize_images.py, which writes the small WebP/PNG copies the landing page loads from the PNG masters in docs/assets/
 - `docs/` - GitHub Pages marketing/docs site (index.html, CNAME, sitemap.xml, robots.txt) plus llms.txt/llms-full.txt for AI-crawler consumption and pricing.md
 - `.github/` - CI workflows: ci.yml (test/lint), npm-publish.yml and publish.yml (dual PyPI + npm release)
 
