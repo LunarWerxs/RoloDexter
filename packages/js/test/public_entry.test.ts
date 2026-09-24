@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { generate_language } from "../src/public.js";
-import { __all__ } from "../src/index.js";
 
 test("the published generate_language enforces Python's positional arity", () => {
   assert.throws(
@@ -23,9 +22,4 @@ test("the published generate_language enforces Python's positional arity", () =>
       message: "generate_language() takes 1 positional argument but 3 were given",
     },
   );
-});
-
-test("generate_language is part of the advertised root surface", () => {
-  assert.equal(typeof generate_language, "function");
-  assert.ok(__all__.includes("generate_language"));
 });

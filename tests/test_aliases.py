@@ -68,24 +68,31 @@ class TestNewAliases:
 
 
 class TestNewCanonicalFields:
-    """Verify the 3 new fields added for form bot compatibility."""
+    """Verify the 3 new fields added for form bot compatibility, and v1.2's age."""
 
-    def test_message_alias(self, registry: PatternRegistry) -> None:
-        assert registry.exact_lookup("message") == "message"
-        assert registry.exact_lookup("inquiry") == "message"
-        assert registry.exact_lookup("feedback") == "message"
-        assert registry.exact_lookup("your_message") == "message"
-
-    def test_subject_alias(self, registry: PatternRegistry) -> None:
-        assert registry.exact_lookup("subject") == "subject"
-        assert registry.exact_lookup("subject_line") == "subject"
-        assert registry.exact_lookup("reason_for_contact") == "subject"
-
-    def test_company_size_alias(self, registry: PatternRegistry) -> None:
-        assert registry.exact_lookup("company_size") == "company_size"
-        assert registry.exact_lookup("team_size") == "company_size"
-        assert registry.exact_lookup("employees") == "company_size"
-        assert registry.exact_lookup("headcount") == "company_size"
+    @pytest.mark.parametrize(
+        "alias, expected",
+        [
+            ("message", "message"),
+            ("inquiry", "message"),
+            ("feedback", "message"),
+            ("your_message", "message"),
+            ("subject", "subject"),
+            ("subject_line", "subject"),
+            ("reason_for_contact", "subject"),
+            ("company_size", "company_size"),
+            ("team_size", "company_size"),
+            ("employees", "company_size"),
+            ("headcount", "company_size"),
+            ("age", "age"),
+            ("years_old", "age"),
+            ("your_age", "age"),
+        ],
+    )
+    def test_form_bot_field_alias(
+        self, registry: PatternRegistry, alias: str, expected: str
+    ) -> None:
+        assert registry.exact_lookup(alias) == expected
 
 
 class TestW3CAutocompleteAliases:
@@ -113,60 +120,32 @@ class TestW3CAutocompleteAliases:
 class TestFormBotFormDetectionPatterns:
     """Simulate form bot's detectPurpose() regex patterns via rolodexter."""
 
-    def test_form_field_first_name(self, mapper: ContactMapper) -> None:
-        for header in ["first_name", "fname", "given_name", "forename", "firstname"]:
-            m = mapper.identify(header)
-            assert m.canonical == "first_name", f"Failed for {header}"
-
-    def test_form_field_last_name(self, mapper: ContactMapper) -> None:
-        for header in ["last_name", "lname", "surname", "family_name", "lastname"]:
-            m = mapper.identify(header)
-            assert m.canonical == "last_name", f"Failed for {header}"
-
-    def test_form_field_company(self, mapper: ContactMapper) -> None:
-        for header in [
-            "company",
-            "organization",
-            "organisation",
-            "firm",
-            "employer",
-            "business",
-        ]:
-            m = mapper.identify(header)
-            assert m.canonical == "company", f"Failed for {header}"
-
-    def test_form_field_message(self, mapper: ContactMapper) -> None:
-        for header in ["message", "inquiry", "enquiry", "feedback"]:
-            m = mapper.identify(header)
-            assert m.canonical == "message", f"Failed for {header}"
-
-    def test_form_field_job_title(self, mapper: ContactMapper) -> None:
-        for header in ["job_title", "position", "designation"]:
-            m = mapper.identify(header)
-            assert m.canonical == "job_title", f"Failed for {header}"
-
-    def test_form_field_address(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("address").canonical == "address_line1"
-
-    def test_form_field_website(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("website").canonical == "website"
-
-    def test_form_field_subject(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("subject").canonical == "subject"
-
-    def test_form_field_industry(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("industry").canonical == "industry"
-
-    def test_form_field_department(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("department").canonical == "department"
-
-    def test_form_field_revenue(self, mapper: ContactMapper) -> None:
-        assert mapper.identify("revenue").canonical == "revenue"
-
-    def test_form_field_company_size(self, mapper: ContactMapper) -> None:
-        for header in ["company_size", "team_size", "employees", "headcount"]:
-            m = mapper.identify(header)
-            assert m.canonical == "company_size", f"Failed for {header}"
+    # The canonical names are rows of test_all_detect_purposes, organi[sz]ation of
+    # test_guess_keyword_resolves, and inquiry/feedback/team_size/employees/headcount
+    # of the alias table above.
+    @pytest.mark.parametrize(
+        "header, expected",
+        [
+            ("fname", "first_name"),
+            ("given_name", "first_name"),
+            ("forename", "first_name"),
+            ("firstname", "first_name"),
+            ("lname", "last_name"),
+            ("surname", "last_name"),
+            ("family_name", "last_name"),
+            ("lastname", "last_name"),
+            ("firm", "company"),
+            ("employer", "company"),
+            ("business", "company"),
+            ("enquiry", "message"),
+            ("position", "job_title"),
+            ("designation", "job_title"),
+        ],
+    )
+    def test_form_field(
+        self, mapper: ContactMapper, header: str, expected: str
+    ) -> None:
+        assert mapper.identify(header).canonical == expected
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -179,14 +158,6 @@ class TestAgeField:
 
     def test_age_enum_exists(self) -> None:
         assert CanonicalField.AGE == "age"
-
-    def test_age_alias_lookup(self, registry: PatternRegistry) -> None:
-        assert registry.exact_lookup("age") == "age"
-        assert registry.exact_lookup("years_old") == "age"
-        assert registry.exact_lookup("your_age") == "age"
-
-    def test_age_in_canonical_fields(self, registry: PatternRegistry) -> None:
-        assert "age" in registry.canonical_fields
 
 
 class TestExtendedSourceAliases:
@@ -654,15 +625,13 @@ class TestV23VendorPrefixes:
 class TestV23PublicExports:
     """PostalCodeNormalizer and BooleanNormalizer are importable from rolodexter."""
 
-    def test_postalcode_importable(self) -> None:
-        from rolodexter import PostalCodeNormalizer
+    @pytest.mark.parametrize("name", ["PostalCodeNormalizer", "BooleanNormalizer"])
+    def test_importable_from_root(self, name: str) -> None:
+        import rolodexter
 
-        assert PostalCodeNormalizer is not None
-
-    def test_boolean_importable(self) -> None:
-        from rolodexter import BooleanNormalizer
-
-        assert BooleanNormalizer is not None
+        assert isinstance(getattr(rolodexter, name, None), type), (
+            f"rolodexter.{name} missing"
+        )
 
     def test_dead_symbols_removed(self) -> None:
         """Removed symbols should not be importable.

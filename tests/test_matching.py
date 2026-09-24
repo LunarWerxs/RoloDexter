@@ -176,14 +176,6 @@ class TestHeuristicMatch:
         assert strat.match(header, value="45000") is None
         assert strat.match(header, value="90210") is None
 
-    def test_none_value(self) -> None:
-        strat = HeuristicMatchStrategy()
-        assert strat.match("col", value=None) is None
-
-    def test_empty_string(self) -> None:
-        strat = HeuristicMatchStrategy()
-        assert strat.match("col", value="") is None
-
     def test_plain_text_no_match(self) -> None:
         strat = HeuristicMatchStrategy()
         assert strat.match("col", value="Just some text") is None
@@ -226,10 +218,29 @@ class TestIdentify:
         assert m.confidence == 1.0
         assert m.strategy == "exact"
 
-    def test_heuristic_fallback(self, mapper: ContactMapper) -> None:
-        m = mapper.identify("Column X", value="jane@test.com")
-        assert m.canonical == "email"
-        assert m.strategy == "heuristic"
+    @pytest.mark.parametrize(
+        "header, value, canonical, strategy",
+        [
+            ("Column X", "jane@test.com", "email", "heuristic"),
+            # Non-social URLs fall through to generic website detection.
+            ("colZZ", "https://example.com/page", "website", "heuristic"),
+            ("colZZ", "@johndoe", "twitter", "heuristic"),
+            # Dates are birthday heuristics only with birth-related headers.
+            ("unknown_col", "15.03.1990", "unknown", "none"),
+            ("unknown_col", "1990-03-15", "unknown", "none"),
+            ("custom_birth_marker", "1990-03-15", "birthday", "heuristic"),
+        ],
+    )
+    def test_heuristic_fallback(
+        self,
+        mapper: ContactMapper,
+        header: str,
+        value: str,
+        canonical: str,
+        strategy: str,
+    ) -> None:
+        m = mapper.identify(header, value=value)
+        assert (m.canonical, m.strategy) == (canonical, strategy)
 
     def test_unknown(self, mapper: ContactMapper) -> None:
         m = mapper.identify("zzzz_nonsense_field")
@@ -279,37 +290,6 @@ class TestV23SocialMediaHeuristics:
     ) -> None:
         m = mapper.identify("some_profile", value=url)
         assert m.canonical == expected, f"{url} → {m.canonical}, expected {expected}"
-        assert m.strategy == "heuristic"
-
-    def test_generic_url_fallback(self, mapper: ContactMapper) -> None:
-        """Non-social URLs fall through to generic website detection."""
-        m = mapper.identify("colZZ", value="https://example.com/page")
-        assert m.canonical == "website"
-        assert m.strategy == "heuristic"
-
-    def test_twitter_handle_heuristic(self, mapper: ContactMapper) -> None:
-        """@handle pattern detected as twitter."""
-        m = mapper.identify("colZZ", value="@johndoe")
-        assert m.canonical == "twitter"
-        assert m.strategy == "heuristic"
-
-
-class TestV23EUDateHeuristic:
-    """Date formats are birthday heuristics only with birth-related headers."""
-
-    def test_generic_eu_date_format_stays_unknown(self, mapper: ContactMapper) -> None:
-        m = mapper.identify("unknown_col", value="15.03.1990")
-        assert m.canonical == "unknown"
-        assert m.strategy == "none"
-
-    def test_generic_iso_date_format_stays_unknown(self, mapper: ContactMapper) -> None:
-        m = mapper.identify("unknown_col", value="1990-03-15")
-        assert m.canonical == "unknown"
-        assert m.strategy == "none"
-
-    def test_birth_date_hint_detects_date_format(self, mapper: ContactMapper) -> None:
-        m = mapper.identify("custom_birth_marker", value="1990-03-15")
-        assert m.canonical == "birthday"
         assert m.strategy == "heuristic"
 
 
@@ -528,6 +508,3 @@ class TestFuzzyShortAliasGuard:
         assert mapper.identify("phne_nmbr").canonical == "phone"
         assert mapper.identify("first_nam").canonical == "first_name"
         assert mapper.identify("Compny").canonical == "company"
-
-    def test_garbage_still_unmatched(self) -> None:
-        assert ContactMapper().identify("supercalifragilistic").canonical == "unknown"

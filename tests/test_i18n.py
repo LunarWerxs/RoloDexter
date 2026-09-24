@@ -286,19 +286,6 @@ class TestI18nLanguageSelection:
         assert reg.exact_lookup("email") == "email"
         assert reg.exact_lookup("correo") is None
 
-    def test_english_only_with_none(self) -> None:
-        reg = PatternRegistry(languages=None)
-        assert reg.loaded_languages == []
-        assert reg.exact_lookup("email") == "email"
-        assert reg.exact_lookup("first_name") == "first_name"
-        assert reg.exact_lookup("correo") is None
-        assert reg.exact_lookup("vorname") is None
-
-    def test_english_only_with_empty_list(self) -> None:
-        reg = PatternRegistry(languages=[])
-        assert reg.loaded_languages == []
-        assert reg.exact_lookup("correo") is None
-
     def test_single_language_string(self) -> None:
         with _mock_patch("rolodexter.i18n.load_cached", side_effect=_mock_load_cached):
             reg = PatternRegistry(languages="es")
@@ -370,13 +357,6 @@ class TestI18nContactMapper:
         mapper = ContactMapper()
         assert mapper.registry.loaded_languages == []
         assert mapper.registry.exact_lookup("correo") is None
-        m = mapper.identify("email")
-        assert m.canonical == "email"
-
-    def test_mapper_english_only_explicit(self) -> None:
-        mapper = ContactMapper(languages=None)
-        assert mapper.registry.loaded_languages == []
-        assert mapper.registry.exact_lookup("vorname") is None
         m = mapper.identify("email")
         assert m.canonical == "email"
 

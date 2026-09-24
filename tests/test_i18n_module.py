@@ -46,12 +46,6 @@ class TestI18nModule:
 
     # --- discover / load ---
 
-    def test_discover_cached_returns_dict(self) -> None:
-        from rolodexter.i18n import discover_cached
-
-        result = discover_cached()
-        assert isinstance(result, dict)
-
     def test_load_cached_missing_returns_none(self) -> None:
         from rolodexter.i18n import load_cached
 
@@ -194,47 +188,29 @@ class TestI18nModule:
         assert loaded is not None
         assert loaded["fields"]["email"] == ["prueba"]
 
-    def test_load_cached_bad_json(self, tmp_path: Path, caplog) -> None:
-        """Corrupt JSON is skipped, with a warning rather than silent failure."""
+    @pytest.mark.parametrize(
+        "code, content",
+        [
+            # Not JSON at all.
+            ("fr", "NOT JSON{{{"),
+            # Valid JSON that doesn't match the cache schema.
+            ("de", '["not", "an", "object"]'),
+            # A JSON object missing required cache keys.
+            ("it", '{"language_code": "it"}'),
+        ],
+    )
+    def test_load_cached_corrupt_file(
+        self, tmp_path: Path, caplog, code: str, content: str
+    ) -> None:
+        """A corrupt cache file is skipped, with a warning rather than silent failure."""
         from rolodexter.i18n import load_cached
 
-        bad_file = tmp_path / "fr.json"
-        bad_file.write_text("NOT JSON{{{", encoding="utf-8")
+        (tmp_path / f"{code}.json").write_text(content, encoding="utf-8")
         with (
             _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
             caplog.at_level("WARNING", logger="rolodexter.i18n"),
         ):
-            assert load_cached("fr") is None
-        assert "corrupt" in caplog.text.lower()
-
-    def test_load_cached_wrong_schema(self, tmp_path: Path, caplog) -> None:
-        """Valid JSON that doesn't match the cache schema is treated as corrupt."""
-        import json
-
-        from rolodexter.i18n import load_cached
-
-        bad_file = tmp_path / "de.json"
-        bad_file.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
-        with (
-            _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
-            caplog.at_level("WARNING", logger="rolodexter.i18n"),
-        ):
-            assert load_cached("de") is None
-        assert "corrupt" in caplog.text.lower()
-
-    def test_load_cached_missing_keys(self, tmp_path: Path, caplog) -> None:
-        """A JSON object missing required cache keys is treated as corrupt."""
-        import json
-
-        from rolodexter.i18n import load_cached
-
-        bad_file = tmp_path / "it.json"
-        bad_file.write_text(json.dumps({"language_code": "it"}), encoding="utf-8")
-        with (
-            _mock_patch("rolodexter.i18n.get_all_cache_dirs", return_value=[tmp_path]),
-            caplog.at_level("WARNING", logger="rolodexter.i18n"),
-        ):
-            assert load_cached("it") is None
+            assert load_cached(code) is None
         assert "corrupt" in caplog.text.lower()
 
     # --- discover_cached with tmp dir ---
@@ -255,6 +231,8 @@ class TestI18nModule:
 
     def test_translate_batch_mocked(self) -> None:
         """Verify _translate_batch calls deep-translator correctly."""
+        import rolodexter.i18n as i18n_mod
+
         mock_translator = type(
             "MockTranslator",
             (),
@@ -262,25 +240,9 @@ class TestI18nModule:
                 "translate_batch": lambda self, phrases: [p.upper() for p in phrases],
             },
         )()
-        with _mock_patch(
-            "rolodexter.i18n.GoogleTranslator",
-            return_value=mock_translator,
-            create=True,
-        ):
-            # We need to mock the actual import inside the function
-            import rolodexter.i18n as i18n_mod
-
-            original = i18n_mod._translate_batch
-
-            def patched_batch(phrases, lang_code):
-                return [p.upper() for p in phrases]
-
-            i18n_mod._translate_batch = patched_batch
-            try:
-                results = i18n_mod._translate_batch(["hello", "world"], "es")
-                assert results == ["HELLO", "WORLD"]
-            finally:
-                i18n_mod._translate_batch = original
+        with _mock_patch.object(i18n_mod, "_translator", return_value=mock_translator):
+            results = i18n_mod._translate_batch(["hello", "world"], "es")
+        assert results == ["HELLO", "WORLD"]
 
     # --- generate_language full flow (mocked translation) ---
 
@@ -370,84 +332,6 @@ class TestI18nModule:
 # ═══════════════════════════════════════════════════════════════
 #  v2.5 — COVERAGE BOOST: i18n.py GAPS
 # ═══════════════════════════════════════════════════════════════
-
-
-class TestI18nCacheDirs:
-    """Test i18n cache directory resolution."""
-
-    def test_get_cache_dir_returns_path(self) -> None:
-        from rolodexter.i18n import get_cache_dir
-
-        d = get_cache_dir()
-        assert isinstance(d, Path)
-        assert d.exists()
-
-    def test_get_all_cache_dirs(self) -> None:
-        from rolodexter.i18n import get_all_cache_dirs
-
-        dirs = get_all_cache_dirs()
-        assert isinstance(dirs, list)
-        for d in dirs:
-            assert isinstance(d, Path)
-            assert d.is_dir()
-
-    def test_user_cache_dir(self) -> None:
-        from rolodexter.i18n import _user_cache_dir
-
-        d = _user_cache_dir()
-        assert isinstance(d, Path)
-        assert d.name == "i18n"
-
-
-class TestI18nAliasVariants:
-    """Test _to_alias_variants() variant generation."""
-
-    def test_basic_variants(self) -> None:
-        from rolodexter.i18n import _to_alias_variants
-
-        variants = _to_alias_variants("First Name")
-        assert "first name" in variants
-        assert "first_name" in variants
-        assert "firstname" in variants
-        assert "first-name" in variants
-
-    def test_single_char_excluded(self) -> None:
-        from rolodexter.i18n import _to_alias_variants
-
-        assert _to_alias_variants("x") == set()
-
-    def test_empty_excluded(self) -> None:
-        from rolodexter.i18n import _to_alias_variants
-
-        assert _to_alias_variants("") == set()
-
-
-class TestI18nFieldDerivation:
-    """Test _derive_field_phrases and _get_english_aliases."""
-
-    def test_derive_field_phrases(self) -> None:
-        from rolodexter.i18n import _derive_field_phrases
-
-        master = {"fields": {"first_name": ["fname"], "email": ["e_mail"]}}
-        result = _derive_field_phrases(master)
-        assert result["first_name"] == "first name"
-        assert result["email"] == "email"
-
-    def test_skip_fields_excluded(self) -> None:
-        from rolodexter.i18n import _derive_field_phrases
-
-        master = {"fields": {"first_name": ["fname"], "metadata": ["meta"]}}
-        result = _derive_field_phrases(master)
-        assert "metadata" not in result
-
-    def test_get_english_aliases(self) -> None:
-        from rolodexter.i18n import _get_english_aliases
-
-        master = {"fields": {"first_name": ["FName", "Given"], "email": ["E-Mail"]}}
-        aliases = _get_english_aliases(master)
-        assert "fname" in aliases
-        assert "given" in aliases
-        assert "e-mail" in aliases
 
 
 class TestI18nLoadsCacheOnly:

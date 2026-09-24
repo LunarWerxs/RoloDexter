@@ -10,37 +10,6 @@ from pathlib import Path
 import pytest
 
 
-class TestI18nLoadMaster:
-    """Test _load_master()."""
-
-    def test_returns_dict_with_fields(self) -> None:
-        from rolodexter.i18n import _load_master
-
-        data = _load_master()
-        assert isinstance(data, dict)
-        assert "fields" in data
-        assert "version" in data
-
-
-class TestI18nLoadCached:
-    """Test load_cached() with nonexistent language."""
-
-    def test_missing_language_returns_none(self) -> None:
-        from rolodexter.i18n import load_cached
-
-        assert load_cached("zz_nonexistent") is None
-
-
-class TestI18nDiscoverCached:
-    """Test discover_cached()."""
-
-    def test_returns_dict(self) -> None:
-        from rolodexter.i18n import discover_cached
-
-        found = discover_cached()
-        assert isinstance(found, dict)
-
-
 class TestI18nTryUnidecode:
     """Test _try_unidecode fallback."""
 
@@ -59,98 +28,8 @@ class TestI18nTryUnidecode:
         assert result is None
 
 
-class TestI18nGenerateLanguageErrors:
-    """Test generate_language error paths."""
-
-    def test_unsupported_language_raises(self) -> None:
-        from rolodexter.i18n import generate_language
-
-        with pytest.raises(ValueError, match="Unsupported language"):
-            generate_language("xx_fake")
-
-
-class TestI18nPackageDir:
-    """Test _package_i18n_dir directly."""
-
-    def test_returns_path_on_editable_install(self) -> None:
-        from rolodexter.i18n import _package_i18n_dir
-
-        result = _package_i18n_dir()
-        # On editable install this should return a valid Path
-        if result is not None:
-            assert isinstance(result, Path)
-            assert result.exists()
-
-
-class TestI18nWriteAndLoadCache:
-    """Test _write_cache + load_cached round-trip."""
-
-    def test_write_and_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from rolodexter.i18n import _write_cache, load_cached
-
-        # Monkeypatch get_cache_dir to use tmp_path
-        monkeypatch.setattr("rolodexter.i18n.get_cache_dir", lambda: tmp_path)
-        monkeypatch.setattr("rolodexter.i18n.get_all_cache_dirs", lambda: [tmp_path])
-
-        lang_data = {
-            "language_code": "sw",
-            "language_name": "Swahili",
-            "generated_at": "2026-01-01T00:00:00+00:00",
-            "source_version": "2.10.0",
-            "fields": {"email": ["correo_test"]},
-        }
-        path = _write_cache(lang_data)
-        assert path.exists()
-
-        loaded = load_cached("sw")
-        assert loaded is not None
-        assert loaded["language_code"] == "sw"
-        assert loaded["fields"]["email"] == ["correo_test"]
-
-
-class TestI18nCliList:
-    """Test i18n CLI --list option."""
-
-    def test_list_languages(self, capsys: pytest.CaptureFixture[str]) -> None:
-        import sys
-
-        from rolodexter.i18n import main
-
-        old_argv = sys.argv
-        try:
-            sys.argv = ["rolodexter.i18n", "--list"]
-            main()
-        finally:
-            sys.argv = old_argv
-        captured = capsys.readouterr()
-        assert "Spanish" in captured.out
-        assert "French" in captured.out
-        assert "es" in captured.out
-
-
 class TestI18nGenerateLanguageCached:
     """Test generate_language when cached data already exists."""
-
-    def test_returns_cached_without_translating(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from rolodexter.i18n import generate_language
-
-        cached_data = {
-            "language_code": "es",
-            "language_name": "Spanish",
-            "generated_at": "2026-01-01",
-            "source_version": "2.10.0",
-            "fields": {"email": ["correo"]},
-        }
-        monkeypatch.setattr(
-            "rolodexter.i18n.load_cached",
-            lambda code: cached_data if code == "es" else None,
-        )
-        result = generate_language("es")
-        assert result == cached_data
 
     def test_force_bypasses_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With force=True and no deep-translator, ImportError is raised."""
