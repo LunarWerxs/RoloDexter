@@ -439,10 +439,18 @@ class TestNestedPayloadDepth:
 class TestPatternRegistryErrors:
     """Test PatternRegistry error paths."""
 
-    def test_cached_languages(self) -> None:
+    def test_cached_languages(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Only .gitkeep ships in the package i18n dir, so point discovery at a
+        # known cache instead of whatever this machine happens to have cached.
+        cache_dir = tmp_path / "i18n-cache"
+        cache_dir.mkdir()
+        (cache_dir / "fr.json").write_text("{}", encoding="utf-8")
+        (cache_dir / "es.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr("rolodexter.i18n.get_all_cache_dirs", lambda: [cache_dir])
         reg = PatternRegistry()
-        cached = reg.cached_languages
-        assert "es" in cached  # es.json ships with the package
+        assert reg.cached_languages == ["es", "fr"]
 
     def test_loaded_languages_empty_default(self) -> None:
         reg = PatternRegistry()
