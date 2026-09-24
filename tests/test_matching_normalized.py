@@ -61,6 +61,7 @@ class TestNormalizedMatchStrategy:
             ("Address 1 - Country", "country"),
             ("Website 1 - Value", "website"),
             # Vendor prefix stripping
+            ("hs_email", "email"),
             ("hs_lead_status", "lead_status"),
             ("hubspot_owner_id", "owner"),
             # Address prefix stripping
