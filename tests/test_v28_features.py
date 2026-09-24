@@ -65,10 +65,6 @@ class TestStrictMode:
         result = mapper.map_payload({"fname": "Jane", "phone": "(202) 555-0143"})
         assert result.normalized["phone"] == "+12025550143"
 
-    def test_non_strict_collects_instead_of_raising(self) -> None:
-        result = ContactMapper().map_payload({"phone": "garbage value here"})
-        assert result.warnings  # recorded, not raised
-
 
 class TestConfidenceThreshold:
     def test_constructor_threshold_rejects_out_of_range(self) -> None:

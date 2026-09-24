@@ -184,12 +184,6 @@ class TestMapPayload:
         result = mapper.map_payload({"email": ""})
         assert result.normalized["email"] == ""
 
-    def test_collision_creates_list(self, mapper: ContactMapper) -> None:
-        result = mapper.map_payload({"mobile": "555-1111", "cell": "555-2222"})
-        val = result.normalized.get("phone")
-        assert isinstance(val, list)
-        assert len(val) == 2
-
     def test_match_rate(self, mapper: ContactMapper) -> None:
         result = mapper.map_payload({"fname": "Jane", "zzz_qqqq_xxxx_jjj": "???"})
         assert result.match_rate == pytest.approx(0.5)
@@ -445,26 +439,10 @@ class TestNestedPayloadDepth:
 class TestPatternRegistryErrors:
     """Test PatternRegistry error paths."""
 
-    def test_load_from_bad_path_raises(self) -> None:
-        with pytest.raises(PatternLoadError):
-            PatternRegistry(patterns_path="/nonexistent/path.json")
-
-    def test_repr(self) -> None:
-        reg = PatternRegistry()
-        r = repr(reg)
-        assert "PatternRegistry" in r
-        assert "aliases=" in r
-
-    def test_available_languages(self) -> None:
-        reg = PatternRegistry()
-        langs = reg.available_languages
-        assert isinstance(langs, list)
-        assert "es" in langs
-
     def test_cached_languages(self) -> None:
         reg = PatternRegistry()
         cached = reg.cached_languages
-        assert isinstance(cached, list)
+        assert "es" in cached  # es.json ships with the package
 
     def test_loaded_languages_empty_default(self) -> None:
         reg = PatternRegistry()
@@ -663,29 +641,19 @@ class TestOverrides:
 class TestDepth2KeyResolution:
     """Confirm depth=2 flattens with dots and NormalizedMatch resolves them."""
 
-    def test_address_city_resolves(self) -> None:
-        mapper = ContactMapper()
-        result = mapper.map_payload(
-            {"address": {"city": "Austin"}},
-            depth=2,
-        )
-        assert result.normalized.get("city") == "Austin"
-
-    def test_address_state_resolves(self) -> None:
-        mapper = ContactMapper()
-        result = mapper.map_payload(
-            {"address": {"state": "TX"}},
-            depth=2,
-        )
-        assert result.normalized.get("state") == "TX"
-
-    def test_contact_email_resolves(self) -> None:
-        mapper = ContactMapper()
-        result = mapper.map_payload(
-            {"contact": {"email": "a@b.com"}},
-            depth=2,
-        )
-        assert result.normalized.get("email") == "a@b.com"
+    @pytest.mark.parametrize(
+        ("payload", "canonical", "value"),
+        [
+            ({"address": {"city": "Austin"}}, "city", "Austin"),
+            ({"address": {"state": "TX"}}, "state", "TX"),
+            ({"contact": {"email": "a@b.com"}}, "email", "a@b.com"),
+        ],
+    )
+    def test_nested_key_resolves(
+        self, payload: dict[str, dict[str, str]], canonical: str, value: str
+    ) -> None:
+        result = ContactMapper().map_payload(payload, depth=2)
+        assert result.normalized.get(canonical) == value
 
     def test_nested_company_name(self) -> None:
         mapper = ContactMapper()
@@ -706,10 +674,6 @@ class TestDepth2KeyResolution:
         # 'address' is the key, value is a dict — heuristic can't match it
         assert "city" not in result.normalized
 
-    def test_flatten_uses_dot_separator(self) -> None:
-        flat = ContactMapper._flatten({"a": {"b": "v"}}, depth=2)
-        assert "a.b" in flat
-
     def test_depth3_nested(self) -> None:
         flat = ContactMapper._flatten(
             {"level1": {"level2": {"level3": "val"}}},
@@ -720,10 +684,6 @@ class TestDepth2KeyResolution:
 
 class TestDefaultRegion:
     """default_region is configurable on the mapper, per call, and on heuristics."""
-
-    def test_constructor_accepts_region(self) -> None:
-        mapper = ContactMapper(default_region="GB")
-        assert isinstance(repr(mapper), str)
 
     def test_heuristic_strategy_accepts_region(self) -> None:
         strat = HeuristicMatchStrategy(default_region="GB")

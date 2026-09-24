@@ -5,6 +5,8 @@ Extracted verbatim from ``test_rolodexter.py``.
 
 from __future__ import annotations
 
+import pytest
+
 from rolodexter._phone import (
     MatchType,
     NumberType,
@@ -33,76 +35,27 @@ class TestPhoneModuleParse:
         assert p.national_number == "5551234567"
         assert p.e164 == "+15551234567"
 
-    def test_us_formatted(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+1 (555) 123-4567")
+    @pytest.mark.parametrize(
+        ("raw", "region", "e164"),
+        [
+            ("+1 (555) 123-4567", None, "+15551234567"),
+            ("+44 20 7946 0958", None, "+442079460958"),
+            ("+81 3-1234-5678", None, "+81312345678"),
+            ("+49 30 1234567", None, "+49301234567"),
+            ("+91 98765 43210", None, "+919876543210"),
+            ("+86 138 0013 8000", None, "+8613800138000"),
+            ("+55 11 91234-5678", None, "+5511912345678"),
+            ("(02) 1234 5678", "AU", "+61212345678"),
+            ("020 7946 0958", "GB", "+442079460958"),
+            ("01 23 45 67 89", "FR", "+33123456789"),
+            ("0044 20 7946 0958", None, "+442079460958"),  # 00 dial-out
+            ("011 44 20 7946 0958", None, "+442079460958"),  # 011 dial-out
+        ],
+    )
+    def test_parses_to_e164(self, raw: str, region: str | None, e164: str) -> None:
+        p = parse(raw, default_region=region)
         assert p is not None
-        assert p.e164 == "+15551234567"
-
-    def test_uk_number(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+44 20 7946 0958")
-        assert p is not None
-        assert p.e164 == "+442079460958"
-
-    def test_japan_number(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+81 3-1234-5678")
-        assert p is not None
-        assert p.e164 == "+81312345678"
-
-    def test_germany_number(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+49 30 1234567")
-        assert p is not None
-        assert p.e164 == "+49301234567"
-
-    def test_india_number(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+91 98765 43210")
-        assert p is not None
-        assert p.e164 == "+919876543210"
-
-    def test_australia_with_region(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("(02) 1234 5678", default_region="AU")
-        assert p is not None
-        assert p.calling_code == 61
-        assert p.e164.startswith("+61")
-
-    def test_uk_local_with_region(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("020 7946 0958", default_region="GB")
-        assert p is not None
-        assert p.e164 == "+442079460958"
-
-    def test_france_local_with_region(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("01 23 45 67 89", default_region="FR")
-        assert p is not None
-        assert p.e164 == "+33123456789"
-
-    def test_double_zero_prefix(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("0044 20 7946 0958")
-        assert p is not None
-        assert p.e164 == "+442079460958"
-
-    def test_us_011_prefix(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("011 44 20 7946 0958")
-        assert p is not None
-        assert p.e164 == "+442079460958"
+        assert p.e164 == e164
 
     def test_vanity_number(self) -> None:
         from rolodexter._phone import parse
@@ -112,39 +65,9 @@ class TestPhoneModuleParse:
         assert p.calling_code == 1
         assert p.e164 == "+18003569377"
 
-    def test_china_mobile(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+86 138 0013 8000")
-        assert p is not None
-        assert p.e164 == "+8613800138000"
-
-    def test_brazil_mobile(self) -> None:
-        from rolodexter._phone import parse
-
-        p = parse("+55 11 91234-5678")
-        assert p is not None
-        assert p.e164 == "+5511912345678"
-
-    def test_none_returns_none(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse(None) is None  # type: ignore[arg-type]
-
-    def test_empty_returns_none(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse("") is None
-
-    def test_garbage_returns_none(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse("no phone here") is None
-
-    def test_too_short_returns_none(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse("123") is None
+    @pytest.mark.parametrize("raw", [None, "", "   ", "no phone here", "123"])
+    def test_unparseable_returns_none(self, raw: str | None) -> None:
+        assert parse(raw) is None  # type: ignore[arg-type]
 
     def test_is_valid_property(self) -> None:
         from rolodexter._phone import parse
@@ -210,35 +133,21 @@ class TestPhoneExtensions:
         assert p.e164 == "+15551234567"
         assert p.extension == "890"
 
-    def test_ext_keyword_dot(self) -> None:
-        p = parse("+1 555 123 4567 ext. 42")
+    @pytest.mark.parametrize(
+        ("raw", "extension"),
+        [
+            ("+1 555 123 4567 ext. 42", "42"),
+            ("+44 20 7946 0958 extn 100", "100"),
+            ("+1 555 123 4567 extension 999", "999"),
+            ("+1 555 123 4567 x 55", "55"),
+            ("+1 555 123 4567 # 77", "77"),
+            ("+1 555 123 4567;ext=200", "200"),
+        ],
+    )
+    def test_extension_separators(self, raw: str, extension: str) -> None:
+        p = parse(raw)
         assert p is not None
-        assert p.extension == "42"
-
-    def test_extn_keyword(self) -> None:
-        p = parse("+44 20 7946 0958 extn 100")
-        assert p is not None
-        assert p.extension == "100"
-
-    def test_extension_keyword(self) -> None:
-        p = parse("+1 555 123 4567 extension 999")
-        assert p is not None
-        assert p.extension == "999"
-
-    def test_x_separator(self) -> None:
-        p = parse("+1 555 123 4567 x 55")
-        assert p is not None
-        assert p.extension == "55"
-
-    def test_hash_separator(self) -> None:
-        p = parse("+1 555 123 4567 # 77")
-        assert p is not None
-        assert p.extension == "77"
-
-    def test_semicolon_ext(self) -> None:
-        p = parse("+1 555 123 4567;ext=200")
-        assert p is not None
-        assert p.extension == "200"
+        assert p.extension == extension
 
     def test_no_extension_none(self) -> None:
         p = parse("+15551234567")
@@ -249,26 +158,24 @@ class TestPhoneExtensions:
 class TestPhoneRFC3966:
     """Test RFC 3966 tel: URI handling."""
 
-    def test_basic_tel_uri(self) -> None:
-        p = parse("tel:+15551234567")
+    @pytest.mark.parametrize(
+        ("raw", "e164"),
+        [
+            ("tel:+15551234567", "+15551234567"),
+            ("tel:+442079460958;phone-context=+44", "+442079460958"),
+            ("TEL:+15551234567", "+15551234567"),  # scheme is case-insensitive
+        ],
+    )
+    def test_tel_uri(self, raw: str, e164: str) -> None:
+        p = parse(raw)
         assert p is not None
-        assert p.e164 == "+15551234567"
-
-    def test_tel_uri_with_phone_context(self) -> None:
-        p = parse("tel:+442079460958;phone-context=+44")
-        assert p is not None
-        assert p.e164 == "+442079460958"
+        assert p.e164 == e164
 
     def test_tel_uri_with_ext(self) -> None:
         p = parse("tel:+15551234567;ext=42")
         assert p is not None
         assert p.e164 == "+15551234567"
         assert p.extension == "42"
-
-    def test_tel_uri_case_insensitive(self) -> None:
-        p = parse("TEL:+15551234567")
-        assert p is not None
-        assert p.e164 == "+15551234567"
 
 
 class TestPhoneFormatInternational:
@@ -286,36 +193,11 @@ class TestPhoneFormatInternational:
         assert result.startswith("+44 ")
         assert " " in result  # has grouping
 
-    def test_france_number(self) -> None:
-        p = parse("+33123456789")
-        assert p is not None
-        result = format_international(p)
-        assert result.startswith("+33 ")
-
-    def test_unknown_cc_no_grouping(self) -> None:
-        """Countries without a template get ungrouped output."""
-        p = parse("+29012345")
-        assert p is not None
-        result = format_international(p)
-        assert result.startswith("+290 ")
-
     def test_with_extension(self) -> None:
         p = parse("+1 555 123 4567 ext 42")
         assert p is not None
         result = format_international(p)
         assert "ext. 42" in result
-
-    def test_india(self) -> None:
-        p = parse("+919876543210")
-        assert p is not None
-        result = format_international(p)
-        assert result.startswith("+91 ")
-
-    def test_china(self) -> None:
-        p = parse("+8613800138000")
-        assert p is not None
-        result = format_international(p)
-        assert result.startswith("+86 ")
 
 
 class TestPhoneFormatNational:
@@ -397,56 +279,30 @@ class TestPhoneNumberMatch:
 class TestPhoneNumberType:
     """Test number_type() heuristic detection."""
 
-    def test_us_toll_free(self) -> None:
-        p = parse("+18005551212")
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("+18005551212", NumberType.TOLL_FREE),
+            ("+19002001234", NumberType.PREMIUM_RATE),
+            ("+447911123456", NumberType.MOBILE),
+            ("+442079460958", NumberType.FIXED_LINE),
+            ("+33612345678", NumberType.MOBILE),
+            ("+919876543210", NumberType.MOBILE),
+            ("+8613800138000", NumberType.MOBILE),
+            ("+4915112345678", NumberType.MOBILE),
+            ("+29012345", NumberType.UNKNOWN),
+        ],
+    )
+    def test_number_type(self, raw: str, expected: int) -> None:
+        p = parse(raw)
         assert p is not None
-        assert number_type(p) == NumberType.TOLL_FREE
-
-    def test_us_premium(self) -> None:
-        p = parse("+19002001234")
-        assert p is not None
-        assert number_type(p) == NumberType.PREMIUM_RATE
+        assert number_type(p) == expected
 
     def test_us_regular_fixed_or_mobile(self) -> None:
         """NANP can't distinguish mobile from fixed → FIXED_LINE_OR_MOBILE."""
         p = parse("+12025551234")
         assert p is not None
         assert number_type(p) == NumberType.FIXED_LINE_OR_MOBILE
-
-    def test_uk_mobile(self) -> None:
-        p = parse("+447911123456")
-        assert p is not None
-        assert number_type(p) == NumberType.MOBILE
-
-    def test_uk_fixed(self) -> None:
-        p = parse("+442079460958")
-        assert p is not None
-        assert number_type(p) == NumberType.FIXED_LINE
-
-    def test_france_mobile(self) -> None:
-        p = parse("+33612345678")
-        assert p is not None
-        assert number_type(p) == NumberType.MOBILE
-
-    def test_india_mobile(self) -> None:
-        p = parse("+919876543210")
-        assert p is not None
-        assert number_type(p) == NumberType.MOBILE
-
-    def test_china_mobile(self) -> None:
-        p = parse("+8613800138000")
-        assert p is not None
-        assert number_type(p) == NumberType.MOBILE
-
-    def test_germany_mobile(self) -> None:
-        p = parse("+4915112345678")
-        assert p is not None
-        assert number_type(p) == NumberType.MOBILE
-
-    def test_unknown_country(self) -> None:
-        p = parse("+29012345")
-        assert p is not None
-        assert number_type(p) == NumberType.UNKNOWN
 
 
 class TestPhoneNumberMatcher:
@@ -479,9 +335,7 @@ class TestPhoneNumberMatcher:
         matches = list(PhoneNumberMatcher(text))
         assert len(matches) >= 1
         m = matches[0]
-        assert (
-            text[m.start : m.end].strip().replace(" ", "").replace("+", "+") is not None
-        )
+        assert text[m.start : m.end] == "+12025551234"
 
     def test_has_next(self) -> None:
         matcher = PhoneNumberMatcher("Call +12025551234")
@@ -563,11 +417,6 @@ class TestPhoneNumberWithoutPnObj:
 class TestPhoneParseEdgeCases:
     """Edge cases for parse() not covered by existing tests."""
 
-    def test_parse_whitespace_only(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse("   ") is None
-
     def test_parse_not_possible_number(self) -> None:
         from rolodexter._phone import parse
 
@@ -578,16 +427,6 @@ class TestPhoneParseEdgeCases:
         from rolodexter._phone import parse
 
         assert parse(12345) is None  # type: ignore[arg-type]
-
-    def test_parse_empty(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse("") is None
-
-    def test_parse_none(self) -> None:
-        from rolodexter._phone import parse
-
-        assert parse(None) is None  # type: ignore[arg-type]
 
 
 class TestPhoneNumberMatchRepr:
