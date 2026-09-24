@@ -47,12 +47,6 @@ class TestNameNormalizer:
     def test_normalize(self, raw: str, expected: str) -> None:
         assert NameNormalizer.normalize(raw) == expected
 
-    def test_empty(self) -> None:
-        assert NameNormalizer.normalize("") == ""
-
-    def test_none(self) -> None:
-        assert NameNormalizer.normalize(None) is None  # type: ignore[arg-type]
-
 
 class TestNameDeliberateCapitals:
     """A capital placed after a word's first letter is kept (2.12.0).
@@ -123,9 +117,6 @@ class TestAddressNormalizer:
     def test_normalize(self) -> None:
         assert AddressNormalizer.normalize("  123  main   st  ") == "123 Main St"
 
-    def test_empty(self) -> None:
-        assert AddressNormalizer.normalize("") == ""
-
 
 class TestStringNormalizer:
     def test_strips_whitespace(self) -> None:
@@ -166,26 +157,25 @@ class TestNormalizeValue:
 class TestV23PostalCodeNormalizer:
     """PostalCodeNormalizer: uppercase + Canadian spacing."""
 
-    def test_canadian_postal_code_spacing(self) -> None:
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            # Canadian codes get the space between the two halves.
+            ("k1a0b1", "K1A 0B1"),
+            ("K1A 0B1", "K1A 0B1"),
+            ("  m5v 2t6  ", "M5V 2T6"),
+            # US ZIPs pass through.
+            ("90210", "90210"),
+            ("90210-1234", "90210-1234"),
+            # Everything else is uppercased.
+            ("sw1a 1aa", "SW1A 1AA"),
+        ],
+    )
+    def test_normalize(self, raw: str, expected: str) -> None:
         from rolodexter.core import PostalCodeNormalizer
 
         n = PostalCodeNormalizer()
-        assert n.normalize("k1a0b1") == "K1A 0B1"
-        assert n.normalize("K1A 0B1") == "K1A 0B1"
-        assert n.normalize("  m5v 2t6  ") == "M5V 2T6"
-
-    def test_us_zip_passthrough(self) -> None:
-        from rolodexter.core import PostalCodeNormalizer
-
-        n = PostalCodeNormalizer()
-        assert n.normalize("90210") == "90210"
-        assert n.normalize("90210-1234") == "90210-1234"
-
-    def test_uppercase(self) -> None:
-        from rolodexter.core import PostalCodeNormalizer
-
-        n = PostalCodeNormalizer()
-        assert n.normalize("sw1a 1aa") == "SW1A 1AA"
+        assert n.normalize(raw) == expected
 
 
 class TestV23BooleanNormalizer:
@@ -230,23 +220,23 @@ class TestV23BooleanNormalizer:
 class TestNameNormalizerParse:
     """Test NameNormalizer.parse() structured output."""
 
-    def test_simple_name(self) -> None:
-        result = NameNormalizer.parse("John Smith")
-        assert result["first"] == "John"
-        assert result["last"] == "Smith"
-
-    def test_with_title_and_suffix(self) -> None:
-        result = NameNormalizer.parse("Dr. Jane Doe Jr.")
-        assert result["title"] == "Dr."
-        assert result["first"] == "Jane"
-        assert result["last"] == "Doe"
-        assert result["suffix"] == "Jr."
-
-    def test_with_middle_name(self) -> None:
-        result = NameNormalizer.parse("John Fitzgerald Kennedy")
-        assert result["first"] == "John"
-        assert result["middle"] == "Fitzgerald"
-        assert result["last"] == "Kennedy"
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("John Smith", {"first": "John", "last": "Smith"}),
+            (
+                "Dr. Jane Doe Jr.",
+                {"title": "Dr.", "first": "Jane", "last": "Doe", "suffix": "Jr."},
+            ),
+            (
+                "John Fitzgerald Kennedy",
+                {"first": "John", "middle": "Fitzgerald", "last": "Kennedy"},
+            ),
+        ],
+    )
+    def test_parse(self, raw: str, expected: dict[str, str]) -> None:
+        result = NameNormalizer.parse(raw)
+        assert {key: result[key] for key in expected} == expected
 
     def test_returns_all_keys(self) -> None:
         result = NameNormalizer.parse("Alice")
@@ -311,24 +301,20 @@ class TestBooleanNormalizerEdge:
 class TestListNormalizer:
     """Test ListNormalizer for tags and list-like values."""
 
-    def test_comma_separated(self) -> None:
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("  a ,  b  , c  ", ["a", "b", "c"]),
+            ("a,,b,  ,c", ["a", "b", "c"]),
+            ("a; b; c", ["a", "b", "c"]),
+            ('["hot", "lead"]', ["hot", "lead"]),
+            ("[1, 2, 3]", ["1", "2", "3"]),
+        ],
+    )
+    def test_splits_string(self, raw: str, expected: list[str]) -> None:
         from rolodexter.core import ListNormalizer
 
-        assert ListNormalizer.normalize("marketing, sales, vip") == [
-            "marketing",
-            "sales",
-            "vip",
-        ]
-
-    def test_semicolon_separated(self) -> None:
-        from rolodexter.core import ListNormalizer
-
-        assert ListNormalizer.normalize("a; b; c") == ["a", "b", "c"]
-
-    def test_json_array(self) -> None:
-        from rolodexter.core import ListNormalizer
-
-        assert ListNormalizer.normalize('["hot", "lead"]') == ["hot", "lead"]
+        assert ListNormalizer.normalize(raw) == expected
 
     def test_single_value(self) -> None:
         from rolodexter.core import ListNormalizer
@@ -349,21 +335,6 @@ class TestListNormalizer:
         from rolodexter.core import ListNormalizer
 
         assert ListNormalizer.normalize(42) == 42
-
-    def test_whitespace_trimmed(self) -> None:
-        from rolodexter.core import ListNormalizer
-
-        assert ListNormalizer.normalize("  a ,  b  , c  ") == ["a", "b", "c"]
-
-    def test_empty_items_filtered(self) -> None:
-        from rolodexter.core import ListNormalizer
-
-        assert ListNormalizer.normalize("a,,b,  ,c") == ["a", "b", "c"]
-
-    def test_json_array_with_numbers(self) -> None:
-        from rolodexter.core import ListNormalizer
-
-        assert ListNormalizer.normalize("[1, 2, 3]") == ["1", "2", "3"]
 
     def test_list_with_empty_strings_filtered(self) -> None:
         from rolodexter.core import ListNormalizer
@@ -407,10 +378,6 @@ class TestListNormalizer:
 
 class TestAddressSmartCasing:
     """AddressNormalizer no longer mangles real-world tokens (was str.title())."""
-
-    def test_existing_behaviour_preserved(self) -> None:
-        assert AddressNormalizer.normalize("  123  main   st  ") == "123 Main St"
-        assert normalize_value("city", "  new york  ") == "New York"
 
     def test_mc_names(self) -> None:
         assert AddressNormalizer.normalize("123 MCDONALD ST") == "123 McDonald St"

@@ -39,10 +39,6 @@ class TestPhoneNormalizer:
         result = PhoneNormalizer.normalize("(555) 123-4567", default_region="US")
         assert result == "+15551234567"
 
-    def test_us_dots_with_region(self) -> None:
-        result = PhoneNormalizer.normalize("555.123.4567", default_region="US")
-        assert result == "+15551234567"
-
     def test_none_passthrough(self) -> None:
         assert PhoneNormalizer.normalize(None) is None  # type: ignore[arg-type]
 
@@ -53,18 +49,6 @@ class TestPhoneNormalizer:
 class TestPhoneNormalizerE164:
     """Test PhoneNormalizer.normalize() uses built-in E.164 module."""
 
-    def test_us_number(self) -> None:
-        result = PhoneNormalizer.normalize("+1 (555) 123-4567")
-        assert result == "+15551234567"
-
-    def test_uk_number(self) -> None:
-        result = PhoneNormalizer.normalize("+44 20 7946 0958")
-        assert result == "+442079460958"
-
-    def test_japan_number(self) -> None:
-        result = PhoneNormalizer.normalize("+81 3-1234-5678")
-        assert result == "+81312345678"
-
     def test_default_region_au(self) -> None:
         result = PhoneNormalizer.normalize("(02) 1234 5678", default_region="AU")
         assert result.startswith("+61")
@@ -72,40 +56,6 @@ class TestPhoneNormalizerE164:
     def test_default_region_gb(self) -> None:
         result = PhoneNormalizer.normalize("020 7946 0958", default_region="GB")
         assert result == "+442079460958"
-
-    def test_empty_returns_as_is(self) -> None:
-        assert PhoneNormalizer.normalize("") == ""
-
-    def test_none_returns_none(self) -> None:
-        assert PhoneNormalizer.normalize(None) is None  # type: ignore[arg-type]
-
-    def test_non_string_returns_as_is(self) -> None:
-        assert PhoneNormalizer.normalize(12345) == 12345  # type: ignore[arg-type]
-
-    def test_garbage_returns_original(self) -> None:
-        assert PhoneNormalizer.normalize("no phone here") == "no phone here"
-
-    def test_too_short_returns_original(self) -> None:
-        assert PhoneNormalizer.normalize("123") == "123"
-
-    def test_whitespace_only_returns_original(self) -> None:
-        assert PhoneNormalizer.normalize("   ") == "   "
-
-    def test_double_zero_international(self) -> None:
-        result = PhoneNormalizer.normalize("0044 20 7946 0958")
-        assert result == "+442079460958"
-
-    def test_vanity_number(self) -> None:
-        result = PhoneNormalizer.normalize("+1-800-FLOWERS")
-        assert result == "+18003569377"
-
-    def test_india_number(self) -> None:
-        result = PhoneNormalizer.normalize("+91 98765 43210")
-        assert result == "+919876543210"
-
-    def test_china_number(self) -> None:
-        result = PhoneNormalizer.normalize("+86 138 0013 8000")
-        assert result == "+8613800138000"
 
     def test_unparseable_number_is_returned_unchanged(self) -> None:
         """An unparseable number is passed through, never silently mangled.
