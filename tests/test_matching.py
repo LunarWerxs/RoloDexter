@@ -499,11 +499,19 @@ class TestTraceHeader:
         # cross-language divergence to the wrong stage.
         mapper = ContactMapper()
         steps = mapper.trace_header("fname")
-        assert [step["layer"] for step in steps] == ["exact", "normalized", "fuzzy", "heuristic"]
+        assert [step["layer"] for step in steps] == [
+            "exact",
+            "normalized",
+            "fuzzy",
+            "heuristic",
+        ]
         winner = mapper.identify("fname")
         selected = [step for step in steps if step["selected"]]
         assert len(selected) == 1
-        assert (selected[0]["layer"], selected[0]["canonical"]) == (winner.strategy, winner.canonical)
+        assert (selected[0]["layer"], selected[0]["canonical"]) == (
+            winner.strategy,
+            winner.canonical,
+        )
         assert mapper.cache_info()["size"] == 0
 
     def test_value_reaches_the_value_dependent_layer(self) -> None:
