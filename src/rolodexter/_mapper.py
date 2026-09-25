@@ -205,6 +205,52 @@ class ContactMapper:
                 return result
         return self._unknown(header)
 
+    def trace_header(
+        self,
+        header: str,
+        *,
+        value: Any = None,
+        default_region: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Log every pipeline layer's verdict on one header, in pipeline order.
+
+        WHY: :meth:`identify` reports only the layer that won.  When the
+        Python and JavaScript packages disagree on a header, the question is
+        which layer drifted first, and that needs every layer's decision side
+        by side.  ``scripts/parity_sweep.py`` diffs this log across the two
+        packages to charge a divergence to the first stage that differs.
+
+        Each step is ``{"layer", "canonical", "confidence", "selected"}``:
+        ``canonical``/``confidence`` are ``None`` when the layer did not
+        match, and ``selected`` is ``True`` on the one layer
+        :meth:`map_payload` would take (the first that matched).  Every layer
+        runs, even after one has matched, so a later layer's verdict is
+        visible too.  Header-only layers see no value, exactly as in
+        :meth:`map_payload`; the header cache is neither read nor written.
+
+        .. versionadded:: 2.13.0
+        """
+        region = default_region if default_region is not None else self._default_region
+        match_value = _value_for_matching(value)
+        steps: list[dict[str, Any]] = []
+        selected = False
+        for strategy in self._strategies:
+            result = strategy.match(
+                header,
+                value=None if strategy.header_only else match_value,
+                default_region=region,
+            )
+            steps.append(
+                {
+                    "layer": strategy.name,
+                    "canonical": None if result is None else result.canonical,
+                    "confidence": None if result is None else result.confidence,
+                    "selected": result is not None and not selected,
+                }
+            )
+            selected = selected or result is not None
+        return steps
+
     def _resolve(self, header: str, value: Any, region: str | None) -> FieldMatch:
         """Resolve a header, caching the deterministic header-only verdict.
 

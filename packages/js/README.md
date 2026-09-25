@@ -187,6 +187,7 @@ Warnings:
 | `compile_schema(headers)` | Resolve a header list **once**, then reuse it across every row |
 | `map_dataframe(df)` | Map a DataFrame-like column store |
 | `identify(header, opts?)` | Resolve a single header without mapping anything |
+| `trace_header(header, opts?)` | Every pipeline layer's verdict on one header, in order |
 | `clear_cache()` / `cache_info()` | Inspect and reset the header cache |
 
 `map_dataframe()` guarantees unique output labels: unmatched source labels are

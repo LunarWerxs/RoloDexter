@@ -17,6 +17,12 @@ it is progress; growing it needs a reason in the commit message.
     python scripts/parity_sweep.py                    # fails on new divergence
     python scripts/parity_sweep.py --update-baseline  # after a deliberate change
     python scripts/parity_sweep.py --show phones      # print examples
+    python scripts/parity_sweep.py --json             # per-stage summary as JSON
+
+Every diverging case is also charged to the first pipeline stage that drifts
+(exact, normalized, fuzzy, heuristic, then the value normalizer), so the report
+reads "stage X is wrong" rather than only "N cases differ".  See
+``attribute()`` below.
 
 The JS half runs from ``packages/js/dist``, so build it first.
 """
@@ -525,10 +531,146 @@ def classify(section: str, item: dict[str, Any]) -> str:
     return "other"
 
 
-def main() -> int:
+# ── Per-stage attribution ─────────────────────────────────────────────
+# "N cases diverge" says a port is wrong, not where.  For every diverging case
+# that runs the header pipeline, both packages log each layer's verdict
+# (ContactMapper.trace_header) and the value normalizer's output on the layer
+# that won; the case is charged to the EARLIEST stage, in pipeline order, whose
+# log differs on any of its headers.  A case whose traced stages all agree is
+# charged to "assembly": what map_payload does after them (merging, warnings,
+# thresholds, embedded phones).  The idea, not the code, comes from the React
+# Compiler's Rust-port harness (findDivergencePass, MIT).
+
+TRACED_SECTIONS = ("schemas", "payloads", "objects")
+SECTION_STAGE = {"normalize": "normalize", "phones": "phone", "languages": "i18n"}
+RAISED = "trace raised"
+ASSEMBLY = "assembly"
+
+
+def stage_order() -> list[str]:
+    layers = [step["layer"] for step in r.ContactMapper().trace_header("")]
+    return [RAISED, *layers, "normalize", ASSEMBLY, "phone", "i18n"]
+
+
+def _flatten_encoded(payload: Any, depth: int, prefix: str = "", current: int = 1) -> dict[str, Any]:
+    """map_payload's flattening, on the corpus's encoded form (markers are leaves)."""
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        full_key = f"{prefix}{key}" if prefix else key
+        if isinstance(value, dict) and "$" not in value and current < depth:
+            out.update(_flatten_encoded(value, depth, f"{full_key}.", current + 1))
+        else:
+            out[full_key] = value
+    return out
+
+
+def trace_requests(index: dict[str, tuple[str, dict[str, Any]]], entries: list[str]) -> list[dict[str, Any]]:
+    """One request per header of every diverging case that runs the header pipeline."""
+    requests: list[dict[str, Any]] = []
+    for entry in entries:
+        section, case_id = entry.split("/", 1)
+        if section not in TRACED_SECTIONS:
+            continue
+        item = index[case_id][1]
+        mapper_options = item.get("mapper_options", {})
+        options = item.get("options", {})
+        region = options.get("default_region")
+        if region is None:
+            region = mapper_options.get("default_region", "US")
+        if section == "schemas":
+            pairs: list[tuple[str, Any]] = [(header, None) for header in item["headers"]]
+            normalize = False
+        else:
+            depth = max(1, min(options.get("depth", 1), 5))
+            pairs = list(_flatten_encoded(item["payload"], depth).items())
+            normalize = bool(mapper_options.get("normalize", True))
+        requests.extend(
+            {
+                "id": f"{entry}|{position}",
+                "case": entry,
+                "header": header,
+                "value": value,
+                "default_region": region,
+                "normalize": normalize,
+                "mapper_options": mapper_options,
+            }
+            for position, (header, value) in enumerate(pairs)
+        )
+    return requests
+
+
+def trace_case(item: dict[str, Any]) -> dict[str, Any]:
+    """Python half of traceCase() in parity_sweep_js.mjs; the two must match."""
+    mapper = r.ContactMapper(**item["mapper_options"])
+    value = decode(item["value"])
+    layers = mapper.trace_header(item["header"], value=value, default_region=item["default_region"])
+    selected = next((step for step in layers if step["selected"]), None)
+    normalized = None
+    if selected is not None and item["normalize"]:
+        canonical = selected["canonical"]
+        normalized = capture(
+            lambda: r.normalize_value(canonical, value, default_region=item["default_region"])
+        )
+    return {"layers": layers, "normalized": normalized}
+
+
+def first_divergent_stage(py: Any, js: Any) -> str | None:
+    """The first stage whose log differs along the path the pipeline took, or None."""
+    if py == js:
+        return None
+    if "ok" not in py or "ok" not in js:
+        return RAISED
+    for py_step, js_step in itertools.zip_longest(py["ok"]["layers"], js["ok"]["layers"]):
+        if py_step != js_step:
+            return str((py_step or js_step)["layer"])
+        if py_step["selected"] == {"n": "true"}:
+            # Both packages took this layer; what later layers would have said
+            # never reaches the result, so it cannot explain this case.
+            break
+    if py["ok"]["normalized"] != js["ok"]["normalized"]:
+        return "normalize"
+    return None
+
+
+def attribute(
+    diverging: list[str],
+    requests: list[dict[str, Any]],
+    py_traces: dict[str, Any],
+    js_traces: dict[str, Any],
+    order: list[str],
+) -> dict[str, str]:
+    """Charge each diverging case to the earliest stage that differs."""
+    def rank(stage: str) -> int:
+        return order.index(stage) if stage in order else len(order)
+
+    per_case: dict[str, list[str]] = {}
+    for request in requests:
+        stage = first_divergent_stage(py_traces[request["id"]], js_traces[request["id"]])
+        if stage is not None:
+            per_case.setdefault(request["case"], []).append(stage)
+    stages: dict[str, str] = {}
+    for entry in diverging:
+        section = entry.split("/", 1)[0]
+        if section in SECTION_STAGE:
+            stages[entry] = SECTION_STAGE[section]
+        elif entry in per_case:
+            stages[entry] = min(per_case[entry], key=rank)
+        else:
+            stages[entry] = ASSEMBLY
+    return stages
+
+
+def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update-baseline", action="store_true", help="record today's divergences as accepted")
     parser.add_argument("--show", metavar="SECTION", help="print example diffs from one section")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the per-stage summary as JSON instead of the text report",
+    )
     args = parser.parse_args()
 
     corpus = build_corpus()
@@ -572,8 +714,55 @@ def main() -> int:
     accepted = set(json.loads(BASELINE.read_text(encoding="utf-8"))["cases"]) if BASELINE.exists() else set()
     new = sorted(set(diverging) - accepted)
     fixed = sorted(accepted - set(diverging))
-
     total = sum(len(items) for items in corpus.values())
+
+    # Second, small pass: only the diverging cases are traced, so a clean
+    # sweep pays nothing for attribution.
+    requests = trace_requests(index, diverging)
+    py_traces: dict[str, Any] = {}
+    js_traces: dict[str, Any] = {}
+    if requests:
+        py_traces = {request["id"]: capture(lambda request=request: trace_case(request)) for request in requests}
+        trace_corpus: dict[str, list[dict[str, Any]]] = {section: [] for section in corpus}
+        trace_corpus["traces"] = requests
+        js_traces = js_results(trace_corpus, scratch)["traces"]
+        scratch.unlink(missing_ok=True)
+    order = stage_order()
+    stages = attribute(diverging, requests, py_traces, js_traces, order)
+    stage_counts = {
+        stage: (
+            sum(1 for entry in diverging if stages[entry] == stage),
+            sum(1 for entry in new if stages[entry] == stage),
+        )
+        for stage in sorted(set(stages.values()), key=lambda s: order.index(s) if s in order else len(order))
+    }
+
+    if args.json:
+        # Machine-readable, for a port-tracking job: stages in pipeline order,
+        # and the earliest one that diverges at all and with a NEW case.
+        print(
+            json.dumps(
+                {
+                    "cases": total,
+                    "diverging": len(diverging),
+                    "accepted": len(accepted),
+                    "new": len(new),
+                    "fixed": len(fixed),
+                    "stages": [
+                        {"stage": stage, "diverging": count, "new": new_count}
+                        for stage, (count, new_count) in stage_counts.items()
+                    ],
+                    "earliest_stage": next(iter(stage_counts), None),
+                    "earliest_new_stage": next(
+                        (stage for stage, (_, new_count) in stage_counts.items() if new_count), None
+                    ),
+                    "new_cases": [{"case": entry, "stage": stages[entry]} for entry in new],
+                },
+                indent=1,
+            )
+        )
+        return 1 if new else 0
+
     print(f"{total} cases, {len(diverging)} diverging ({len(accepted)} accepted)")
 
     counts: dict[str, int] = {}
@@ -583,6 +772,12 @@ def main() -> int:
         counts[label] = counts.get(label, 0) + 1
     for label, count in sorted(counts.items(), key=lambda pair: -pair[1]):
         print(f"  {count:>5}  {label}")
+
+    if stage_counts:
+        print("\nfirst diverging stage, in pipeline order:")
+        for stage, (count, new_count) in stage_counts.items():
+            suffix = f"  ({new_count} new)" if new_count else ""
+            print(f"  {count:>5}  {stage}{suffix}")
 
     if args.show:
         shown = 0
@@ -597,7 +792,7 @@ def main() -> int:
             # beats a UTF-8 console here: most of this corpus is invisible, and
             # a U+200B rendered as nothing looks identical to a U+FEFF rendered
             # as nothing, which is the same defect as mojibake, only quieter.
-            print(f"\n-- {case_id}")
+            print(f"\n-- {case_id}  [first diverging stage: {stages[entry]}]")
             print(f"   in : {json.dumps(index[case_id][1])[:200]}")
             print(f"   py : {json.dumps(python_side[section][case_id])[:200]}")
             print(f"   js : {json.dumps(js_side[section][case_id])[:200]}")
@@ -612,7 +807,7 @@ def main() -> int:
     if new:
         print(f"\n{len(new)} NEW divergence(s):")
         for entry in new[:20]:
-            print(f"  {entry}")
+            print(f"  {entry}  [{stages[entry]}]")
         return 1
     return 0
 

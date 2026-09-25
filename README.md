@@ -380,6 +380,7 @@ ContactMapper(
 | Method                                                    | Description                                       |
 | --------------------------------------------------------- | ------------------------------------------------- |
 | `identify(header, *, value)`                              | Resolve a single header to a `FieldMatch`         |
+| `trace_header(header, *, value)`                          | Every pipeline layer's verdict, in order          |
 | `map_payload(payload, *, depth, ...)`                     | Normalize an entire dict → `MappingResult`        |
 | `map_batch(payloads, *, ...)`                             | Process a list of payloads → `list[MappingResult]`|
 | `map_stream(iterable, *, ...)`                            | Lazily yield results (constant memory)            |

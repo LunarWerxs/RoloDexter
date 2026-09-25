@@ -295,6 +295,27 @@ test("header cache can be bounded, cleared, and disabled", () => {
   );
 });
 
+// trace_header is what scripts/parity_sweep.py diffs against Python's to name
+// the drifting layer: one step per layer, in order, even after a match, with
+// `selected` on exactly the layer identify() takes, and the value reaching
+// only the value-dependent layer.
+test("trace_header logs every layer and selects the identify winner", () => {
+  const mapper = new ContactMapper();
+  const steps = mapper.trace_header("fname");
+  assert.deepEqual(steps.map((step) => step.layer), ["exact", "normalized", "fuzzy", "heuristic"]);
+  const winner = mapper.identify("fname");
+  const selected = steps.filter((step) => step.selected);
+  assert.equal(selected.length, 1);
+  assert.deepEqual([selected[0].layer, selected[0].canonical], [winner.strategy, winner.canonical]);
+  assert.equal(mapper.cache_info().size, 0);
+
+  const heuristic = new ContactMapper()
+    .trace_header("Mystery", { value: "ada@example.com" })
+    .find((step) => step.layer === "heuristic");
+  assert.equal(heuristic?.selected, true);
+  assert.equal(heuristic?.canonical, "email");
+});
+
 test("public strategy classes and custom strategy pipeline work", () => {
   const registry = new PatternRegistry();
 

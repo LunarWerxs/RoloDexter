@@ -489,6 +489,30 @@ class TestHeaderResolutionCache:
             ContactMapper(header_cache_max_size=-1)
 
 
+class TestTraceHeader:
+    """trace_header is what parity_sweep.py diffs to name the drifting layer."""
+
+    def test_logs_every_layer_and_selects_the_identify_winner(self) -> None:
+        # Contract: one step per layer, in pipeline order, even after a match,
+        # and `selected` on exactly the layer identify() takes.  A trace that
+        # stopped at the first hit, or marked the wrong winner, would charge a
+        # cross-language divergence to the wrong stage.
+        mapper = ContactMapper()
+        steps = mapper.trace_header("fname")
+        assert [step["layer"] for step in steps] == ["exact", "normalized", "fuzzy", "heuristic"]
+        winner = mapper.identify("fname")
+        selected = [step for step in steps if step["selected"]]
+        assert len(selected) == 1
+        assert (selected[0]["layer"], selected[0]["canonical"]) == (winner.strategy, winner.canonical)
+        assert mapper.cache_info()["size"] == 0
+
+    def test_value_reaches_the_value_dependent_layer(self) -> None:
+        steps = ContactMapper().trace_header("Mystery", value="ada@example.com")
+        heuristic = next(step for step in steps if step["layer"] == "heuristic")
+        assert heuristic["selected"] is True
+        assert heuristic["canonical"] == "email"
+
+
 # ═══════════════════════════════════════════════════════════════
 #  v2.7.0 — FUZZY SHORT-ALIAS FALSE-POSITIVE GUARD
 # ═══════════════════════════════════════════════════════════════

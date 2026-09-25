@@ -150,8 +150,31 @@ function language(item) {
   return data;
 }
 
+// One header's per-stage log for a case that already diverged: every layer's
+// verdict, then the value normalizer on the layer that won. parity_sweep.py
+// diffs this against its own log to name the first stage that drifts. Must
+// match trace_case() there exactly.
+function traceCase(item) {
+  const mapper = new r.ContactMapper(item.mapper_options ?? {});
+  const value = decode(item.value);
+  const region = item.default_region ?? null;
+  const layers = mapper.trace_header(item.header, { value, default_region: region });
+  const selected = layers.find((step) => step.selected);
+  let normalized = null;
+  if (selected && item.normalize) {
+    normalized = capture(() => r.normalize_value(selected.canonical, value, { default_region: region }));
+  }
+  return { layers, normalized };
+}
+
 const corpus = JSON.parse(fs.readFileSync(0, "utf8"));
 const out = {};
+
+// The attribution pass sends only `traces`, with every other section empty.
+out.traces = {};
+for (const item of corpus.traces ?? []) {
+  out.traces[item.id] = capture(() => traceCase(item));
+}
 
 out.normalize = {};
 for (const item of corpus.normalize) {
