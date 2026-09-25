@@ -1,0 +1,6 @@
+# rolodexter.core.HeuristicMatchStrategy  api-hash 1c7f3d17
+class HeuristicMatchStrategy(MatchStrategy)
+  def __init__(self, default_region: str | None = 'US') -> None
+  header_only: bool = False
+  def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None
+  @property name -> str

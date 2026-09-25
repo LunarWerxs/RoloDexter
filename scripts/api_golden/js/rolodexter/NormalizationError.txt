@@ -1,0 +1,3 @@
+# rolodexter.NormalizationError  api-hash 7431fa22
+class NormalizationError extends RolodexterError
+  constructor(message?: string | undefined): NormalizationError

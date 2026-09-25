@@ -1,0 +1,2 @@
+# rolodexter.core.MappingWarning  api-hash 439b919b
+class MappingWarning(str)

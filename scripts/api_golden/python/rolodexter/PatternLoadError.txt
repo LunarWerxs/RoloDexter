@@ -1,0 +1,2 @@
+# rolodexter.PatternLoadError  api-hash 782d7e7b
+class PatternLoadError(RolodexterError)

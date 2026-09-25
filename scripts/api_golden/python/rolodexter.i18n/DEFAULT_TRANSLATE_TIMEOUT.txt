@@ -1,0 +1,2 @@
+# rolodexter.i18n.DEFAULT_TRANSLATE_TIMEOUT  api-hash f5c9a2b5
+DEFAULT_TRANSLATE_TIMEOUT: float = 10.0

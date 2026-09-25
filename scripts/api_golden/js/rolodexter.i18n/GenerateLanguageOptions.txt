@@ -1,0 +1,7 @@
+# rolodexter.i18n.GenerateLanguageOptions  api-hash 5c350269
+export interface GenerateLanguageOptions { force?: boolean; force_fields?: Set<string> | string[]; timeout?: number; retries?: number; retry_backoff?: number; }
+  force?: boolean | undefined
+  force_fields?: string[] | Set<string> | undefined
+  retries?: number | undefined
+  retry_backoff?: number | undefined
+  timeout?: number | undefined

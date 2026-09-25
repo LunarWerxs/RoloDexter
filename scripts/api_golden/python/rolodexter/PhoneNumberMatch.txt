@@ -1,0 +1,3 @@
+# rolodexter.PhoneNumberMatch  api-hash f742cca8
+class PhoneNumberMatch
+  def __init__(self, start: int, end: int, raw_string: str, number: PhoneNumber)

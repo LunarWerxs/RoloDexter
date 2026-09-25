@@ -1,0 +1,14 @@
+# rolodexter.ContactMapper  api-hash 5f009312
+class ContactMapper(rolodexter._mapper.ContactMapper)
+  def __init__(self, *, patterns: dict[str, Any] | None = None, patterns_path: str | None = None, default_service: str | None = None, normalize: bool = True, strategies: Sequence[MatchStrategy] | None = None, languages: str | Sequence[str] | None = None, overrides: dict[str, str] | None = None, default_region: str | None = 'US', strict: bool = False, confidence_threshold: float = 0.0, header_cache_max_size: int | None = 4096) -> None
+  def cache_info(self) -> dict[str, Any]
+  def clear_cache(self) -> None
+  def compile_schema(self, headers: Iterable[str], *, default_region: str | None = None, strict: bool | None = None, confidence_threshold: float | None = None) -> MappingSchema
+  def identify(self, header: str, *, value: str | None = None, service: str | None = None, default_region: str | None = None) -> FieldMatch
+  def map_batch(self, payloads: Sequence[dict[str, Any]], *, service: str | None = None, depth: int = 1, default_region: str | None = None, extract_embedded_phones: bool = False, strict: bool | None = None, confidence_threshold: float | None = None, normalize: bool | None = None) -> list[MappingResult]
+  def map_dataframe(self, df: Any, *, default_region: str | None = None, normalize: bool | None = None, strict: bool | None = None, confidence_threshold: float | None = None) -> Any
+  def map_payload(self, payload: dict[str, Any], *, service: str | None = None, depth: int = 1, extract_embedded_phones: bool = False, default_region: str | None = None, strict: bool | None = None, confidence_threshold: float | None = None, normalize: bool | None = None) -> MappingResult
+  def map_stream(self, payloads: Iterable[dict[str, Any]], *, depth: int = 1, default_region: str | None = None, extract_embedded_phones: bool = False, strict: bool | None = None, confidence_threshold: float | None = None, normalize: bool | None = None) -> Iterator[MappingResult]
+  def profile(self, payloads: Iterable[dict[str, Any]], *, max_rows: int | None = None, depth: int = 1, default_region: str | None = None, extract_embedded_phones: bool = False, strict: bool | None = None, confidence_threshold: float | None = None, normalize: bool | None = None) -> MappingProfile
+  @property registry -> PatternRegistry
+  def seed_header_cache(self, matches: dict[str, FieldMatch]) -> None

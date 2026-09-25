@@ -1,0 +1,2 @@
+# rolodexter.i18n.get_cache_dir  api-hash 30de265a
+def get_cache_dir() -> Path

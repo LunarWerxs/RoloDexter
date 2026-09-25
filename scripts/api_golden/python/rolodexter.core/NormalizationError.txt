@@ -1,0 +1,2 @@
+# rolodexter.core.NormalizationError  api-hash e221d687
+class NormalizationError(RolodexterError)

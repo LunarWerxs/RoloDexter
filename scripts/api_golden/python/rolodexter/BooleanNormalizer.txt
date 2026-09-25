@@ -1,0 +1,3 @@
+# rolodexter.BooleanNormalizer  api-hash e8bb5b6a
+class BooleanNormalizer
+  @classmethod def normalize(cls, value: str) -> bool | str

@@ -114,7 +114,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
     "coverage": "npm run build && node scripts/run-tests.mjs --coverage",
-    "check:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py",
+    "check:parity": "python ../../scripts/check_release_versions.py && python ../../scripts/parity_probe.py && python ../../scripts/cli_parity_probe.py && python ../../scripts/api_snapshot.py",
     "prepack": "npm test && npm run check:parity"
   },
   "dependencies": {

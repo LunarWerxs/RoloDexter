@@ -1,0 +1,6 @@
+export interface LanguageData { language_code?: string; language_name?: string; generated_at?: string; source_version?: string; fields?: Record<string, string[]>; }
+  fields?: Record<string, string[]> | undefined
+  generated_at?: string | undefined
+  language_code?: string | undefined
+  language_name?: string | undefined
+  source_version?: string | undefined

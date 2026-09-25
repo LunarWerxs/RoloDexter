@@ -1,0 +1,2 @@
+# rolodexter.is_valid  api-hash 5cde0cda
+def is_valid(raw: str, default_region: str | None = None) -> bool

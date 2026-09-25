@@ -1,0 +1,4 @@
+# rolodexter.NameNormalizer  api-hash 80ca0617
+class NameNormalizer
+  @classmethod def normalize(cls, value: str) -> str
+  @classmethod def parse(cls, value: str) -> dict[str, str]

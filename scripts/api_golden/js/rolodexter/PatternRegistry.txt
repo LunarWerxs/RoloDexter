@@ -1,0 +1,13 @@
+# rolodexter.PatternRegistry  api-hash 880c5740
+class PatternRegistry
+  constructor(): PatternRegistry
+  constructor(options: PatternRegistryOptions): PatternRegistry
+  constructor(patterns: PatternData | null, patterns_path?: string | null | undefined, languages?: string | string[] | null | undefined, overrides?: Record<string, string> | null | undefined): PatternRegistry
+  readonly all_aliases: string[]
+  readonly available_languages: string[]
+  readonly cached_languages: string[]
+  readonly canonical_fields: string[]
+  exact_lookup(header: string): string | null
+  readonly loaded_languages: string[]
+  toString(): string
+  readonly version: string

@@ -1,0 +1,3 @@
+# rolodexter.PatternLoadError  api-hash 425288f3
+class PatternLoadError extends RolodexterError
+  constructor(message?: string | undefined): PatternLoadError

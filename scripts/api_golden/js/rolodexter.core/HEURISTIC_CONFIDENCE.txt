@@ -1,0 +1,2 @@
+# rolodexter.core.HEURISTIC_CONFIDENCE  api-hash 29ac2cfb
+const HEURISTIC_CONFIDENCE: 0.6

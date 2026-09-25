@@ -1,0 +1,7 @@
+export interface ProfileOptions extends Omit<MapPayloadOptions, "service"> { max_rows?: number | null; }
+  confidence_threshold?: number | undefined
+  default_region?: string | null | undefined
+  depth?: number | undefined
+  extract_embedded_phones?: boolean | undefined
+  max_rows?: number | null | undefined
+  strict?: boolean | undefined

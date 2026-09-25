@@ -1,0 +1,5 @@
+# rolodexter.PostalCodeNormalizer  api-hash e89c65b2
+class PostalCodeNormalizer
+  constructor(): PostalCodeNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

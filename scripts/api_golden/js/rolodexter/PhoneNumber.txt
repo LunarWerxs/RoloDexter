@@ -1,0 +1,13 @@
+# rolodexter.PhoneNumber  api-hash f613157f
+class PhoneNumber
+  constructor(calling_code: number, national_number: string, raw: string, extension?: string | null | undefined): PhoneNumber
+  constructor(calling_code: number, national_number: string, raw: string, extension: string | null | undefined, parsed: PhoneNumber | undefined): PhoneNumber
+  readonly calling_code: number
+  readonly country_codes: string[]
+  readonly e164: string
+  readonly extension: string | null
+  readonly is_possible: boolean
+  readonly is_valid: boolean
+  readonly national_number: string
+  readonly raw: string
+  toString(): string

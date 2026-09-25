@@ -1,0 +1,2 @@
+# rolodexter.format_e164  api-hash 17928b1e
+def format_e164(raw: str, default_region: str | None = None) -> str | None

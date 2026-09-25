@@ -1,0 +1,2 @@
+# rolodexter.i18n.discover_cached  api-hash 81997f5c
+function discover_cached(): Record<string, string>

@@ -1,0 +1,4 @@
+# rolodexter.core.DateNormalizer  api-hash 83c47ff3
+class DateNormalizer
+  @classmethod def is_ambiguous(cls, value: str) -> bool
+  @classmethod def normalize(cls, value: str) -> str

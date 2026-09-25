@@ -1,0 +1,7 @@
+# rolodexter.core.NameNormalizer  api-hash 0053cd2d
+class NameNormalizer
+  constructor(): NameNormalizer
+  normalize(value: unknown): unknown
+  parse(value: string): Record<string, string>
+  static normalize(value: unknown): unknown
+  static parse(value: string): Record<string, string>

@@ -1,0 +1,2 @@
+# rolodexter.core.DEFAULT_HEADER_CACHE_MAX_SIZE  api-hash 6bd1e9fb
+DEFAULT_HEADER_CACHE_MAX_SIZE: int = 4096

@@ -1,0 +1,2 @@
+# rolodexter.i18n.discover_cached  api-hash 8ae39fd2
+def discover_cached() -> dict[str, Path]

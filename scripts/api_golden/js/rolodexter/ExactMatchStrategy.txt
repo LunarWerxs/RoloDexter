@@ -1,0 +1,6 @@
+# rolodexter.ExactMatchStrategy  api-hash 150c47b3
+class ExactMatchStrategy extends MatchStrategy
+  constructor(registry: PatternRegistry): ExactMatchStrategy
+  readonly header_only: boolean
+  match(header: string): FieldMatch | undefined
+  readonly name: string

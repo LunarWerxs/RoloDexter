@@ -1,0 +1,15 @@
+# rolodexter.MappingProfile  api-hash 1cfcc339
+class MappingProfile
+  constructor(rows_seen: number, fields_seen: number, matched_count: number, unmatched_count: number, canonical_counts: Record<string, number>, unmapped_counts: Record<string, number>, strategy_counts: Record<string, number>, warning_counts: Record<string, number>): MappingProfile
+  readonly canonical_counts: Record<string, number>
+  explain(): string
+  readonly fields_seen: number
+  readonly match_rate: number
+  readonly matched_count: number
+  readonly rows_seen: number
+  readonly strategy_counts: Record<string, number>
+  to_dict(): Record<string, unknown>
+  readonly unmapped_counts: Record<string, number>
+  readonly unmatched_count: number
+  readonly warning_count: number
+  readonly warning_counts: Record<string, number>

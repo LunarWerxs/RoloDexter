@@ -1,0 +1,5 @@
+# rolodexter.core.PhoneNormalizer  api-hash 390925ac
+class PhoneNormalizer
+  constructor(): PhoneNormalizer
+  normalize(value: unknown, options?: { default_region?: string | null | undefined; } | null): unknown
+  static normalize(value: unknown, options?: { default_region?: string | null | undefined; } | null): unknown

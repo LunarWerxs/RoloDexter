@@ -1,0 +1,2 @@
+# rolodexter.core.FUZZY_LENGTH_RATIO  api-hash 29c3319b
+FUZZY_LENGTH_RATIO: float = 0.5

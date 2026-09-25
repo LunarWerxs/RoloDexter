@@ -1,0 +1,27 @@
+# rolodexter.NumberType  api-hash 2255b5e6
+class NumberType
+  constructor(): NumberType
+  readonly FIXED_LINE: 0 = NumberType.FIXED_LINE
+  readonly FIXED_LINE_OR_MOBILE: 2 = NumberType.FIXED_LINE_OR_MOBILE
+  readonly MOBILE: 1 = NumberType.MOBILE
+  readonly PAGER: 8 = NumberType.PAGER
+  readonly PERSONAL_NUMBER: 7 = NumberType.PERSONAL_NUMBER
+  readonly PREMIUM_RATE: 4 = NumberType.PREMIUM_RATE
+  readonly SHARED_COST: 5 = NumberType.SHARED_COST
+  readonly TOLL_FREE: 3 = NumberType.TOLL_FREE
+  readonly UAN: 9 = NumberType.UAN
+  readonly UNKNOWN: 99 = NumberType.UNKNOWN
+  readonly VOICEMAIL: 10 = NumberType.VOICEMAIL
+  readonly VOIP: 6 = NumberType.VOIP
+  static readonly FIXED_LINE: 0 = 0
+  static readonly FIXED_LINE_OR_MOBILE: 2 = 2
+  static readonly MOBILE: 1 = 1
+  static readonly PAGER: 8 = 8
+  static readonly PERSONAL_NUMBER: 7 = 7
+  static readonly PREMIUM_RATE: 4 = 4
+  static readonly SHARED_COST: 5 = 5
+  static readonly TOLL_FREE: 3 = 3
+  static readonly UAN: 9 = 9
+  static readonly UNKNOWN: 99 = 99
+  static readonly VOICEMAIL: 10 = 10
+  static readonly VOIP: 6 = 6

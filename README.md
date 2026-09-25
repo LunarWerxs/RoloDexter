@@ -510,6 +510,19 @@ pip install -e ".[dev]"
 pytest
 ```
 
+The public API of both packages is pinned by golden snapshots in
+`scripts/api_golden/`: one text file per export, plus a hash per export and
+member that also covers every type it depends on. `npm run check:parity`
+(run by CI) fails when either surface changes and labels each difference:
+a removed name is `BREAKING`, a changed one `POTENTIALLY_BREAKING`, a new one
+`POTENTIALLY_NON_BREAKING`, with a suggested version bump. After a deliberate
+API change, review the report and accept it:
+
+```bash
+python scripts/api_snapshot.py                   # report; exits 1 on any change
+python scripts/api_snapshot.py --update-goldens  # rewrite only the affected goldens
+```
+
 ## FAQ
 
 **Is RoloDexter free?**

@@ -1,0 +1,3 @@
+# rolodexter.StringNormalizer  api-hash 8aeb55a3
+class StringNormalizer
+  @staticmethod def normalize(value: str) -> str

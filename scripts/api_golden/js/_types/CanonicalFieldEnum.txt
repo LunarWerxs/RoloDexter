@@ -1,0 +1,1 @@
+type CanonicalFieldEnum = { (value: string): CanonicalFieldMember; readonly [Symbol.iterator]: () => IterableIterator<CanonicalFieldMember>; } & Record<CanonicalFieldName, CanonicalFieldMember>;

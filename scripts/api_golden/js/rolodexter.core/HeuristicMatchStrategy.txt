@@ -1,0 +1,6 @@
+# rolodexter.core.HeuristicMatchStrategy  api-hash 9bb05b94
+class HeuristicMatchStrategy extends MatchStrategy
+  constructor(default_region?: string | null): HeuristicMatchStrategy
+  readonly header_only: boolean
+  match(header: string, value?: string | null | undefined, options?: MatchOptions): FieldMatch | undefined
+  readonly name: string

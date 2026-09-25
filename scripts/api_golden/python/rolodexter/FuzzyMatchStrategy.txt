@@ -1,0 +1,6 @@
+# rolodexter.FuzzyMatchStrategy  api-hash 3bdbfa2a
+class FuzzyMatchStrategy(MatchStrategy)
+  def __init__(self, registry: PatternRegistry) -> None
+  header_only: bool = True
+  def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None
+  @property name -> str

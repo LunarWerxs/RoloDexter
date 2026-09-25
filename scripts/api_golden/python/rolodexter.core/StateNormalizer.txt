@@ -1,0 +1,3 @@
+# rolodexter.core.StateNormalizer  api-hash 93ae4708
+class StateNormalizer
+  @classmethod def normalize(cls, value: str) -> str

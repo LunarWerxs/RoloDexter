@@ -1,0 +1,2 @@
+# rolodexter.i18n.main  api-hash 539c5e53
+function main(): Promise<number>

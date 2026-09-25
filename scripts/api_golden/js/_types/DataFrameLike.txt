@@ -1,0 +1,5 @@
+export interface DataFrameLike { columns: Iterable<unknown> | ArrayLike<unknown>; rename: (args: { columns: Record<string, string>; } | Record<string, string>) => unknown; get?: (column: string) => unknown; set?: (column: string, values: unknown) => unknown; [key: string]: unknown; }
+  columns: Iterable<unknown> | ArrayLike<unknown>
+  get?: ((column: string) => unknown) | undefined
+  rename: (args: Record<string, string> | { columns: Record<string, string>; }) => unknown
+  set?: ((column: string, values: unknown) => unknown) | undefined

@@ -1,0 +1,12 @@
+export interface ContactMapperOptions { patterns?: PatternData; patterns_path?: string; normalize?: boolean; overrides?: Record<string, string>; languages?: string | string[] | null; default_region?: string | null; default_service?: string | null; strict?: boolean; confidence_threshold?: number; strategies?: MatchStrategy[]; header_cache_max_size?: number | null; }
+  confidence_threshold?: number | undefined
+  default_region?: string | null | undefined
+  default_service?: string | null | undefined
+  header_cache_max_size?: number | null | undefined
+  languages?: string | string[] | null | undefined
+  normalize?: boolean | undefined
+  overrides?: Record<string, string> | undefined
+  patterns?: PatternData | undefined
+  patterns_path?: string | undefined
+  strategies?: MatchStrategy[] | undefined
+  strict?: boolean | undefined

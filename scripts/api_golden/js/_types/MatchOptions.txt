@@ -1,0 +1,2 @@
+export interface MatchOptions { default_region?: string | null; }
+  default_region?: string | null | undefined

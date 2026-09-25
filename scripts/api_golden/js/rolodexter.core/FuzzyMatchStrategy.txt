@@ -1,0 +1,6 @@
+# rolodexter.core.FuzzyMatchStrategy  api-hash 48b773be
+class FuzzyMatchStrategy extends MatchStrategy
+  constructor(registry: PatternRegistry): FuzzyMatchStrategy
+  readonly header_only: boolean
+  match(header: string): FieldMatch | undefined
+  readonly name: string

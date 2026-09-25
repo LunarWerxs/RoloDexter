@@ -1,0 +1,5 @@
+# rolodexter.core.EmailNormalizer  api-hash c19b81e1
+class EmailNormalizer
+  constructor(): EmailNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

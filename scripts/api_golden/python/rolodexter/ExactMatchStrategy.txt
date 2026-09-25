@@ -1,0 +1,6 @@
+# rolodexter.ExactMatchStrategy  api-hash 3c212877
+class ExactMatchStrategy(MatchStrategy)
+  def __init__(self, registry: PatternRegistry) -> None
+  header_only: bool = True
+  def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None
+  @property name -> str

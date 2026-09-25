@@ -1,0 +1,6 @@
+# rolodexter.NormalizedMatchStrategy  api-hash 900427f2
+class NormalizedMatchStrategy extends MatchStrategy
+  constructor(registry: PatternRegistry): NormalizedMatchStrategy
+  readonly header_only: boolean
+  match(header: string): FieldMatch | undefined
+  readonly name: string

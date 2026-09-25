@@ -1,0 +1,1 @@
+type MappingMatches = Record<string, FieldMatch> & { get(header: string): FieldMatch | null; set(header: string, match: FieldMatch): MappingMatches; entries(): IterableIterator<[ string, FieldMatch ]>; items(): IterableIterator<[ string, FieldMatch ]>; [Symbol.iterator](): IterableIterator<[ string, FieldMatch ]>; };

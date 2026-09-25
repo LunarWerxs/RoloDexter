@@ -1,0 +1,2 @@
+# rolodexter.i18n.load_cached  api-hash de39131b
+def load_cached(lang_code: str) -> dict[str, Any] | None

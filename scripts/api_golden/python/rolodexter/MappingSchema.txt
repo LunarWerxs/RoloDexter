@@ -1,0 +1,13 @@
+# rolodexter.MappingSchema  api-hash 5c2efe59
+@dataclass(frozen=True)
+class MappingSchema
+  SCHEMA_VERSION: int = 1
+  def __init__(self, matches: dict[str, FieldMatch], mapper: ContactMapper, default_region: str | None = None) -> None
+  def apply(self, row: dict[str, Any], **kwargs: Any) -> MappingResult
+  def column_map(self) -> dict[str, str]
+  default_region: str | None = None
+  @classmethod def from_dict(cls, data: dict[str, Any], mapper: ContactMapper, *, default_region: str | None = None) -> MappingSchema
+  mapper: ContactMapper
+  matches: dict[str, FieldMatch]
+  def to_dict(self) -> dict[str, Any]
+  def unmatched_headers(self) -> list[str]

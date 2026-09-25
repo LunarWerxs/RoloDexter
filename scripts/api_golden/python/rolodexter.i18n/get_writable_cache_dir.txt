@@ -1,0 +1,2 @@
+# rolodexter.i18n.get_writable_cache_dir  api-hash b07df2a2
+def get_writable_cache_dir() -> Path

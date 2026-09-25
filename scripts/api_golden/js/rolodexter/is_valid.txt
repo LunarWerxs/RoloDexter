@@ -1,0 +1,2 @@
+# rolodexter.is_valid  api-hash 97dbe764
+function is_valid(raw: string, default_region?: string | null): boolean

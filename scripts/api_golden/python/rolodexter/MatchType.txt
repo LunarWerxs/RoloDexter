@@ -1,0 +1,7 @@
+# rolodexter.MatchType  api-hash bdb11815
+class MatchType
+  EXACT_MATCH: int = 4
+  NOT_A_NUMBER: int = 0
+  NO_MATCH: int = 1
+  NSN_MATCH: int = 3
+  SHORT_NSN_MATCH: int = 2
