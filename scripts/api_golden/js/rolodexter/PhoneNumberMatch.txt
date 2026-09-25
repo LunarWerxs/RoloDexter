@@ -1,0 +1,8 @@
+# rolodexter.PhoneNumberMatch  api-hash 67cd3e0e
+class PhoneNumberMatch
+  constructor(start: number, end: number, raw_string: string, number: PhoneNumber): PhoneNumberMatch
+  readonly end: number
+  readonly number: PhoneNumber
+  readonly raw_string: string
+  readonly start: number
+  toString(): string

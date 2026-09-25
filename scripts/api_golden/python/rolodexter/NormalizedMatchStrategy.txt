@@ -1,0 +1,6 @@
+# rolodexter.NormalizedMatchStrategy  api-hash 426a1fda
+class NormalizedMatchStrategy(MatchStrategy)
+  def __init__(self, registry: PatternRegistry) -> None
+  header_only: bool = True
+  def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None
+  @property name -> str

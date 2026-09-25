@@ -1,0 +1,13 @@
+# rolodexter.MatchType  api-hash c1954bfb
+class MatchType
+  constructor(): MatchType
+  readonly EXACT_MATCH: 4 = MatchType.EXACT_MATCH
+  readonly NOT_A_NUMBER: 0 = MatchType.NOT_A_NUMBER
+  readonly NO_MATCH: 1 = MatchType.NO_MATCH
+  readonly NSN_MATCH: 3 = MatchType.NSN_MATCH
+  readonly SHORT_NSN_MATCH: 2 = MatchType.SHORT_NSN_MATCH
+  static readonly EXACT_MATCH: 4 = 4
+  static readonly NOT_A_NUMBER: 0 = 0
+  static readonly NO_MATCH: 1 = 1
+  static readonly NSN_MATCH: 3 = 3
+  static readonly SHORT_NSN_MATCH: 2 = 2

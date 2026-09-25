@@ -1,0 +1,3 @@
+# rolodexter.PostalCodeNormalizer  api-hash 5cf25352
+class PostalCodeNormalizer
+  @classmethod def normalize(cls, value: str) -> str

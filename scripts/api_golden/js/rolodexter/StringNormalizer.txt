@@ -1,0 +1,5 @@
+# rolodexter.StringNormalizer  api-hash 9235d589
+class StringNormalizer
+  constructor(): StringNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

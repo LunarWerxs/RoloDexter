@@ -1,0 +1,2 @@
+# rolodexter.i18n.DEFAULT_TRANSLATE_RETRIES  api-hash ce38241d
+DEFAULT_TRANSLATE_RETRIES: int = 1

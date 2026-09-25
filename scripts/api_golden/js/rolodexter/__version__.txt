@@ -1,0 +1,2 @@
+# rolodexter.__version__  api-hash e8976e71
+const __version__: string

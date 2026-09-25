@@ -1,0 +1,2 @@
+# rolodexter.i18n.get_cache_dir  api-hash 9abf80e9
+function get_cache_dir(): string

@@ -1,0 +1,2 @@
+# rolodexter.core.FUZZY_LENGTH_RATIO  api-hash becbcd2d
+const FUZZY_LENGTH_RATIO: 0.5

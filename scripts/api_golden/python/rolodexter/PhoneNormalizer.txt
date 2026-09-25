@@ -1,0 +1,3 @@
+# rolodexter.PhoneNormalizer  api-hash c264ca16
+class PhoneNormalizer
+  @classmethod def normalize(cls, value: str, *, default_region: str | None = None) -> str

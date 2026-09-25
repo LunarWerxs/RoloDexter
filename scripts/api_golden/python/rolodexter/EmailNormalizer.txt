@@ -1,0 +1,3 @@
+# rolodexter.EmailNormalizer  api-hash a30f6cf4
+class EmailNormalizer
+  @staticmethod def normalize(value: str) -> str

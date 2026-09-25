@@ -1,0 +1,2 @@
+# rolodexter.core.FUZZY_HIGH_CONFIDENCE  api-hash b478a32b
+FUZZY_HIGH_CONFIDENCE: float = 0.85

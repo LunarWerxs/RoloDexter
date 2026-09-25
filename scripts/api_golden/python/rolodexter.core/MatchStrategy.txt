@@ -1,0 +1,5 @@
+# rolodexter.core.MatchStrategy  api-hash 537a1d11
+class MatchStrategy(abc.ABC)
+  header_only: bool = False
+  def match(self, header: str, value: str | None = None, **kwargs: object) -> FieldMatch | None
+  @property name -> str

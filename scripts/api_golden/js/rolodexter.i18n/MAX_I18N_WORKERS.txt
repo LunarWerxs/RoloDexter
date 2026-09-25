@@ -1,0 +1,2 @@
+# rolodexter.i18n.MAX_I18N_WORKERS  api-hash 3390af8f
+const MAX_I18N_WORKERS: 8

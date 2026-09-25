@@ -1,0 +1,14 @@
+# rolodexter.core.ContactMapper  api-hash 91a572e4
+class ContactMapper
+  constructor(options?: ContactMapperOptions): ContactMapper
+  cache_info(): { size: number; max_size: number | null; cacheable_pipeline: boolean; }
+  clear_cache(): void
+  compile_schema(headers: Iterable<unknown>, options?: CompileSchemaOptions): MappingSchema
+  identify(header: string, options?: { value?: string | undefined; service?: string | null | undefined; default_region?: string | null | undefined; }): FieldMatch
+  map_batch(payloads: Iterable<Record<string, unknown>>, options?: MapPayloadOptions): MappingResult[]
+  map_dataframe(rows: DataFrameLike, options?: MapDataFrameOptions): unknown
+  map_payload(payload: Record<string, unknown>, options?: MapPayloadOptions): MappingResult
+  map_stream(payloads: Iterable<Record<string, unknown>>, options?: MapPayloadOptions): Generator<MappingResult, any, any>
+  profile(payloads: Iterable<Record<string, unknown>>, options?: ProfileOptions): MappingProfile
+  readonly registry: PatternRegistry
+  seed_header_cache(matches: Record<string, FieldMatch>): void

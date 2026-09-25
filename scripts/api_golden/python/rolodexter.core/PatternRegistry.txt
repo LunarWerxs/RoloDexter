@@ -1,0 +1,10 @@
+# rolodexter.core.PatternRegistry  api-hash f069d6cf
+class PatternRegistry
+  def __init__(self, patterns: dict[str, Any] | None = None, patterns_path: str | None = None, languages: str | Sequence[str] | None = None, overrides: dict[str, str] | None = None) -> None
+  @property all_aliases -> list[str]
+  @property available_languages -> list[str]
+  @property cached_languages -> list[str]
+  @property canonical_fields -> list[str]
+  def exact_lookup(self, header: str) -> str | None
+  @property loaded_languages -> list[str]
+  @property version -> str

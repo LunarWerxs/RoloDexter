@@ -1,0 +1,2 @@
+# rolodexter.core.value_warnings  api-hash 48cbf997
+def value_warnings(key: str, canonical_field: str, value: Any) -> list[MappingWarning]

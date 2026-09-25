@@ -1,0 +1,5 @@
+# rolodexter.ListNormalizer  api-hash dceab370
+class ListNormalizer
+  constructor(): ListNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

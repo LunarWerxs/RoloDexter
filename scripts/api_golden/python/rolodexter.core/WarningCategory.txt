@@ -1,0 +1,8 @@
+# rolodexter.core.WarningCategory  api-hash ac6bcda8
+class WarningCategory(str, enum.Enum)
+  DATE_AMBIGUOUS = 'date_ambiguous'
+  EMAIL_VALIDATION = 'email_validation'
+  EMBEDDED_PHONE_LIMIT = 'embedded_phone_limit'
+  LOW_CONFIDENCE = 'low_confidence'
+  OTHER = 'other'
+  PHONE_NORMALIZATION = 'phone_normalization'

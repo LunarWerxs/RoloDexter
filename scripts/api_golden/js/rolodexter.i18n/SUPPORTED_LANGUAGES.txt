@@ -1,0 +1,2 @@
+# rolodexter.i18n.SUPPORTED_LANGUAGES  api-hash bf56f503
+const SUPPORTED_LANGUAGES: Record<string, readonly [string, string]>

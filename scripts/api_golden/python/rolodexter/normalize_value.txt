@@ -1,0 +1,2 @@
+# rolodexter.normalize_value  api-hash 9dec89be
+def normalize_value(canonical_field: str, value: Any, *, default_region: str | None = None) -> Any

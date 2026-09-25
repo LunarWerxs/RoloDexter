@@ -1,0 +1,4 @@
+export interface PatternData { version?: string; fields?: Record<string, string[]>; expansion?: { form_prefixes?: string[]; form_fields?: Record<string, string>; social_suffixes?: string[]; social_fields?: string[]; }; }
+  expansion?: { form_prefixes?: string[] | undefined; form_fields?: Record<string, string> | undefined; social_suffixes?: string[] | undefined; social_fields?: string[] | undefined; } | undefined
+  fields?: Record<string, string[]> | undefined
+  version?: string | undefined

@@ -1,0 +1,2 @@
+# rolodexter.core.HEURISTIC_CONFIDENCE  api-hash e8d2e888
+HEURISTIC_CONFIDENCE: float = 0.6

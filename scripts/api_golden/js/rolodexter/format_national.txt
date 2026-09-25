@@ -1,0 +1,2 @@
+# rolodexter.format_national  api-hash b68e0744
+function format_national(phone: PhoneNumber): string

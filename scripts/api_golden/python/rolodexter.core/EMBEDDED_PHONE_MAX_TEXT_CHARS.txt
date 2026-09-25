@@ -1,0 +1,2 @@
+# rolodexter.core.EMBEDDED_PHONE_MAX_TEXT_CHARS  api-hash b484b7f4
+EMBEDDED_PHONE_MAX_TEXT_CHARS: int = 8192

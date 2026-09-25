@@ -1,0 +1,17 @@
+# rolodexter.MappingResult  api-hash ec6f4e3e
+class MappingResult
+  constructor(normalized: Record<string, unknown>, unmapped: Record<string, unknown>, field_matches: Iterable<FieldMatch>, warnings?: Iterable<string> | undefined): MappingResult
+  explain(): string
+  readonly field_matches: readonly FieldMatch[]
+  get_all_emails(): string[]
+  get_all_phones(): string[]
+  get_identity_keys(): string[]
+  get_match(originalHeader: string): FieldMatch | null
+  readonly match_rate: number
+  readonly matched_count: number
+  readonly normalized: Record<string, unknown>
+  toString(): string
+  to_dict(): Record<string, unknown>
+  readonly unmapped: Record<string, unknown>
+  readonly unmatched_count: number
+  readonly warnings: readonly string[]

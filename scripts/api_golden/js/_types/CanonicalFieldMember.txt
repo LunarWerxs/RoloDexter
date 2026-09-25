@@ -1,0 +1,6 @@
+interface CanonicalFieldMember { readonly name: CanonicalFieldName; readonly value: string; toString(): string; valueOf(): string; toJSON(): string; [Symbol.toPrimitive](hint: string): string; }
+  readonly name: CanonicalFieldName
+  toJSON(): string
+  toString(): string
+  readonly value: string
+  valueOf(): string

@@ -1,0 +1,2 @@
+# rolodexter.i18n.MAX_I18N_WORKERS  api-hash 6fe4757a
+MAX_I18N_WORKERS: int = 8

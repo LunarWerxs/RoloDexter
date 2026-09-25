@@ -1,0 +1,16 @@
+# rolodexter.core.MappingProfile  api-hash 1e387814
+@dataclass(frozen=True)
+class MappingProfile
+  def __init__(self, rows_seen: int, fields_seen: int, matched_count: int, unmatched_count: int, canonical_counts: dict[str, int], unmapped_counts: dict[str, int], strategy_counts: dict[str, int], warning_counts: dict[str, int]) -> None
+  canonical_counts: dict[str, int]
+  def explain(self) -> str
+  fields_seen: int
+  @property match_rate -> float
+  matched_count: int
+  rows_seen: int
+  strategy_counts: dict[str, int]
+  def to_dict(self) -> dict[str, Any]
+  unmapped_counts: dict[str, int]
+  unmatched_count: int
+  @property warning_count -> int
+  warning_counts: dict[str, int]

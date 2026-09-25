@@ -1,0 +1,2 @@
+# rolodexter.number_type  api-hash 0987b332
+def number_type(phone: PhoneNumber) -> int

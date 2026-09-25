@@ -1,0 +1,5 @@
+# rolodexter.core.BooleanNormalizer  api-hash cea1e1d6
+class BooleanNormalizer
+  constructor(): BooleanNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

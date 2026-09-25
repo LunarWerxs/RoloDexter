@@ -1,0 +1,3 @@
+# rolodexter.core.RolodexterError  api-hash 532a312f
+class RolodexterError extends Error
+  constructor(message?: string | undefined): RolodexterError

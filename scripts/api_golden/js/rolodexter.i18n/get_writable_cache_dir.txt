@@ -1,0 +1,2 @@
+# rolodexter.i18n.get_writable_cache_dir  api-hash b67561ef
+function get_writable_cache_dir(): string

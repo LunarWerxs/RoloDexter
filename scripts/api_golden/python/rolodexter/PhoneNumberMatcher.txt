@@ -1,0 +1,6 @@
+# rolodexter.PhoneNumberMatcher  api-hash d532369a
+class PhoneNumberMatcher
+  def __init__(self, text: str, default_region: str | None = None, *, max_matches: int | None = None)
+  def __iter__(self) -> Iterator[PhoneNumberMatch]
+  def __len__(self) -> int
+  def has_next(self) -> bool

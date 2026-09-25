@@ -1,0 +1,2 @@
+# rolodexter.format_national  api-hash 42141aa4
+def format_national(phone: PhoneNumber) -> str

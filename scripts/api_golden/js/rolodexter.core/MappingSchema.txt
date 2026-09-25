@@ -1,0 +1,12 @@
+# rolodexter.core.MappingSchema  api-hash 2bb631c9
+class MappingSchema
+  constructor(matches: Record<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null | undefined): MappingSchema
+  apply(row: Record<string, unknown>, options?: MapPayloadOptions): MappingResult
+  column_map(): Record<string, string>
+  readonly default_region: string | null | undefined
+  readonly mapper: ContactMapper
+  readonly matches: MappingMatches
+  static readonly SCHEMA_VERSION: 1 = 1
+  static from_dict(data: Record<string, unknown>, mapper: ContactMapper, options?: { default_region?: string | null | undefined; }): MappingSchema
+  to_dict(): Record<string, unknown>
+  unmatched_headers(): string[]

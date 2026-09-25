@@ -1,0 +1,14 @@
+# rolodexter.NumberType  api-hash 0a518277
+class NumberType
+  FIXED_LINE: int = 0
+  FIXED_LINE_OR_MOBILE: int = 2
+  MOBILE: int = 1
+  PAGER: int = 8
+  PERSONAL_NUMBER: int = 7
+  PREMIUM_RATE: int = 4
+  SHARED_COST: int = 5
+  TOLL_FREE: int = 3
+  UAN: int = 9
+  UNKNOWN: int = 99
+  VOICEMAIL: int = 10
+  VOIP: int = 6

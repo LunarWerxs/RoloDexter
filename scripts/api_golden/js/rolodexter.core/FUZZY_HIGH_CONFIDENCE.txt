@@ -1,0 +1,2 @@
+# rolodexter.core.FUZZY_HIGH_CONFIDENCE  api-hash 4bdd71a3
+const FUZZY_HIGH_CONFIDENCE: 0.85

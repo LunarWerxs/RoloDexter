@@ -1,0 +1,4 @@
+export interface CompileSchemaOptions { default_region?: string | null; strict?: boolean; confidence_threshold?: number; }
+  confidence_threshold?: number | undefined
+  default_region?: string | null | undefined
+  strict?: boolean | undefined

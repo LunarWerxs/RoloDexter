@@ -1,0 +1,12 @@
+# rolodexter.PhoneNumber  api-hash 241f94bc
+@dataclass(frozen=True)
+class PhoneNumber
+  def __init__(self, calling_code: int, national_number: str, raw: str, extension: str | None = None, _pn_obj: _pn.PhoneNumber | None = None) -> None
+  calling_code: int
+  @property country_codes -> list[str]
+  @property e164 -> str
+  extension: str | None = None
+  @property is_possible -> bool
+  @property is_valid -> bool
+  national_number: str
+  raw: str

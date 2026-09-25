@@ -1,0 +1,7 @@
+export interface MapPayloadOptions { depth?: number; service?: string | null; default_region?: string | null; extract_embedded_phones?: boolean; strict?: boolean; confidence_threshold?: number; }
+  confidence_threshold?: number | undefined
+  default_region?: string | null | undefined
+  depth?: number | undefined
+  extract_embedded_phones?: boolean | undefined
+  service?: string | null | undefined
+  strict?: boolean | undefined

@@ -1,0 +1,10 @@
+# rolodexter.core.FieldMatch  api-hash 8f3c89ed
+class FieldMatch
+  constructor(original: string, canonical?: string | undefined, confidence?: number | undefined, strategy?: string | undefined, service?: string | null): FieldMatch
+  readonly canonical: string
+  readonly confidence: number
+  readonly is_matched: boolean
+  readonly original: string
+  readonly service: string | null
+  readonly strategy: string
+  toString(): string

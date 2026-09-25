@@ -1,0 +1,2 @@
+# rolodexter.generate_language  api-hash db6ad0a9
+def generate_language(lang_code: str, *, force: bool = False, force_fields: set[str] | None = None, timeout: float = 10.0, retries: int = 1, retry_backoff: float = 0.5) -> dict[str, Any]

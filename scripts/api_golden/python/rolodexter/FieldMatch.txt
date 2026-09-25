@@ -1,0 +1,10 @@
+# rolodexter.FieldMatch  api-hash 0241e5bc
+@dataclass(frozen=True)
+class FieldMatch
+  def __init__(self, original: str, canonical: str, confidence: float, strategy: str, service: str | None = None) -> None
+  canonical: str
+  confidence: float
+  @property is_matched -> bool
+  original: str
+  service: str | None = None
+  strategy: str

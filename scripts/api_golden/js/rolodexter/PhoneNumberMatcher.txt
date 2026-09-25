@@ -1,0 +1,5 @@
+# rolodexter.PhoneNumberMatcher  api-hash f391b983
+class PhoneNumberMatcher implements Iterable<PhoneNumberMatch>
+  constructor(text: string, default_region?: string | null, options?: { max_matches?: number | null | undefined; }): PhoneNumberMatcher
+  has_next(): boolean
+  readonly length: number

@@ -1,0 +1,5 @@
+# rolodexter.AddressNormalizer  api-hash 9126b1b4
+class AddressNormalizer
+  constructor(): AddressNormalizer
+  normalize(value: unknown): unknown
+  static normalize(value: unknown): unknown

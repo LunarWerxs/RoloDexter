@@ -1,0 +1,2 @@
+# rolodexter.core.EXACT_MATCH_CONFIDENCE  api-hash fd74cab2
+EXACT_MATCH_CONFIDENCE: float = 1.0

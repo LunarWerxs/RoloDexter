@@ -1,0 +1,17 @@
+# rolodexter.core.MappingResult  api-hash eacd350e
+@dataclass(frozen=True)
+class MappingResult
+  def __init__(self, normalized: dict[str, Any], unmapped: dict[str, Any], field_matches: tuple[FieldMatch, ...], warnings: tuple[str, ...] = ()) -> None
+  def explain(self) -> str
+  field_matches: tuple[FieldMatch, ...]
+  def get_all_emails(self) -> list[str]
+  def get_all_phones(self) -> list[str]
+  def get_identity_keys(self) -> list[str]
+  def get_match(self, original_header: str) -> FieldMatch | None
+  @property match_rate -> float
+  @property matched_count -> int
+  normalized: dict[str, Any]
+  def to_dict(self) -> dict[str, Any]
+  unmapped: dict[str, Any]
+  @property unmatched_count -> int
+  warnings: tuple[str, ...] = ()

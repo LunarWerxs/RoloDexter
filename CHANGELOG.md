@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Golden public-API snapshots with a breaking-change verdict.**
+  `scripts/api_snapshot.py` renders the public surface of `rolodexter`,
+  `rolodexter.core` and `rolodexter.i18n`, and of the npm package's three
+  entry points (read from `packages/js/src` with the TypeScript checker, no
+  build needed), into one golden file per export under `scripts/api_golden/`.
+  Each export and member also gets an 8-character hash over its own
+  declaration and every local type it reaches, so a change deep in a shared
+  type shows up on each export that uses it. A missing name is reported as
+  `BREAKING`, a changed hash as `POTENTIALLY_BREAKING` and a new name as
+  `POTENTIALLY_NON_BREAKING`, with a suggested semver bump; renaming a
+  `CanonicalField` member reads as `BREAKING` in both languages at once.
+  `npm run check:parity` runs it, so CI and `npm pack` fail on an unreviewed
+  API change; `--update-goldens` accepts a deliberate one by writing,
+  rewriting or deleting exactly the affected files. The approach follows
+  TensorFlow's API compatibility test and React Native's per-export API
+  hashes; the code is new.
+
 ## [2.12.0] - 2026-09-02
 
 ### Changed

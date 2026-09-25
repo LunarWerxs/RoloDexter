@@ -1,0 +1,2 @@
+# rolodexter.number_type  api-hash 19520422
+function number_type(phone: PhoneNumber): number

@@ -1,0 +1,3 @@
+# rolodexter.core.ListNormalizer  api-hash 4fcd724d
+class ListNormalizer
+  @staticmethod def normalize(value: Any) -> list[str] | Any

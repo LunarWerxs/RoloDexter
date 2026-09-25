@@ -1,0 +1,2 @@
+# rolodexter.i18n.get_all_cache_dirs  api-hash 2fea54a3
+def get_all_cache_dirs() -> list[Path]

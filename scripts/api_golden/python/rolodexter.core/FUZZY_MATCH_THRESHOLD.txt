@@ -1,0 +1,2 @@
+# rolodexter.core.FUZZY_MATCH_THRESHOLD  api-hash d76d3fbc
+FUZZY_MATCH_THRESHOLD: int = 80

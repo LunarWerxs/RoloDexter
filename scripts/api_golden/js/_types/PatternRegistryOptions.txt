@@ -1,0 +1,5 @@
+interface PatternRegistryOptions { patterns?: PatternData | null; patterns_path?: string | null; languages?: string | string[] | null; overrides?: Record<string, string> | null; }
+  languages?: string | string[] | null | undefined
+  overrides?: Record<string, string> | null | undefined
+  patterns?: PatternData | null | undefined
+  patterns_path?: string | null | undefined

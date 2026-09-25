@@ -1,0 +1,6 @@
+# rolodexter.core.MatchStrategy  api-hash 55f844ed
+class MatchStrategy
+  constructor(): MatchStrategy
+  readonly header_only: boolean
+  match(_header: string, _value?: string | null | undefined, _options?: MatchOptions | undefined): FieldMatch | null | undefined
+  readonly name: string

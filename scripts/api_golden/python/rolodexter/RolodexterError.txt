@@ -1,0 +1,2 @@
+# rolodexter.RolodexterError  api-hash e254771e
+class RolodexterError(Exception)

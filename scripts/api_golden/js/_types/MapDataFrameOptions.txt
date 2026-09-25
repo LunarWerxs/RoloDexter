@@ -1,0 +1,5 @@
+export interface MapDataFrameOptions { default_region?: string | null; normalize?: boolean | null; strict?: boolean | null; confidence_threshold?: number | null; }
+  confidence_threshold?: number | null | undefined
+  default_region?: string | null | undefined
+  normalize?: boolean | null | undefined
+  strict?: boolean | null | undefined

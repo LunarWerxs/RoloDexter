@@ -1,0 +1,2 @@
+# rolodexter.core.NORMALIZED_MATCH_CONFIDENCE  api-hash 156cd7bb
+NORMALIZED_MATCH_CONFIDENCE: float = 0.95
