@@ -1,0 +1,5 @@
+export interface HeaderTraceStep { layer: string; canonical: string | null; confidence: number | null; selected: boolean; }
+  canonical: string | null
+  confidence: number | null
+  layer: string
+  selected: boolean

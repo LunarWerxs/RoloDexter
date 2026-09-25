@@ -1,4 +1,4 @@
-# rolodexter.MappingSchema  api-hash 2bb631c9
+# rolodexter.MappingSchema  api-hash cc653e65
 class MappingSchema
   constructor(matches: Record<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null | undefined): MappingSchema
   apply(row: Record<string, unknown>, options?: MapPayloadOptions): MappingResult

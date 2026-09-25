@@ -1,4 +1,4 @@
-# rolodexter.ContactMapper  api-hash 91a572e4
+# rolodexter.ContactMapper  api-hash 58fa6935
 class ContactMapper
   constructor(options?: ContactMapperOptions): ContactMapper
   cache_info(): { size: number; max_size: number | null; cacheable_pipeline: boolean; }
@@ -12,3 +12,4 @@ class ContactMapper
   profile(payloads: Iterable<Record<string, unknown>>, options?: ProfileOptions): MappingProfile
   readonly registry: PatternRegistry
   seed_header_cache(matches: Record<string, FieldMatch>): void
+  trace_header(header: string, options?: { value?: unknown; default_region?: string | null | undefined; }): HeaderTraceStep[]

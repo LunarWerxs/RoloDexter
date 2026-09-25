@@ -1,4 +1,4 @@
-# rolodexter.core.MappingSchema  api-hash 5c2efe59
+# rolodexter.core.MappingSchema  api-hash 0eb8d447
 @dataclass(frozen=True)
 class MappingSchema
   SCHEMA_VERSION: int = 1

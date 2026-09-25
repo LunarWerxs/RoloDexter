@@ -1,4 +1,4 @@
-# rolodexter.core.ContactMapper  api-hash 5f009312
+# rolodexter.core.ContactMapper  api-hash 939ea53d
 class ContactMapper(rolodexter._mapper.ContactMapper)
   def __init__(self, *, patterns: dict[str, Any] | None = None, patterns_path: str | None = None, default_service: str | None = None, normalize: bool = True, strategies: Sequence[MatchStrategy] | None = None, languages: str | Sequence[str] | None = None, overrides: dict[str, str] | None = None, default_region: str | None = 'US', strict: bool = False, confidence_threshold: float = 0.0, header_cache_max_size: int | None = 4096) -> None
   def cache_info(self) -> dict[str, Any]
@@ -12,3 +12,4 @@ class ContactMapper(rolodexter._mapper.ContactMapper)
   def profile(self, payloads: Iterable[dict[str, Any]], *, max_rows: int | None = None, depth: int = 1, default_region: str | None = None, extract_embedded_phones: bool = False, strict: bool | None = None, confidence_threshold: float | None = None, normalize: bool | None = None) -> MappingProfile
   @property registry -> PatternRegistry
   def seed_header_cache(self, matches: dict[str, FieldMatch]) -> None
+  def trace_header(self, header: str, *, value: Any = None, default_region: str | None = None) -> list[dict[str, Any]]
