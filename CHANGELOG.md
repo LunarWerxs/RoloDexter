@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ContactMapper.trace_header(header, *, value, default_region)`**, in both
+  packages: every pipeline layer's verdict on one header (exact, normalized,
+  fuzzy, heuristic), in order, with `selected` on the layer `map_payload`
+  would take. Unlike `identify()` it runs every layer, so a later layer's
+  opinion is visible too, and it neither reads nor writes the header cache.
+- **`scripts/parity_sweep.py` names the first stage that diverges.** Each
+  diverging case is traced through both packages and charged to the earliest
+  stage whose log differs (a header layer, the value normalizer, or result
+  assembly), so the report says which layer of the port is wrong rather than
+  only how many cases differ. `--show` and the NEW list carry the stage, and
+  `--json` prints the per-stage summary, with the earliest diverging stage,
+  for tooling. Idea from the React Compiler's Rust-port harness.
+
 ## [2.12.0] - 2026-09-02
 
 ### Changed

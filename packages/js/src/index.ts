@@ -201,6 +201,15 @@ const CONTACT_MAPPER_OPTION_KEYS = new Set([
 ]);
 
 const IDENTIFY_OPTION_KEYS = new Set(["value", "service", "default_region"]);
+const TRACE_HEADER_OPTION_KEYS = new Set(["value", "default_region"]);
+
+/** One pipeline layer's verdict on a header, as `ContactMapper.trace_header` logs it. */
+export interface HeaderTraceStep {
+  layer: string;
+  canonical: string | null;
+  confidence: number | null;
+  selected: boolean;
+}
 const MAP_PAYLOAD_OPTION_KEYS = new Set(["depth", "service", "default_region", "extract_embedded_phones", "strict", "confidence_threshold"]);
 const PROFILE_OPTION_KEYS = new Set(["max_rows", "depth", "default_region", "extract_embedded_phones", "strict", "confidence_threshold"]);
 const COMPILE_SCHEMA_OPTION_KEYS = new Set(["default_region", "strict", "confidence_threshold"]);
@@ -288,6 +297,40 @@ export class ContactMapper {
       }
     }
     return unknown(header);
+  }
+
+  /**
+   * Log every pipeline layer's verdict on one header, in pipeline order.
+   *
+   * WHY: `identify` reports only the layer that won. When the Python and
+   * JavaScript packages disagree on a header, the question is which layer
+   * drifted first, and that needs every layer's decision side by side.
+   * scripts/parity_sweep.py diffs this log across the two packages to charge a
+   * divergence to the first stage that differs. Every layer runs, even after
+   * one has matched; `selected` marks the one `map_payload` would take.
+   * Header-only layers see no value, and the header cache is not touched.
+   */
+  trace_header(header: string, options: { value?: unknown; default_region?: string | null } = {}): HeaderTraceStep[] {
+    assertPythonMethodOptions("ContactMapper.trace_header", "header", arguments.length, options);
+    assertPythonOptionsKeys("ContactMapper.trace_header", options, TRACE_HEADER_OPTION_KEYS);
+    const opts = options ?? {};
+    const region = opts.default_region ?? this.#defaultRegion;
+    const matchValue = valueForMatching(opts.value);
+    const steps: HeaderTraceStep[] = [];
+    let selected = false;
+    for (const strategy of this.#strategies) {
+      const result = strategy.match(header, isHeaderOnlyStrategy(strategy) ? null : matchValue, {
+        default_region: region,
+      });
+      steps.push({
+        layer: strategy.name,
+        canonical: result ? result.canonical : null,
+        confidence: result ? result.confidence : null,
+        selected: Boolean(result) && !selected,
+      });
+      selected = selected || Boolean(result);
+    }
+    return steps;
   }
 
   /** Resolve, normalize, and record one `key`/`value` entry of a payload during `map_payload`, mutating the accumulators in place. */
