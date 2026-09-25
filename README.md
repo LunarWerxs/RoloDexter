@@ -523,6 +523,11 @@ python scripts/api_snapshot.py                   # report; exits 1 on any change
 python scripts/api_snapshot.py --update-goldens  # rewrite only the affected goldens
 ```
 
+The Python goldens are rendered with the Python version CI pins (3.14):
+`inspect.signature` and dataclass-generated `__init__` text can differ between
+versions, so run the snapshot (and `npm pack`, whose `prepack` runs it) on
+3.14, or pass `--lang js` to check only the Node half.
+
 ## FAQ
 
 **Is RoloDexter free?**

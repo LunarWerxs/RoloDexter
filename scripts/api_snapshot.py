@@ -410,17 +410,26 @@ def snapshot(lang: str, update: bool) -> dict[str, Any]:
     return report
 
 
+def _parity_key(name: str) -> str:
+    # Python members are snake_case and JS ones camelCase (map_payload vs
+    # mapPayload); fold both so one change in both packages reads as one.
+    return name.replace("_", "").casefold()
+
+
 def _parity_notes(reports: dict[str, Any]) -> list[str]:
     """Changes one package made that its counterpart did not make."""
     seen: dict[tuple[str, str], dict[str, str]] = {}
+    shown: dict[tuple[str, str], str] = {}
     for lang, report in reports.items():
         for change in report["changes"]:
-            seen.setdefault((change["module"], change["name"]), {})[lang] = change["verdict"]
+            key = (change["module"], _parity_key(change["name"]))
+            seen.setdefault(key, {})[lang] = change["verdict"]
+            shown.setdefault(key, change["name"])
     if len(reports) < 2:
         return []
     return [
-        f"{module} {name}: " + ", ".join(f"{lang} {verdicts.get(lang, 'unchanged')}" for lang in reports)
-        for (module, name), verdicts in sorted(seen.items())
+        f"{key[0]} {shown[key]}: " + ", ".join(f"{lang} {verdicts.get(lang, 'unchanged')}" for lang in reports)
+        for key, verdicts in sorted(seen.items())
         if len(set(verdicts.values())) != 1 or len(verdicts) != len(reports)
     ]
 

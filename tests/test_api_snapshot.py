@@ -74,9 +74,7 @@ class TestVerdicts:
 
 class TestTransitiveHashes:
     def test_a_dependency_change_rehashes_every_export_that_reaches_it(self) -> None:
-        before, _ = snap.build_manifest(
-            _surface("interface Options { depth: number }")
-        )
+        before, _ = snap.build_manifest(_surface("interface Options { depth: number }"))
         after, reached = snap.build_manifest(
             _surface("interface Options { depth: string }")
         )
