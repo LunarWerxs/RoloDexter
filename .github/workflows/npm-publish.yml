@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   publish:
+    timeout-minutes: 60
     name: Publish JS package
     runs-on: ubuntu-latest
     environment:

@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   publish:
+    timeout-minutes: 60
     name: Upload to PyPI
     runs-on: ubuntu-latest
     environment:

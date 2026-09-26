@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   test:
+    timeout-minutes: 30
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -72,6 +73,7 @@ jobs:
           fail_ci_if_error: false
 
   secret-scan:
+    timeout-minutes: 30
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +92,7 @@ jobs:
           ./gitleaks detect --no-banner --redact --exit-code 1
 
   test-js:
+    timeout-minutes: 60
     name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -144,6 +147,7 @@ jobs:
         run: npm pack --dry-run
 
   build:
+    timeout-minutes: 60
     name: Build package
     runs-on: ubuntu-latest
     needs: test
