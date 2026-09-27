@@ -58,8 +58,11 @@ test("parse returns null for text and non-strings, and falls back to a US local 
   assert.equal(local.is_possible, true);
   assert.equal(local.is_valid, false);
   assert.equal(format_national(local), "555-1212");
-  // The seven-digit fallback is US-only.
-  assert.equal(parse("555-1212", "GB"), null);
+  // The local-number fallback follows the region, as in the Python package.
+  const gb = parse("555-1212", "GB");
+  assert.ok(gb);
+  assert.equal(gb.calling_code, 44);
+  assert.equal(gb.national_number, "5551212");
 });
 
 test("is_number_match grades exact, extension-only, national and non matches", () => {
