@@ -11,15 +11,19 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
-const TEST_DIR = "dist/test";
+// dist/test holds the suite; dist/src holds the module tests that sit beside
+// the module they cover (src/_phone.test.ts and the like).
+const TEST_DIRS = ["dist/test", "dist/src"];
 
-const files = readdirSync(TEST_DIR, { recursive: true })
-  .map(String)
-  .filter((entry) => entry.endsWith(".test.js"))
-  .map((entry) => join(TEST_DIR, entry));
+const files = TEST_DIRS.flatMap((dir) =>
+  readdirSync(dir, { recursive: true })
+    .map(String)
+    .filter((entry) => entry.endsWith(".test.js"))
+    .map((entry) => join(dir, entry)),
+);
 
 if (files.length === 0) {
-  console.error(`No compiled test files found in ${TEST_DIR}. Run the build first.`);
+  console.error(`No compiled test files found in ${TEST_DIRS.join(" or ")}. Run the build first.`);
   process.exit(1);
 }
 
@@ -36,10 +40,11 @@ if (wantCoverage) {
   // dist/cjs is a bundled *duplicate* of the same sources, emitted for the
   // `require` entry point. Only a smoke test loads it, so counting it halves
   // the reported number while saying nothing about how well the code is
-  // tested. dist/test is the test code itself.
+  // tested. dist/test and dist/src/**/*.test.js are the test code itself.
   flags.unshift(
     "--test-coverage-exclude=dist/cjs/**",
     "--test-coverage-exclude=dist/test/**",
+    "--test-coverage-exclude=dist/src/**/*.test.js",
   );
   if (nodeMajor >= 22) {
     // A ratchet, not an aspiration: set just under today's real numbers so a

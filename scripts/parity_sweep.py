@@ -30,6 +30,7 @@ The JS half runs from ``packages/js/dist``, so build it first.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
 import json
 import math
@@ -662,7 +663,23 @@ def attribute(
     return stages
 
 
-def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+@dataclasses.dataclass
+class SweepReport:
+    """Everything the text and JSON reports read, gathered once by main()."""
+
+    index: dict[str, tuple[str, dict[str, Any]]]
+    python_side: dict[str, dict[str, Any]]
+    js_side: dict[str, dict[str, Any]]
+    diverging: list[str]
+    accepted: set[str]
+    new: list[str]
+    fixed: list[str]
+    total: int
+    stages: dict[str, str]
+    stage_counts: dict[str, tuple[int, int]]
+
+
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update-baseline", action="store_true", help="record today's divergences as accepted")
     parser.add_argument("--show", metavar="SECTION", help="print example diffs from one section")
@@ -671,7 +688,166 @@ def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many
         action="store_true",
         help="print the per-stage summary as JSON instead of the text report",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def _diverging_cases(
+    python_side: dict[str, dict[str, Any]], js_side: dict[str, dict[str, Any]]
+) -> list[str] | None:
+    """Every "section/case" whose results differ, or None if the runs saw different corpora."""
+    diverging: list[str] = []
+    for section in python_side:
+        if python_side[section].keys() != js_side[section].keys():
+            print(f"corpus mismatch in {section}: the two runs saw different cases", file=sys.stderr)
+            return None
+        diverging.extend(
+            f"{section}/{case_id}"
+            for case_id, value in python_side[section].items()
+            if value != js_side[section][case_id]
+        )
+    return diverging
+
+
+def _write_baseline(diverging: list[str]) -> None:
+    BASELINE.write_text(
+        json.dumps(
+            {
+                "note": (
+                    "Accepted cross-language divergences, by case id. Shrinking this "
+                    "list is progress; growing it needs a reason in the commit message. "
+                    "Regenerate with: python scripts/parity_sweep.py --update-baseline"
+                ),
+                "cases": sorted(diverging),
+            },
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"baseline updated: {len(diverging)} accepted divergences")
+
+
+def _trace_divergences(
+    corpus: dict[str, list[dict[str, Any]]],
+    requests: list[dict[str, Any]],
+    scratch: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Trace only the diverging cases on both sides, so a clean sweep pays nothing."""
+    if not requests:
+        return {}, {}
+    py_traces = {request["id"]: capture(lambda request=request: trace_case(request)) for request in requests}
+    trace_corpus: dict[str, list[dict[str, Any]]] = {section: [] for section in corpus}
+    trace_corpus["traces"] = requests
+    js_traces = js_results(trace_corpus, scratch)["traces"]
+    scratch.unlink(missing_ok=True)
+    return py_traces, js_traces
+
+
+def _count_stages(
+    diverging: list[str], new: list[str], stages: dict[str, str], order: list[str]
+) -> dict[str, tuple[int, int]]:
+    """(diverging, new) case counts per first-diverging stage, in pipeline order."""
+    return {
+        stage: (
+            sum(1 for entry in diverging if stages[entry] == stage),
+            sum(1 for entry in new if stages[entry] == stage),
+        )
+        for stage in sorted(set(stages.values()), key=lambda s: order.index(s) if s in order else len(order))
+    }
+
+
+def _print_json_report(report: SweepReport) -> int:
+    # Machine-readable, for a port-tracking job: stages in pipeline order,
+    # and the earliest one that diverges at all and with a NEW case.
+    print(
+        json.dumps(
+            {
+                "cases": report.total,
+                "diverging": len(report.diverging),
+                "accepted": len(report.accepted),
+                "new": len(report.new),
+                "fixed": len(report.fixed),
+                "stages": [
+                    {"stage": stage, "diverging": count, "new": new_count}
+                    for stage, (count, new_count) in report.stage_counts.items()
+                ],
+                "earliest_stage": next(iter(report.stage_counts), None),
+                "earliest_new_stage": next(
+                    (stage for stage, (_, new_count) in report.stage_counts.items() if new_count), None
+                ),
+                "new_cases": [{"case": entry, "stage": report.stages[entry]} for entry in report.new],
+            },
+            indent=1,
+        )
+    )
+    return 1 if report.new else 0
+
+
+def _print_label_counts(report: SweepReport) -> None:
+    counts: dict[str, int] = {}
+    for entry in report.diverging:
+        section, case_id = entry.split("/", 1)
+        label = classify(section, report.index[case_id][1])
+        counts[label] = counts.get(label, 0) + 1
+    for label, count in sorted(counts.items(), key=lambda pair: -pair[1]):
+        print(f"  {count:>5}  {label}")
+
+
+def _print_stage_counts(report: SweepReport) -> None:
+    if not report.stage_counts:
+        return
+    print("\nfirst diverging stage, in pipeline order:")
+    for stage, (count, new_count) in report.stage_counts.items():
+        suffix = f"  ({new_count} new)" if new_count else ""
+        print(f"  {count:>5}  {stage}{suffix}")
+
+
+def _print_examples(report: SweepReport, show: str) -> None:
+    shown = 0
+    for entry in report.diverging:
+        section, case_id = entry.split("/", 1)
+        if section != show:
+            continue
+        # Escaped to ASCII, deliberately.  This printed raw until 2.11.1 and
+        # died with UnicodeEncodeError on a cp1252 console - the tool you
+        # reach for *after* the gate reports a divergence, crashing on
+        # exactly the non-English cases it exists to explain.  Escaping also
+        # beats a UTF-8 console here: most of this corpus is invisible, and
+        # a U+200B rendered as nothing looks identical to a U+FEFF rendered
+        # as nothing, which is the same defect as mojibake, only quieter.
+        print(f"\n-- {case_id}  [first diverging stage: {report.stages[entry]}]")
+        print(f"   in : {json.dumps(report.index[case_id][1])[:200]}")
+        print(f"   py : {json.dumps(report.python_side[section][case_id])[:200]}")
+        print(f"   js : {json.dumps(report.js_side[section][case_id])[:200]}")
+        shown += 1
+        if shown >= 10:
+            break
+
+
+def _print_baseline_drift(report: SweepReport) -> int:
+    if report.fixed:
+        print(f"\n{len(report.fixed)} baselined divergence(s) now agree - rerun with --update-baseline:")
+        for entry in report.fixed[:10]:
+            print(f"  {entry}")
+    if report.new:
+        print(f"\n{len(report.new)} NEW divergence(s):")
+        for entry in report.new[:20]:
+            print(f"  {entry}  [{report.stages[entry]}]")
+        return 1
+    return 0
+
+
+def _print_text_report(report: SweepReport, show: str | None) -> int:
+    print(f"{report.total} cases, {len(report.diverging)} diverging ({len(report.accepted)} accepted)")
+    _print_label_counts(report)
+    _print_stage_counts(report)
+    if show:
+        _print_examples(report, show)
+    return _print_baseline_drift(report)
+
+
+def main() -> int:
+    args = _parse_args()
 
     corpus = build_corpus()
     scratch = ROOT / "packages" / "js" / "dist" / ".parity-sweep-js.json"
@@ -681,34 +857,12 @@ def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many
     scratch.unlink(missing_ok=True)
 
     index = {item["id"]: (section, item) for section, items in corpus.items() for item in items}
-    diverging: list[str] = []
-    for section in python_side:
-        if python_side[section].keys() != js_side[section].keys():
-            print(f"corpus mismatch in {section}: the two runs saw different cases", file=sys.stderr)
-            return 2
-        diverging.extend(
-            f"{section}/{case_id}"
-            for case_id, value in python_side[section].items()
-            if value != js_side[section][case_id]
-        )
+    diverging = _diverging_cases(python_side, js_side)
+    if diverging is None:
+        return 2
 
     if args.update_baseline:
-        BASELINE.write_text(
-            json.dumps(
-                {
-                    "note": (
-                        "Accepted cross-language divergences, by case id. Shrinking this "
-                        "list is progress; growing it needs a reason in the commit message. "
-                        "Regenerate with: python scripts/parity_sweep.py --update-baseline"
-                    ),
-                    "cases": sorted(diverging),
-                },
-                indent=1,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        print(f"baseline updated: {len(diverging)} accepted divergences")
+        _write_baseline(diverging)
         return 0
 
     accepted = set(json.loads(BASELINE.read_text(encoding="utf-8"))["cases"]) if BASELINE.exists() else set()
@@ -716,100 +870,26 @@ def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many
     fixed = sorted(accepted - set(diverging))
     total = sum(len(items) for items in corpus.values())
 
-    # Second, small pass: only the diverging cases are traced, so a clean
-    # sweep pays nothing for attribution.
     requests = trace_requests(index, diverging)
-    py_traces: dict[str, Any] = {}
-    js_traces: dict[str, Any] = {}
-    if requests:
-        py_traces = {request["id"]: capture(lambda request=request: trace_case(request)) for request in requests}
-        trace_corpus: dict[str, list[dict[str, Any]]] = {section: [] for section in corpus}
-        trace_corpus["traces"] = requests
-        js_traces = js_results(trace_corpus, scratch)["traces"]
-        scratch.unlink(missing_ok=True)
+    py_traces, js_traces = _trace_divergences(corpus, requests, scratch)
     order = stage_order()
     stages = attribute(diverging, requests, py_traces, js_traces, order)
-    stage_counts = {
-        stage: (
-            sum(1 for entry in diverging if stages[entry] == stage),
-            sum(1 for entry in new if stages[entry] == stage),
-        )
-        for stage in sorted(set(stages.values()), key=lambda s: order.index(s) if s in order else len(order))
-    }
+    report = SweepReport(
+        index=index,
+        python_side=python_side,
+        js_side=js_side,
+        diverging=diverging,
+        accepted=accepted,
+        new=new,
+        fixed=fixed,
+        total=total,
+        stages=stages,
+        stage_counts=_count_stages(diverging, new, stages, order),
+    )
 
     if args.json:
-        # Machine-readable, for a port-tracking job: stages in pipeline order,
-        # and the earliest one that diverges at all and with a NEW case.
-        print(
-            json.dumps(
-                {
-                    "cases": total,
-                    "diverging": len(diverging),
-                    "accepted": len(accepted),
-                    "new": len(new),
-                    "fixed": len(fixed),
-                    "stages": [
-                        {"stage": stage, "diverging": count, "new": new_count}
-                        for stage, (count, new_count) in stage_counts.items()
-                    ],
-                    "earliest_stage": next(iter(stage_counts), None),
-                    "earliest_new_stage": next(
-                        (stage for stage, (_, new_count) in stage_counts.items() if new_count), None
-                    ),
-                    "new_cases": [{"case": entry, "stage": stages[entry]} for entry in new],
-                },
-                indent=1,
-            )
-        )
-        return 1 if new else 0
-
-    print(f"{total} cases, {len(diverging)} diverging ({len(accepted)} accepted)")
-
-    counts: dict[str, int] = {}
-    for entry in diverging:
-        section, case_id = entry.split("/", 1)
-        label = classify(section, index[case_id][1])
-        counts[label] = counts.get(label, 0) + 1
-    for label, count in sorted(counts.items(), key=lambda pair: -pair[1]):
-        print(f"  {count:>5}  {label}")
-
-    if stage_counts:
-        print("\nfirst diverging stage, in pipeline order:")
-        for stage, (count, new_count) in stage_counts.items():
-            suffix = f"  ({new_count} new)" if new_count else ""
-            print(f"  {count:>5}  {stage}{suffix}")
-
-    if args.show:
-        shown = 0
-        for entry in diverging:
-            section, case_id = entry.split("/", 1)
-            if section != args.show:
-                continue
-            # Escaped to ASCII, deliberately.  This printed raw until 2.11.1 and
-            # died with UnicodeEncodeError on a cp1252 console - the tool you
-            # reach for *after* the gate reports a divergence, crashing on
-            # exactly the non-English cases it exists to explain.  Escaping also
-            # beats a UTF-8 console here: most of this corpus is invisible, and
-            # a U+200B rendered as nothing looks identical to a U+FEFF rendered
-            # as nothing, which is the same defect as mojibake, only quieter.
-            print(f"\n-- {case_id}  [first diverging stage: {stages[entry]}]")
-            print(f"   in : {json.dumps(index[case_id][1])[:200]}")
-            print(f"   py : {json.dumps(python_side[section][case_id])[:200]}")
-            print(f"   js : {json.dumps(js_side[section][case_id])[:200]}")
-            shown += 1
-            if shown >= 10:
-                break
-
-    if fixed:
-        print(f"\n{len(fixed)} baselined divergence(s) now agree - rerun with --update-baseline:")
-        for entry in fixed[:10]:
-            print(f"  {entry}")
-    if new:
-        print(f"\n{len(new)} NEW divergence(s):")
-        for entry in new[:20]:
-            print(f"  {entry}  [{stages[entry]}]")
-        return 1
-    return 0
+        return _print_json_report(report)
+    return _print_text_report(report, args.show)
 
 
 if __name__ == "__main__":

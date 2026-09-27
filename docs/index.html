@@ -510,7 +510,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "Is RoloDexter free to use?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes — RoloDexter is free, open-source software released under the MIT license. The Python package installs with pip install rolodexter and the JavaScript/TypeScript package installs with npm install rolodexter; both are maintained as one dual-package, MIT-licensed project."
+            "text": "Yes, RoloDexter is free, open-source software released under the MIT license. The Python package installs with pip install rolodexter and the JavaScript/TypeScript package installs with npm install rolodexter; both are maintained as one dual-package, MIT-licensed project."
           }
         },
         {
@@ -518,7 +518,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "What does RoloDexter do?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields — like first_name, email, and phone — and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns."
+            "text": "RoloDexter routes messy, inconsistent contact data from any CRM, form, or CSV export to one clean canonical schema. It resolves 600+ known field aliases to 62 canonical fields, like first_name, email, and phone, and returns a confidence score on every match, from exact hits down to heuristic guesses on unnamed columns."
           }
         },
         {
@@ -542,7 +542,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "Does RoloDexter support languages other than English?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes. English ships by default, and alias tables for 40 languages — including Spanish, French, German, and Japanese — generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts."
+            "text": "Yes. English ships by default, and alias tables for 40 languages, including Spanish, French, German, and Japanese, generate on demand and cache locally, so runtime loading is cache-only and never translates on the fly. Network behavior during generation is bounded with configurable timeouts, retries, and worker counts."
           }
         },
         {
@@ -550,7 +550,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "Does RoloDexter fail silently on bad data?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "No — non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text."
+            "text": "No. Non-fatal issues, like a phone number that can't be normalized to E.164, come back as warnings on the result instead of disappearing silently. Enabling strict mode turns any low-confidence match or unparseable value into a loud failure instead of a quietly wrong row, and each warning carries a category for grouping instead of matching message text."
           }
         },
         {
@@ -558,7 +558,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "Does RoloDexter work offline?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes — matching and normalization for the default English alias table run entirely locally, with no network calls. Only generating alias caches for the other 40 supported languages needs a one-time network fetch, via the optional i18n-generate extra; once cached, those load and match offline too."
+            "text": "Yes, matching and normalization for the default English alias table run entirely locally, with no network calls. Only generating alias caches for the other 40 supported languages needs a one-time network fetch, via the optional i18n-generate extra; once cached, those load and match offline too."
           }
         },
         {
@@ -566,7 +566,7 @@ a.lw-parent:hover .lw-tip,a.lw-parent:focus-visible .lw-tip{opacity:1;visibility
           "name": "How is RoloDexter different from a no-code tool like Zapier?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Zapier and Make let you map one app's fields to another by hand, inside a single workflow step. RoloDexter is a library: call it from Python or TypeScript to resolve any header automatically against 600+ known aliases, with a confidence score on every match — no per-workflow mapping UI required."
+            "text": "Zapier and Make let you map one app's fields to another by hand, inside a single workflow step. RoloDexter is a library: call it from Python or TypeScript to resolve any header automatically against 600+ known aliases, with a confidence score on every match, no per-workflow mapping UI required."
           }
         }
       ]

@@ -87,8 +87,9 @@ Before publishing a new version:
    ```
 
    Then the whole workflow in a Linux container, which is faster than the
-   host and is the leg CI actually runs: `python ~/.claude/tools/localci.py
-   --docker` (35 steps for this repo, about six minutes).
+   host and is the leg CI actually runs: `localci.py --docker` (35 steps for
+   this repo, about six minutes; see [local_ci.md](local_ci.md) for what it
+   runs and how to reproduce it without that runner).
 
 2. If the release touches module layout, packaging, or a normalizer, run the
    adversarial pre-release review described under "Release verification for
