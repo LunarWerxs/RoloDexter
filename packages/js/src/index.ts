@@ -800,5 +800,5 @@ export const __all__ = [
 // scripts/check_release_versions.py, which the publish workflows run before
 // building. This literal silently shipped 2.10.0 inside the 2.11.0 package
 // because nothing compared the two.
-export const version = "2.12.0";
+export const version = "2.13.0";
 export const __version__ = version;
