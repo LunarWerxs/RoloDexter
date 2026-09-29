@@ -885,62 +885,121 @@ function parseProfileArgs(argv: string[]): ProfileArgs {
   return args;
 }
 
-function parsePythonCsv(text: string): string[][] {
-  const records: string[][] = [];
-  let record: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  let atFieldStart = true;
-  let recordStarted = false;
+/**
+ * Incremental CSV parser with Python csv.reader's default-dialect rules.
+ *
+ * Text arrives in chunks and each call returns the records completed so far,
+ * so a large export is parsed in constant memory instead of being read into
+ * one string and split into a whole-file array first. The two one-character
+ * lookaheads (a doubled quote inside a quoted field, and CRLF) are carried
+ * across chunk boundaries as pending state.
+ */
+class PythonCsvParser {
+  private record: string[] = [];
+  private field = "";
+  private inQuotes = false;
+  private atFieldStart = true;
+  private recordStarted = false;
+  /** A `"` closed or escaped a quoted field; the next character decides which. */
+  private quotePending = false;
+  /** A `\r` ended a record; a `\n` right after it belongs to the same line break. */
+  private skipLineFeed = false;
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i] ?? "";
-    if (inQuotes) {
-      if (char === "\"") {
-        if (text[i + 1] === "\"") {
-          field += "\"";
-          i += 1;
-        } else {
-          inQuotes = false;
+  push(text: string): string[][] {
+    const records: string[][] = [];
+    let { record, field, inQuotes, atFieldStart, recordStarted, quotePending, skipLineFeed } = this;
+
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i] ?? "";
+      if (skipLineFeed) {
+        skipLineFeed = false;
+        if (char === "\n") {
+          continue;
         }
+      }
+      if (quotePending) {
+        quotePending = false;
+        if (char === "\"") {
+          field += "\"";
+          continue;
+        }
+        inQuotes = false;
+      }
+      if (inQuotes) {
+        if (char === "\"") {
+          quotePending = true;
+        } else {
+          field += char;
+        }
+        recordStarted = true;
+        continue;
+      }
+
+      if (char === "\"" && atFieldStart) {
+        inQuotes = true;
+        atFieldStart = false;
+        recordStarted = true;
+      } else if (char === ",") {
+        record.push(field);
+        field = "";
+        atFieldStart = true;
+        recordStarted = true;
+      } else if (char === "\r" || char === "\n") {
+        skipLineFeed = char === "\r";
+        record.push(field);
+        records.push(record);
+        record = [];
+        field = "";
+        atFieldStart = true;
+        recordStarted = false;
       } else {
         field += char;
+        atFieldStart = false;
+        recordStarted = true;
       }
-      recordStarted = true;
-      continue;
     }
 
-    if (char === "\"" && atFieldStart) {
-      inQuotes = true;
-      atFieldStart = false;
-      recordStarted = true;
-    } else if (char === ",") {
-      record.push(field);
-      field = "";
-      atFieldStart = true;
-      recordStarted = true;
-    } else if (char === "\r" || char === "\n") {
-      if (char === "\r" && text[i + 1] === "\n") {
-        i += 1;
-      }
-      record.push(field);
-      records.push(record);
-      record = [];
-      field = "";
-      atFieldStart = true;
-      recordStarted = false;
-    } else {
-      field += char;
-      atFieldStart = false;
-      recordStarted = true;
-    }
+    this.record = record;
+    this.field = field;
+    this.inQuotes = inQuotes;
+    this.atFieldStart = atFieldStart;
+    this.recordStarted = recordStarted;
+    this.quotePending = quotePending;
+    this.skipLineFeed = skipLineFeed;
+    return records;
   }
 
-  if (recordStarted || field || record.length > 0 || inQuotes) {
-    record.push(field);
-    records.push(record);
+  /** Flush the final record when the text did not end with a line break. */
+  end(): string[][] {
+    if (this.quotePending) {
+      this.quotePending = false;
+      this.inQuotes = false;
+    }
+    if (this.recordStarted || this.field || this.record.length > 0 || this.inQuotes) {
+      const record = [...this.record, this.field];
+      this.record = [];
+      this.field = "";
+      this.recordStarted = false;
+      this.inQuotes = false;
+      return [record];
+    }
+    return [];
   }
-  return records;
+}
+
+/** Yield CSV records one at a time while the file streams in. */
+async function* readCsvRecords(path: string): AsyncGenerator<string[]> {
+  const parser = new PythonCsvParser();
+  let bomChecked = false;
+  for await (const chunk of createReadStream(path, { encoding: "utf8" })) {
+    let text = chunk as string;
+    if (!bomChecked && text) {
+      text = text.replace(/^﻿/, "");
+      bomChecked = true;
+    }
+    yield* parser.push(text);
+  }
+  yield* parser.end();
 }
 
 function csvRecordLineSpan(record: string[]): number {
@@ -1004,14 +1063,22 @@ function isJsonConstantBoundary(char: string | undefined): boolean {
   return char === undefined || !/[A-Za-z0-9_$]/.test(char);
 }
 
+/**
+ * Swap bare NaN / Infinity / -Infinity tokens (outside strings) for sentinel
+ * strings JSON.parse accepts. Returns `raw` itself when nothing was swapped.
+ *
+ * The output is assembled from slices between matches: appending one
+ * character at a time built a rope node per input character, which on a
+ * 24 MB file cost over a second and hundreds of MB before JSON.parse ran.
+ */
 function replacePythonJsonConstants(raw: string): string {
-  let out = "";
+  const parts: string[] = [];
+  let copiedTo = 0;
   let inString = false;
   let escaped = false;
   for (let i = 0; i < raw.length; i += 1) {
-    const char = raw[i] ?? "";
+    const char = raw[i];
     if (inString) {
-      out += char;
       if (escaped) {
         escaped = false;
       } else if (char === "\\") {
@@ -1023,24 +1090,35 @@ function replacePythonJsonConstants(raw: string): string {
     }
     if (char === "\"") {
       inString = true;
-      out += char;
+      continue;
+    }
+    if (char !== "-" && char !== "I" && char !== "N") {
       continue;
     }
     const prev = i > 0 ? raw[i - 1] : undefined;
+    let sentinel: string | undefined;
+    let length = 0;
     if (raw.startsWith("-Infinity", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 9])) {
-      out += JSON.stringify(JSON_NEG_INF_SENTINEL);
-      i += 8;
+      sentinel = JSON_NEG_INF_SENTINEL;
+      length = 9;
     } else if (raw.startsWith("Infinity", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 8])) {
-      out += JSON.stringify(JSON_INF_SENTINEL);
-      i += 7;
+      sentinel = JSON_INF_SENTINEL;
+      length = 8;
     } else if (raw.startsWith("NaN", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 3])) {
-      out += JSON.stringify(JSON_NAN_SENTINEL);
-      i += 2;
-    } else {
-      out += char;
+      sentinel = JSON_NAN_SENTINEL;
+      length = 3;
+    }
+    if (sentinel !== undefined) {
+      parts.push(raw.slice(copiedTo, i), JSON.stringify(sentinel));
+      i += length - 1;
+      copiedTo = i + 1;
     }
   }
-  return out;
+  if (parts.length === 0) {
+    return raw;
+  }
+  parts.push(raw.slice(copiedTo));
+  return parts.join("");
 }
 
 function revivePythonJsonConstants(value: unknown): unknown {
@@ -1065,23 +1143,36 @@ function revivePythonJsonConstants(value: unknown): unknown {
 }
 
 function parsePythonJson(raw: string): unknown {
-  return revivePythonJsonConstants(JSON.parse(replacePythonJsonConstants(raw)) as unknown);
+  // Text with no NaN/Infinity token is plain JSON: skip the rewrite scan and
+  // the revive walk, which rebuilds every object and array in the document.
+  if (!raw.includes("NaN") && !raw.includes("Infinity")) {
+    return JSON.parse(raw) as unknown;
+  }
+  const rewritten = replacePythonJsonConstants(raw);
+  if (rewritten === raw) {
+    return JSON.parse(raw) as unknown;
+  }
+  return revivePythonJsonConstants(JSON.parse(rewritten) as unknown);
 }
 
 async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
-  const records = parsePythonCsv(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
-  const rawHeaders = (records.shift() ?? []).map(String);
-  const [headers, renamed] = dedupeHeaders(rawHeaders);
-  if (renamed > 0) {
-    logStderr(`warning: ${renamed} duplicate column name(s) in ${path} were renamed with a __N suffix so no column is lost`);
-  }
-  if (mapper && looksLikeDataNotHeaders(rawHeaders, mapper)) {
-    logStderr(
-      `warning: the first row of ${path} looks like DATA, not column names - it has been consumed as the header row and that record will not appear in the output. Add a header row, or re-export with one.`,
-    );
-  }
+  let headers: string[] | undefined;
   let lineNumber = 1;
-  for (const record of records) {
+  for await (const record of readCsvRecords(path)) {
+    if (headers === undefined) {
+      const rawHeaders = record.map(String);
+      const [deduped, renamed] = dedupeHeaders(rawHeaders);
+      headers = deduped;
+      if (renamed > 0) {
+        logStderr(`warning: ${renamed} duplicate column name(s) in ${path} were renamed with a __N suffix so no column is lost`);
+      }
+      if (mapper && looksLikeDataNotHeaders(rawHeaders, mapper)) {
+        logStderr(
+          `warning: the first row of ${path} looks like DATA, not column names - it has been consumed as the header row and that record will not appear in the output. Add a header row, or re-export with one.`,
+        );
+      }
+      continue;
+    }
     lineNumber += csvRecordLineSpan(record);
     if (record.length === 1 && record[0] === "") {
       continue;

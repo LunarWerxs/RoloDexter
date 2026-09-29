@@ -144,6 +144,37 @@ test("CLI CSV parsing follows Python DictReader edge behavior", () => {
   }
 });
 
+test("CLI CSV parsing does not depend on where file read chunks split", () => {
+  // The CSV reader streams the file in fs.createReadStream's 64 KiB chunks.
+  // Put an escaped quote ("") and a CRLF across the first two chunk
+  // boundaries, so each one-character lookahead must carry into the next chunk.
+  const chunk = 64 * 1024;
+  const header = "Email,Notes\r\n";
+  const quotedPrefix = 'a@example.com,"';
+  const quotedPad = "y".repeat(chunk - 1 - header.length - quotedPrefix.length);
+  const rowA = `${quotedPrefix}${quotedPad}""x"\r\n`;
+  const plainPrefix = "b@example.com,";
+  const plainPad = "z".repeat(2 * chunk - 1 - header.length - rowA.length - plainPrefix.length);
+  const text = `${header}${rowA}${plainPrefix}${plainPad}\r\nc@example.com,end\r\n`;
+  assert.equal(text.slice(chunk - 1, chunk + 1), '""');
+  assert.equal(text.slice(2 * chunk - 1, 2 * chunk + 1), "\r\n");
+
+  const dir = mkdtempSync(join(tmpdir(), "rolodexter-js-cli-"));
+  try {
+    const input = join(dir, "chunked.csv");
+    writeFileSync(input, text, "utf8");
+    const result = runCli(["map", input, "--format", "json"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      { email: "a@example.com", notes: `${quotedPad}"x` },
+      { email: "b@example.com", notes: plainPad },
+      { email: "c@example.com", notes: "end" },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI JSONL output ignores materialization row limit", () => {
   const dir = mkdtempSync(join(tmpdir(), "rolodexter-js-cli-"));
   try {
