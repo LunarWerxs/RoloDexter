@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The npm CLI streams CSV input.** `rolodexter map` and `profile` on a
+  `.csv` file now read it in chunks and hand each row on as soon as it is
+  parsed, instead of reading the whole file and parsing every record first,
+  so memory stays flat on large exports as it already did for JSONL. The
+  parse rules are unchanged.
+- **The npm CLI parses plain JSON and JSONL input much faster.** Input that
+  holds no bare `NaN` or `Infinity` goes straight to `JSON.parse`; before,
+  every file was first copied one character at a time and then rebuilt,
+  which on a 24 MB file took over a second and hundreds of MB of memory.
+
 ## [2.13.0] - 2026-09-27
 
 ### Added
