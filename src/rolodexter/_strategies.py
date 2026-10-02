@@ -95,8 +95,9 @@ class NormalizedMatchStrategy(MatchStrategy):
 
     Handles CamelCase, dot-paths, space/hyphen→underscore, indexed
     patterns (``E-mail 1 - Value``), vendor prefix stripping, address
-    prefix stripping, ``_id`` suffix stripping, and number stripping —
-    all with **zero** hardcoded service profiles.
+    prefix stripping, a leading ``your_`` (``Your company name``), ``_id``
+    suffix stripping, and number stripping — all with **zero** hardcoded
+    service profiles.
     """
 
     __slots__ = ("_address_prefixes", "_registry")
@@ -152,6 +153,9 @@ class NormalizedMatchStrategy(MatchStrategy):
             "secondary",
         }
     )
+
+    # A header addressed to the person filling a form ("Your company name").
+    _READER_PREFIX = "your_"
 
     _INDEXED_RE = re.compile(r"^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$")
     _SEP_RE = re.compile(r"[\s\-]+")
@@ -236,6 +240,29 @@ class NormalizedMatchStrategy(MatchStrategy):
                     items.append(stripped)
         return items
 
+    def _candidates_reader_prefix(self, uscore: str) -> list[str]:
+        """Step 7b: drop a leading ``your_`` ("Your work email" -> work_email).
+
+        Form exports title a column with the question the person answered, so
+        "Your company name" names the same field as "Company name". The
+        expansion rules register ``your_`` plus a few dozen common fields;
+        this reaches every other alias, and the vendor and address prefixes
+        after it ("Your billing city" -> billing_city -> city). Before, those
+        headers resolved only through the fuzzy layer, at 0.70 or 0.85.
+
+        .. versionadded:: 2.14.0
+        """
+        if not uscore.startswith(self._READER_PREFIX):
+            return []
+        rest = uscore[len(self._READER_PREFIX) :]
+        if not rest:
+            return []
+        return [
+            rest,
+            *self._candidates_prefix_stripped(rest, self._VENDOR_PREFIXES),
+            *self._candidates_prefix_stripped(rest, self._address_prefixes),
+        ]
+
     def _candidates_id_stripped(self, out: list[str]) -> list[str]:
         """Step 8: _id suffix stripping (owner_id -> owner), plus a vendor-prefix
         strip of that result. Skips anything already present in `out` (or
@@ -289,6 +316,7 @@ class NormalizedMatchStrategy(MatchStrategy):
 
         out.extend(self._candidates_prefix_stripped(uscore, self._VENDOR_PREFIXES))
         out.extend(self._candidates_prefix_stripped(uscore, self._address_prefixes))
+        out.extend(self._candidates_reader_prefix(uscore))
 
         out.extend(self._candidates_id_stripped(out))
 

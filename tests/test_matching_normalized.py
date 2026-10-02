@@ -69,6 +69,12 @@ class TestNormalizedMatchStrategy:
             ("Business Street", "address_line1"),
             ("Business Country/Region", "country"),
             ("billing_city", "city"),
+            # A leading "your" (a form question as the column title), and the
+            # address prefix after it. These used to reach only the fuzzy layer.
+            ("Your company name", "company"),
+            ("Your work email", "email"),
+            ("Your annual revenue", "revenue"),
+            ("Your billing city", "city"),
             # _id suffix stripping
             ("OwnerId", "owner"),
             ("owner_id", "owner"),

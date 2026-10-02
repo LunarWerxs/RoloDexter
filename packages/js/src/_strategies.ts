@@ -98,6 +98,9 @@ function pushIndexedCandidates(h: string, out: string[]): void {
   }
 }
 
+/** A header addressed to the person filling a form ("Your company name"). */
+const READER_PREFIX = "your_";
+
 /** Push vendor/address prefix-stripped variants of `uscore` onto `out`. */
 function pushPrefixCandidates(uscore: string, out: string[]): void {
   for (const prefix of VENDOR_PREFIXES) {
@@ -110,6 +113,24 @@ function pushPrefixCandidates(uscore: string, out: string[]): void {
       out.push(uscore.slice(prefix.length));
     }
   }
+}
+
+/**
+ * Push `uscore` without a leading "your_" ("Your work email" -> work_email), then
+ * its vendor/address-stripped forms ("Your billing city" -> billing_city -> city).
+ * Form exports title a column with the question the person answered. Python:
+ * `NormalizedMatchStrategy._candidates_reader_prefix`. Added in 2.14.0.
+ */
+function pushReaderPrefixCandidates(uscore: string, out: string[]): void {
+  if (!uscore.startsWith(READER_PREFIX)) {
+    return;
+  }
+  const rest = uscore.slice(READER_PREFIX.length);
+  if (!rest) {
+    return;
+  }
+  out.push(rest);
+  pushPrefixCandidates(rest, out);
 }
 
 /** Push `_id`-stripped bases (and their vendor-prefix-stripped inner forms) for existing candidates onto `out`. */
@@ -161,6 +182,7 @@ function normalizedCandidates(header: string, registry: PatternRegistry): string
   }
 
   pushPrefixCandidates(uscore, out);
+  pushReaderPrefixCandidates(uscore, out);
   pushIdBaseCandidates(out, registry);
 
   return out;

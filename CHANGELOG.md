@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A header that starts with "Your" resolves without the fuzzy layer.**
+  Form exports title a column with the question the person answered ("Your
+  company name", "Your work email", "Your billing city"). The normalized
+  layer now also tries the header without its leading `your_`, then the
+  vendor and address prefixes after it, so these resolve at 0.95 through
+  the alias table, in both packages. Before, the expansion rules covered
+  `your_` plus a few dozen common fields and everything else went to fuzzy
+  at 0.70 or 0.85, below a strict `confidence_threshold`. Over every alias
+  in the table with "Your " in front (2,360 headers): 1,982 keep their field
+  at higher confidence, 70 that matched nothing now match, and 298 change
+  field, each to the one the alias table names for the rest of the header
+  (fuzzy had filed "Your Apt" as `last_name`, "Your Bio" as `birthday` and
+  "Your County" as `country`). The reference-header guard from 2.11.0 still
+  holds: "Your primary phone ID" maps to nothing.
 - **The npm CLI streams CSV input.** `rolodexter map` and `profile` on a
   `.csv` file now read it in chunks and hand each row on as soon as it is
   parsed, instead of reading the whole file and parsing every record first,

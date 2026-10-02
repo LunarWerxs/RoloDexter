@@ -100,6 +100,11 @@ CASES: dict[str, Any] = {
         {"id": "reference_email_ref", "payload": {"email_ref": "x"}},
         {"id": "reference_owner_id_still_maps", "payload": {"owner_id": "7"}},
         {"id": "reference_company_id_still_maps", "payload": {"shipping_company_id": "3"}},
+        # 2.14.0: a leading "your" (a form question used as the column title)
+        # is dropped before the exact lookup, and the guards above still hold.
+        {"id": "reader_prefix_company", "payload": {"Your company name": "Acme"}},
+        {"id": "reader_prefix_then_address", "payload": {"Your billing city": "Paris"}},
+        {"id": "reader_prefix_reference_vetoed", "payload": {"Your primary phone ID": "48291"}},
         # Dates normalize only when unambiguous, and warn when they are not.
         {"id": "date_iso", "payload": {"birthday": "2024-03-15"}},
         {"id": "date_unambiguous_dmy", "payload": {"birthday": "25/03/2024"}},

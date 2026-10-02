@@ -136,7 +136,7 @@ running `map` for real. It accepts the same `--region`, `--languages`,
 Every field runs through the strategy chain in priority order:
 
 1. **Exact Match**: O(1) lookup against 600+ known aliases across 62 canonical fields
-2. **Normalized Match**: handles `CamelCase`, `dot.path`, `space → underscore`, and similar variations
+2. **Normalized Match**: handles `CamelCase`, `dot.path`, `space → underscore`, vendor and address prefixes (`hs_email`, `Billing City`), a form question's leading "Your" (`Your company name`), and similar variations
 3. **Fuzzy Match**: `rapidfuzz` catches typos like `"phne_nmbr"` → `phone`
 4. **Heuristic Match**: regex detects emails, phones, URLs, postal codes by *data shape*
 
