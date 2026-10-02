@@ -1063,6 +1063,37 @@ function isJsonConstantBoundary(char: string | undefined): boolean {
   return char === undefined || !/[A-Za-z0-9_$]/.test(char);
 }
 
+/** The bare constant token starting at `raw[i]`, or undefined when none does. */
+function matchJsonConstant(raw: string, i: number): { sentinel: string; length: number } | undefined {
+  const char = raw[i];
+  if (char !== "-" && char !== "I" && char !== "N") {
+    return undefined;
+  }
+  if (!isJsonConstantBoundary(i > 0 ? raw[i - 1] : undefined)) {
+    return undefined;
+  }
+  const candidates: Array<[string, string]> = [
+    ["-Infinity", JSON_NEG_INF_SENTINEL],
+    ["Infinity", JSON_INF_SENTINEL],
+    ["NaN", JSON_NAN_SENTINEL],
+  ];
+  for (const [token, sentinel] of candidates) {
+    if (raw.startsWith(token, i) && isJsonConstantBoundary(raw[i + token.length])) {
+      return { sentinel, length: token.length };
+    }
+  }
+  return undefined;
+}
+
+/** Index just past the string literal whose opening quote is at `raw[start]`. */
+function skipJsonString(raw: string, start: number): number {
+  let i = start + 1;
+  while (i < raw.length && raw[i] !== "\"") {
+    i += raw[i] === "\\" ? 2 : 1;
+  }
+  return i + 1;
+}
+
 /**
  * Swap bare NaN / Infinity / -Infinity tokens (outside strings) for sentinel
  * strings JSON.parse accepts. Returns `raw` itself when nothing was swapped.
@@ -1074,45 +1105,20 @@ function isJsonConstantBoundary(char: string | undefined): boolean {
 function replacePythonJsonConstants(raw: string): string {
   const parts: string[] = [];
   let copiedTo = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < raw.length; i += 1) {
-    const char = raw[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === "\"") {
+      i = skipJsonString(raw, i);
       continue;
     }
-    if (char === "\"") {
-      inString = true;
+    const match = matchJsonConstant(raw, i);
+    if (match === undefined) {
+      i += 1;
       continue;
     }
-    if (char !== "-" && char !== "I" && char !== "N") {
-      continue;
-    }
-    const prev = i > 0 ? raw[i - 1] : undefined;
-    let sentinel: string | undefined;
-    let length = 0;
-    if (raw.startsWith("-Infinity", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 9])) {
-      sentinel = JSON_NEG_INF_SENTINEL;
-      length = 9;
-    } else if (raw.startsWith("Infinity", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 8])) {
-      sentinel = JSON_INF_SENTINEL;
-      length = 8;
-    } else if (raw.startsWith("NaN", i) && isJsonConstantBoundary(prev) && isJsonConstantBoundary(raw[i + 3])) {
-      sentinel = JSON_NAN_SENTINEL;
-      length = 3;
-    }
-    if (sentinel !== undefined) {
-      parts.push(raw.slice(copiedTo, i), JSON.stringify(sentinel));
-      i += length - 1;
-      copiedTo = i + 1;
-    }
+    parts.push(raw.slice(copiedTo, i), JSON.stringify(match.sentinel));
+    i += match.length;
+    copiedTo = i;
   }
   if (parts.length === 0) {
     return raw;
