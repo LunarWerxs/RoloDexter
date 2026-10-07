@@ -81,9 +81,6 @@ dev = [
     "tomli>=2.4.1; python_version < '3.11'",
     "ruff>=0.16.8",
     "mypy>=2.3.1",
-    "deptry>=0.25.1",
-    "vulture>=2.16",
-    "pylint>=4.0.8",
 ]
 
 [project.scripts]
