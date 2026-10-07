@@ -71,10 +71,10 @@
     "state": "ok"
    }
   ],
-  "method": "exact: 16 -> 13",
+  "method": "keep refused on review 2026-10-07: CI installs `.[dev]` and then runs deptry, vulture and pylint (.github/workflows/ci.yml:61-63), so dropping them from the dev extra breaks CI's static-analysis step (reverted) (was: exact: 16 -> 13)",
   "note": "dropped deptry, vulture, pylint from the dev extra (16 -> 13 declared deps)",
   "pattern": null,
-  "verdict": "kept"
+  "verdict": "dropped"
  },
  "def_hash": "0fff2020e99f60fb",
  "id": "20261007-deps-total-9370",
