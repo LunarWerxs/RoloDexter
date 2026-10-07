@@ -4,5 +4,11 @@
   "commit": "ccc3c92aa427e724eeabcea68ef12bbdfae2aa25",
   "trial": "20261006-package-shipped-bytes-f42b",
   "value": 249414
+ },
+ "deps_total": {
+  "at": "2026-10-07T11:35:37+00:00",
+  "commit": "083051b0",
+  "trial": "20261007-deps-total-9370",
+  "value": 13
  }
 }
