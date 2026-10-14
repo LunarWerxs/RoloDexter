@@ -56,7 +56,6 @@ Allow: /pricing.md
 Allow: /sitemap.xml
 Allow: /$
 Allow: /assets/
-Disallow: /maintenance/
 Disallow: /
 
 # Everyone else. The landing page is the only page here; the rest of this folder is repository documentation that happens to sit in the Pages root.
@@ -70,7 +69,6 @@ Allow: /pricing.md
 Allow: /sitemap.xml
 Allow: /$
 Allow: /assets/
-Disallow: /maintenance/
 Disallow: /
 
 Sitemap: https://rolodexter.lunarwerx.com/sitemap.xml

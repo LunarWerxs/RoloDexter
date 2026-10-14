@@ -42,7 +42,7 @@ test("a name splits on Python's whitespace set, not JavaScript's", () => {
   // A byte-order mark is NOT a split point, so the name stays one word. Whether
   // the half after it gets capitalized is a separate question - Python's
   // str.title() treats any non-letter as a word boundary and JavaScript's does
-  // not - tracked as the name casing class in docs/maintenance/parity_sweep.md.
+  // not - tracked by the parity sweep (scripts/parity_sweep.py), not pinned here.
   assert.ok(String(normalize_value("first_name", `ada${BOM}lovelace`)).includes(BOM));
 });
 

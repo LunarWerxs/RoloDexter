@@ -48,8 +48,8 @@ class TestWhitespaceSet:
         # A byte-order mark is NOT a split point, so the name stays one word.
         # Whether the half after it gets capitalized is a separate question -
         # Python's str.title() treats any non-letter as a word boundary and
-        # JavaScript's does not - and that difference is tracked as the name
-        # casing class in docs/maintenance/parity_sweep.md, not pinned here.
+        # JavaScript's does not - and that difference is tracked by the parity
+        # sweep (scripts/parity_sweep.py), not pinned here.
         assert BOM in str(normalize_value("first_name", f"ada{BOM}lovelace"))
 
 
