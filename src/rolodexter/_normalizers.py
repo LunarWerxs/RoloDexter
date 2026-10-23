@@ -226,7 +226,10 @@ class NameNormalizer:
         # without disturbing internal particle casing ("Jan van der Berg").
         if result[:1].islower():
             result = result[:1].upper() + result[1:]
-        return _restore_deliberate_capitals(text, result)
+        result = _restore_deliberate_capitals(text, result)
+        # nameparser 2.4 keeps a post-nominal "PhD" as written; 2.3 wrote
+        # "Ph.D.", which the tests and the JavaScript package both return.
+        return re.sub(r"\bPhD\b", "Ph.D.", result)
 
     @classmethod
     def parse(cls, value: str) -> dict[str, str]:

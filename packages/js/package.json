@@ -118,17 +118,17 @@
     "prepack": "npm test && npm run check:parity"
   },
   "dependencies": {
-    "csv-stringify": "^6.8.0",
+    "csv-stringify": "^6.9.0",
     "fuzzball": "^2.2.6",
-    "libphonenumber-js": "^1.13.7"
+    "libphonenumber-js": "^1.13.15"
   },
   "optionalDependencies": {
     "@vitalets/google-translate-api": "^9.2.1",
     "unidecode": "^1.1.0"
   },
   "devDependencies": {
-    "@types/node": "^24.13.2",
-    "esbuild": "^0.28.1",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
   }
 }
