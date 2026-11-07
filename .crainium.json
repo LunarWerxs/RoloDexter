@@ -9,5 +9,13 @@
       "docs/pricing.md"
     ],
     "site": true
+  },
+  "architect": {
+    "home": "cloud",
+    "since": "2026-11-07",
+    "repo": "lunarwerx/architect",
+    "profile": "profiles/rolodexter.md",
+    "read": "the Architect reads this computer's copy at the start of a run",
+    "write": "docs tool on repo lunarwerx/architect: edit then put"
   }
 }
