@@ -15,7 +15,7 @@ Every CRM, email platform, and CSV export names the same fields differently (Hub
 - On-demand alias generation for 40 languages, cached locally with bounded network behavior
 - Per-caller field overrides for vendor-specific names not in the standard alias table
 - Free, open-source, MIT-licensed
-- Current version: v2.11.1
+- Current version: v2.13.0
 
 ## Links
 - Home: https://rolodexter.lunarwerx.com/
