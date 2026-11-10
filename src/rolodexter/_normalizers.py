@@ -6,6 +6,7 @@ Extracted verbatim from ``core.py``, which re-imports every name here so
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import threading
@@ -229,8 +230,9 @@ class NameNormalizer:
         applied here instead: a particle the parser left at the end of the middle
         names belongs to the family name that follows it.
         """
-        import nameparser
-
+        # nameparser < 2 has no ``parse``; this path only runs on 2.8+.  Typed
+        # as Any so the type checker, run against 1.x, does not reject it.
+        nameparser: Any = importlib.import_module("nameparser")
         parsed = nameparser.parse(text)
         given = parsed.given.split()
         middle = parsed.middle.split()
