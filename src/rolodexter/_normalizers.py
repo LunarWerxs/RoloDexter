@@ -137,6 +137,38 @@ def _restore_deliberate_capitals(source: str, result: str) -> str:
     return "".join(out)
 
 
+# nameparser 2.x splits a name on U+FEFF (a byte-order mark), which this
+# package's whitespace contract does not count as whitespace: a BOM is data
+# (tests/test_whitespace_contract.py). Swap it for a private-use stand-in that
+# nameparser keeps inside its word, then swap it back on the way out.
+_BOM = "\ufeff"
+_BOM_STAND_IN = "\ue000"
+
+# HumanName's own string format, which the tests and the JavaScript package
+# match: the nickname in parentheses after the suffix.
+_LEGACY_RENDER = "{title} {given} {middle} {family} {suffix} ({nickname})"
+
+
+def _protect_bom(text: str) -> str:
+    return text.replace(_BOM, _BOM_STAND_IN)
+
+
+def _unprotect_bom(text: str) -> str:
+    return text.replace(_BOM_STAND_IN, _BOM)
+
+
+def _modern_nameparser() -> bool:
+    """True when the installed nameparser deprecates ``HumanName`` (2.8+).
+
+    From 2.8 ``HumanName`` warns on every construction and ``nameparser.parse``
+    is the supported entry point.  Older releases only have ``HumanName``.
+    """
+    import nameparser
+
+    version = getattr(nameparser, "VERSION", ())
+    return isinstance(version, tuple) and tuple(version[:2]) >= (2, 8)
+
+
 class NameNormalizer:
     """Normalize and parse names via ``nameparser``.
 
@@ -188,6 +220,47 @@ class NameNormalizer:
         return cls._constants
 
     @classmethod
+    def _parse_modern(cls, text: str) -> Any:
+        """``nameparser.parse`` (2.8+) with this package's extra particles.
+
+        nameparser 2.8 deprecates ``HumanName`` and every way of adding a
+        particle to a parser (the Lexicon set fields), so the extras are
+        applied here instead: a particle the parser left at the end of the middle
+        names belongs to the family name that follows it.
+        """
+        import nameparser
+
+        parsed = nameparser.parse(text)
+        given = parsed.given.split()
+        middle = parsed.middle.split()
+        family = parsed.family.split()
+        extra = cls._EXTRA_PREFIXES
+        moved = False
+        while middle and family and middle[-1].lower() in extra:
+            family.insert(0, middle.pop())
+            moved = True
+        if moved:
+            parsed = parsed.replace(
+                given=" ".join(given),
+                middle=" ".join(middle),
+                family=" ".join(family),
+            )
+        return parsed
+
+    @classmethod
+    def _capitalize_modern(cls, text: str) -> str:
+        """Capitalized, rendered form of an already-lowercased name (2.8+)."""
+        parsed = cls._parse_modern(text).capitalized()
+        family = parsed.family.split()
+        lowered = [
+            w.lower() if w.lower() in cls._EXTRA_PREFIXES and i < len(family) - 1 else w
+            for i, w in enumerate(family)
+        ]
+        if lowered != family:
+            parsed = parsed.replace(family=" ".join(lowered))
+        return parsed.render(_LEGACY_RENDER)
+
+    @classmethod
     def normalize(cls, value: str) -> str:
         """Capitalize a name string with culturally-aware rules.
 
@@ -206,7 +279,7 @@ class NameNormalizer:
         if not text:
             return value
 
-        from nameparser import HumanName
+        from nameparser import HumanName  # legacy path only; 2.8+ warns on use
 
         # nameparser re-derives casing from an all-lowercase copy.  That is
         # what turns "JANE DOE" and "jane doe" into "Jane Doe" and what gives
@@ -216,9 +289,14 @@ class NameNormalizer:
         # a better authority on it than a rule is.  Those capitals are put
         # back afterwards by _restore_deliberate_capitals(); the decision and
         # its trade-off are written on that function.
-        hn = HumanName(text.lower(), constants=cls._nameparser_constants())
-        hn.capitalize()
-        result = str(hn)
+        if _modern_nameparser():
+            result = _unprotect_bom(cls._capitalize_modern(_protect_bom(text.lower())))
+        else:
+            hn = HumanName(
+                _protect_bom(text.lower()), constants=cls._nameparser_constants()
+            )
+            hn.capitalize()
+            result = _unprotect_bom(str(hn))
         # ``nameparser`` >= 1.2 leaves a *leading* recognized particle
         # lowercase (e.g. "ter braak" -> "ter Braak"), whereas older
         # releases capitalized it. A normalized display name should always
@@ -242,14 +320,24 @@ class NameNormalizer:
         """
         from nameparser import HumanName
 
-        hn = HumanName(value.strip(), constants=cls._nameparser_constants())
+        if _modern_nameparser():
+            parsed = cls._parse_modern(_protect_bom(value.strip()))
+            return {
+                "title": _unprotect_bom(parsed.title),
+                "first": _unprotect_bom(parsed.given),
+                "middle": _unprotect_bom(parsed.middle),
+                "last": _unprotect_bom(parsed.family),
+                "suffix": _unprotect_bom(parsed.suffix),
+                "nickname": _unprotect_bom(parsed.nickname),
+            }
+        hn = HumanName(_protect_bom(value.strip()), constants=cls._nameparser_constants())
         return {
-            "title": str(hn.title),
-            "first": str(hn.first),
-            "middle": str(hn.middle),
-            "last": str(hn.last),
-            "suffix": str(hn.suffix),
-            "nickname": str(hn.nickname),
+            "title": _unprotect_bom(str(hn.title)),
+            "first": _unprotect_bom(str(hn.first)),
+            "middle": _unprotect_bom(str(hn.middle)),
+            "last": _unprotect_bom(str(hn.last)),
+            "suffix": _unprotect_bom(str(hn.suffix)),
+            "nickname": _unprotect_bom(str(hn.nickname)),
         }
 
 
