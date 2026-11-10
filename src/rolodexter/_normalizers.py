@@ -146,6 +146,7 @@ _BOM_STAND_IN = "\ue000"
 
 # HumanName's own string format, which the tests and the JavaScript package
 # match: the nickname in parentheses after the suffix.
+_CAPITAL_AFTER_DOT = re.compile(r"(?<=[^\W\d_]\.)([^\W\d_])")
 _LEGACY_RENDER = "{title} {given} {middle} {family} {suffix} ({nickname})"
 
 
@@ -258,7 +259,17 @@ class NameNormalizer:
         ]
         if lowered != family:
             parsed = parsed.replace(family=" ".join(lowered))
-        return parsed.render(_LEGACY_RENDER)
+        # nameparser 2.8 also capitalizes a letter after a dot inside a word
+        # ("a@example.com" -> "A@Example.Com"); 1.4 and the JavaScript package
+        # capitalize only the first letter of each whitespace-separated word.
+        # A suffix ("Ph.D.", "M.D.") keeps its capitals on both.
+        suffix_words = set(parsed.suffix.split())
+        return " ".join(
+            word
+            if word in suffix_words
+            else _CAPITAL_AFTER_DOT.sub(lambda m: m.group(1).lower(), word)
+            for word in parsed.render(_LEGACY_RENDER).split(" ")
+        )
 
     @classmethod
     def normalize(cls, value: str) -> str:
@@ -330,7 +341,9 @@ class NameNormalizer:
                 "suffix": _unprotect_bom(parsed.suffix),
                 "nickname": _unprotect_bom(parsed.nickname),
             }
-        hn = HumanName(_protect_bom(value.strip()), constants=cls._nameparser_constants())
+        hn = HumanName(
+            _protect_bom(value.strip()), constants=cls._nameparser_constants()
+        )
         return {
             "title": _unprotect_bom(str(hn.title)),
             "first": _unprotect_bom(str(hn.first)),
