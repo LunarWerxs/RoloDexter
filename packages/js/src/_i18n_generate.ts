@@ -6,7 +6,7 @@ import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SUPPORTED_LANGUAGES, loadCachedLanguage, userI18nCacheDir } from "./_i18n_cache.js";
 import type { AsyncTranslateFunction, GenerateLanguageAsyncOptions, GenerateLanguageOptions, InternalGenerateLanguageOptions, LanguageData, PatternData, TranslateFunction } from "./_models.js";
-import { assertPythonOptionsKeys, isPlainObject, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, valueError } from "./_pycompat.js";
+import { assertPythonOptionsKeys, isPlainObject, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, pythonRangePositionalTypeError, valueError } from "./_pycompat.js";
 import { loadDefaultPatterns } from "./_registry.js";
 import { moduleUrl, require } from "./_runtime.js";
 let unidecode: ((value: string) => string) | undefined;
@@ -429,7 +429,10 @@ export function generate_language(langCode: string, options: GenerateLanguageOpt
   if (arguments.length < 1) {
     throw pythonMissingRequiredArg("generate_language", "lang_code");
   }
-  if (arguments.length > 2 || (arguments.length === 2 && !isPlainObject(options))) {
+  if (arguments.length > 2) {
+    throw pythonRangePositionalTypeError("generate_language", 1, 2, arguments.length);
+  }
+  if (arguments.length === 2 && !isPlainObject(options)) {
     throw pythonPositionalTypeError("generate_language", 1, arguments.length);
   }
   assertPythonOptionsKeys("generate_language", options as Record<string, unknown>, GENERATE_LANGUAGE_OPTION_KEYS);

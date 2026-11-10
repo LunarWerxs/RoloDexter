@@ -19,7 +19,7 @@ test("the published generate_language enforces Python's positional arity", () =>
     () => (generate_language as unknown as (lang: string, options: unknown, extra: unknown) => unknown)("es", {}, "extra"),
     {
       name: "TypeError",
-      message: "generate_language() takes 1 positional argument but 3 were given",
+      message: "generate_language() takes from 1 to 2 positional arguments but 3 were given",
     },
   );
 });
