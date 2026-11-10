@@ -497,6 +497,24 @@ NAME_NOT_A_NAME = "name: non-name text in a name field (URL, email, address, sep
 BOM = "JS trim() strips U+FEFF, Python strip() does not"
 FUZZY = "fuzzy header tie-break on headers that match nothing"
 DOWNSTREAM = "payload result, downstream of a normalizer or matcher"
+# Fallbacks for a normalize case whose field is in none of the sets above, and
+# for a section classify() does not know. They were bare literals in classify()
+# and missing from the list of categories, so the list did not describe every
+# label the report can print.
+OTHER_NORMALIZER = "other string normalizer"
+OTHER = "other"
+# Every label classify() can return. Keep this in step with classify().
+CATEGORIES = (
+    PHONE_LIBS,
+    NAME_INNER_CAPITAL,
+    NAME_UNICODE,
+    NAME_NOT_A_NAME,
+    BOM,
+    FUZZY,
+    DOWNSTREAM,
+    OTHER_NORMALIZER,
+    OTHER,
+)
 
 
 def _has_inner_capital(value: str) -> bool:
@@ -526,10 +544,10 @@ def classify(section: str, item: dict[str, Any]) -> str:
             if not value.isascii():
                 return NAME_UNICODE
             return NAME_NOT_A_NAME
-        return "other string normalizer"
+        return OTHER_NORMALIZER
     if section == "payloads":
         return DOWNSTREAM
-    return "other"
+    return OTHER
 
 
 # ── Per-stage attribution ─────────────────────────────────────────────
