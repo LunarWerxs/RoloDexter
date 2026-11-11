@@ -1,5 +1,5 @@
 {
- "version": "2.13.0",
+ "version": "3.0.0",
  "expansion": {
   "form_prefixes": ["billing_", "shipping_", "your_", "your-", "contact_", "customer_", "applicant_", "name_", "business_", "mailing_", "home_", "other_", "personal_", "primary_", "secondary_"],
   "form_fields": {

@@ -308,7 +308,7 @@ class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
     def test_version_matches_pattern_table(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.13.0"
+        assert registry.version == "3.0.0"
 
 
 # ═══════════════════════════════════════════════════════════════

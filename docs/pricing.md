@@ -34,7 +34,7 @@ edition. Every feature described on the product page (the four-layer
 matching pipeline, confidence scoring, value normalization, batch and
 streaming processing, pandas DataFrame support, the CLI, schema
 compile-once, and 40-language alias generation) ships in the open-source
-package at v2.13.0.
+package at v3.0.0.
 
 ## Support
 
@@ -49,4 +49,4 @@ support contract.
 - npm: https://www.npmjs.com/package/rolodexter
 - Home: https://rolodexter.lunarwerx.com/
 
-Last updated: 2026-08-23
+Last updated: 2026-11-11

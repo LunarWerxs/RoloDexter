@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-11
+
+**TL;DR**
+
+- **Consent columns no longer turn into opt-outs.** A "yes" under `Email
+  Consent` or `GDPR Consent` used to come out as "opted out"; consent now maps
+  to `subscribed`, or to nothing.
+- **Google and Outlook "Type" and "Label" columns stay out of your data.**
+  `E-mail 1 - Type` (Home, Work) no longer lands in `email`.
+- **`--dedupe` stops merging different people.** A shared office line, a
+  company fax or `N/A` in the email column no longer makes two people one.
+- **Correct text stays correct.** `IL`, `NSW` and `Apt 4B` keep their
+  capitals, `Machado` stays `Machado`, a 7-digit local number is no longer
+  turned into a fake international one, and phone extensions are kept.
+- **The npm commands work on macOS and Linux**, and npm `generate_language()`
+  generates language packs again.
+- **New CLI options:** `--encoding` and `--delimiter` (semicolon exports from
+  European spreadsheets map without a flag), `--csv-safe`, and
+  `--duplicates-output` to review every row `--dedupe` dropped.
+- **Releases publish only after the tests pass,** to PyPI and npm together,
+  and neither registry's publish step holds a stored token.
+
+**Upgrading from 2.x**
+
+- **npm:** `schema.matches` is now a map. Use `schema.matches.get(header)` and
+  `[...schema.matches.keys()]` where you used `schema.matches[header]` and
+  `Object.keys(schema.matches)`. This is why the version is 3.0.0.
+- `MappingSchema.from_dict` and `--schema-in` refuse a plan that names a field
+  that does not exist, instead of creating it.
+- Matching is stricter. Headers fuzzy matching used to guess at, such as
+  `phone_type` and `email_type`, now map to nothing, and consent headers move
+  off `email_opt_out`. Run `rolodexter profile` on a usual file to see what
+  moved.
+- The `service` argument, ignored since 2.0, now warns and will be removed.
+
+**Everything in 3.0.0**
+
 ### Added
 
 - **`--duplicates-output PATH`** on `map`, in both CLIs. With `--dedupe`,
@@ -149,9 +186,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **npm build:** `sync-patterns.mjs` finds the repo root without a `.git`
   folder, and the copy-budget check fails when its page is missing instead of
   passing.
-- `SECURITY.md` now says what is true: PyPI uses trusted publishing with no
-  token; npm publishes with an automation token held only in the `npm`
-  GitHub environment until npm trusted publishing is set up.
+- **npm publishes through trusted publishing, as PyPI does.** The release
+  job exchanges GitHub's identity token for a short-lived npm credential, so
+  neither registry's publish step holds a stored token, and `SECURITY.md` says
+  so.
 - Python `ContactMapper` drops a `__slots__` declaration that had no effect
   (the base class has none, so instances always had a `__dict__`).
 

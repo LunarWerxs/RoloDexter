@@ -23,8 +23,9 @@ to the most recent release before reporting.
 - **NPM releases are published from GitHub Actions with
   [provenance](https://docs.npmjs.com/generating-provenance-statements)**
   (Sigstore), linking each published tarball to its source commit and build.
-  The publish step uses an npm automation token held only in the `npm`
-  GitHub environment; it is to be replaced by npm trusted publishing.
+  npm also uses [trusted publishing](https://docs.npmjs.com/trusted-publishers)
+  (OIDC): the `npm` job of `publish.yml` exchanges the runner's identity token
+  for a short-lived publish credential, and no npm token is stored.
 - **CI runs a [`gitleaks`](https://github.com/gitleaks/gitleaks) secret scan**
   on every push and pull request.
 - **Dependencies are monitored by Dependabot** and pinned with an upper bound

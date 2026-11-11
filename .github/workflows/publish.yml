@@ -106,7 +106,7 @@ jobs:
       url: https://www.npmjs.com/package/rolodexter
     permissions:
       contents: read
-      id-token: write  # npm provenance
+      id-token: write  # npm trusted publishing (OIDC) and provenance
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -132,13 +132,12 @@ jobs:
         working-directory: packages/js
         run: npm pack --dry-run
 
-      # TODO (owner step): npm trusted publishing needs a trusted publisher
-      # registered on npmjs.com for this repo and workflow (publish.yml). Once
-      # that is done, drop NODE_AUTH_TOKEN, delete the NPM_TOKEN secret and
-      # rotate the old token. Until then this uses the token in the `npm`
-      # environment.
+      # npm trusted publishing: npmjs.com trusts this repo's publish.yml in the
+      # `npm` environment (registered 2026-11-11), so the job holds no token.
+      # The npm CLI needs 11.5.1 or newer to exchange the OIDC token.
+      - name: npm 11.5.1 or newer
+        run: npm install -g npm@^11.5.1 && npm --version
+
       - name: Publish to NPM
         working-directory: packages/js
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

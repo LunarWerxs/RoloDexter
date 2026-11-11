@@ -50,7 +50,7 @@ canonical schema regardless of source.
 - Schema compile-once: resolve headers to a mapping plan once, replay it on
   every later import so columns route identically
 - Supports Python 3.10-3.14; free, open-source, MIT-licensed
-- Current version: v2.13.0
+- Current version: v3.0.0
 
 ## Installation
 
@@ -118,4 +118,4 @@ library with a maintained alias table and confidence scores, no per-workflow UI.
 - Pricing: https://rolodexter.lunarwerx.com/pricing.md
 - Studio: https://lunarwerx.com/
 
-Last updated: 2026-08-23
+Last updated: 2026-11-11
