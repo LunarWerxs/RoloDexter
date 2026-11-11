@@ -1,2 +1,2 @@
-# rolodexter.core.EXACT_MATCH_CONFIDENCE  api-hash 53810307
-const EXACT_MATCH_CONFIDENCE: 1
+# rolodexter.core.EXACT_MATCH_CONFIDENCE  api-hash 2c42b59b
+const EXACT_MATCH_CONFIDENCE: number

@@ -7,6 +7,7 @@ import type { CanonicalFieldValue } from "./_models.js";
 import { normalizeName, parseNameParts, smartTitleCase, splitNameNickname } from "./_names.js";
 import { normalizePhone } from "./_phone.js";
 import { assertValueNormalizerArity, attributeError, pyCollapseSpace, pyRepr, pyString, pyStrip, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonTypeName } from "./_pycompat.js";
+import { TABLES } from "./_tables.js";
 
 /** @internal */
 
@@ -23,7 +24,7 @@ const SHORT_YEAR_DATE_RE = /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2}$/;
 const ISO_TIME_RE = /^[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?\s*(?:([Zz])|([+-])(\d{2}):?(\d{2})?)?$/;
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 // Date fields that record a moment, so their time and zone are kept.
-const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set(["created_at", "updated_at", "last_contacted"]);
+const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set(TABLES.field_sets.timestamp);
 
 const pad = (n: number, width: number): string => String(n).padStart(width, "0");
 

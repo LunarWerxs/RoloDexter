@@ -20,6 +20,8 @@ const packageRoot = findPackageRoot(here);
 const assets = [
   ["src/patterns.json", "dist/src/patterns.json"],
   ["src/patterns.json", "dist/cjs/patterns.json"],
+  ["src/tables.json", "dist/src/tables.json"],
+  ["src/tables.json", "dist/cjs/tables.json"],
   ["src/i18n/.gitkeep", "dist/src/i18n/.gitkeep"],
   ["src/i18n/.gitkeep", "dist/cjs/i18n/.gitkeep"],
 ];

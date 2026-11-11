@@ -21,13 +21,14 @@ from ._normalizers import (
     _normalize_header,
 )
 from ._patterns import PatternRegistry
+from ._tables import TABLES
 
 # Confidence thresholds
-EXACT_MATCH_CONFIDENCE: float = 1.0
-NORMALIZED_MATCH_CONFIDENCE: float = 0.95
-FUZZY_MATCH_THRESHOLD: int = 80
-FUZZY_HIGH_CONFIDENCE: float = 0.85
-FUZZY_LOW_CONFIDENCE: float = 0.70
+EXACT_MATCH_CONFIDENCE: float = TABLES["confidence"]["exact"]
+NORMALIZED_MATCH_CONFIDENCE: float = TABLES["confidence"]["normalized"]
+FUZZY_MATCH_THRESHOLD: int = TABLES["confidence"]["fuzzy_threshold"]
+FUZZY_HIGH_CONFIDENCE: float = TABLES["confidence"]["fuzzy_high"]
+FUZZY_LOW_CONFIDENCE: float = TABLES["confidence"]["fuzzy_low"]
 # Reject a fuzzy candidate that is far shorter than the header.  ``WRatio``'s
 # partial-ratio component inflates the score of a short alias embedded in a
 # longer header (e.g. ``"tel"`` inside ``"job_titel"``), which silently
@@ -36,8 +37,8 @@ FUZZY_LOW_CONFIDENCE: float = 0.70
 # longer before accepting the match.  0.75 also rejects "alias plus a
 # qualifier" (``phone_ext`` is not ``phone``) and a short alias inside a
 # one-letter slip of a longer one (``tel_nationa`` is not ``nation``).
-FUZZY_LENGTH_RATIO: float = 0.75
-HEURISTIC_CONFIDENCE: float = 0.60
+FUZZY_LENGTH_RATIO: float = TABLES["confidence"]["fuzzy_length_ratio"]
+HEURISTIC_CONFIDENCE: float = TABLES["confidence"]["heuristic"]
 
 # Headers longer than this skip the rewrite (normalized) and fuzzy layers; the
 # exact lookup still runs.  No real column name comes near it, and header text
@@ -47,21 +48,14 @@ _MAX_REWRITE_HEADER_LEN: int = 200
 
 # The property of a "Group N - Property" header ("E-mail 1 - Value") that names
 # the group's value itself, so the bare group ("e_mail") may stand in for it.
-_VALUE_PROPERTIES: frozenset[str] = frozenset(
-    {"value", "address", "number", "url", "formatted"}
-)
+_VALUE_PROPERTIES: frozenset[str] = frozenset(TABLES["value_properties"])
 
 # Trailing words that describe another column instead of holding a value:
 # "E-mail 1 - Type" holds "* Work", "E-mail Display Name" a label for the
 # address, "Phone Ext" an extension.  Such a header is never the field its
 # leading words name ("E-mail Type" is not the email).
-_QUALIFIER_TAILS: tuple[tuple[str, ...], ...] = (
-    ("display", "name"),
-    ("type",),
-    ("label",),
-    ("kind",),
-    ("ext",),
-    ("extension",),
+_QUALIFIER_TAILS: tuple[tuple[str, ...], ...] = tuple(
+    tuple(tail) for tail in TABLES["qualifier_tails"]
 )
 
 
@@ -146,59 +140,21 @@ class NormalizedMatchStrategy(MatchStrategy):
     header_only = True
 
     # Prefixes whose dotted object.name → company
-    _COMPANY_PREFIXES = frozenset(
-        {
-            "account",
-            "accounts",
-            "org",
-            "organization",
-            "organisations",
-            "organizations",
-            "organisation",
-            "company",
-            "companies",
-            "firm",
-            "business",
-            "enterprise",
-        }
-    )
+    _COMPANY_PREFIXES = frozenset(TABLES["prefixes"]["company"])
 
     # ── Strippable prefixes (module-level constants) ──
     # These are intentionally NOT duplicated; NormalizedMatchStrategy reads
     # the same objects that the expansion engine could reference if needed.
 
     # Vendor-specific prefixes to strip
-    _VENDOR_PREFIXES = (
-        "hs_",
-        "hubspot_",
-        "sf_",
-        "salesforce_",
-        "sl_",
-        "smartlead_",
-    )
+    _VENDOR_PREFIXES = tuple(TABLES["prefixes"]["vendor"])
 
     # Address/context prefixes (the suffix IS the field): the subset of
     # patterns.json's expansion.form_prefixes that denote an address/contact
     # context rather than generic form scaffolding (e.g. "your_", "name_").
     # Single-sourced from the registry in __init__ so the two lists can't
     # drift — see _ADDRESS_CONTEXT_TERMS.
-    _ADDRESS_CONTEXT_TERMS = frozenset(
-        {
-            # "Contact Province" names the contact's province.  Before
-            # FUZZY_LENGTH_RATIO went to 0.75 such a header reached its field
-            # by fuzzy containment; stripping the prefix reaches it directly.
-            "contact",
-            "business",
-            "mailing",
-            "home",
-            "other",
-            "personal",
-            "shipping",
-            "billing",
-            "primary",
-            "secondary",
-        }
-    )
+    _ADDRESS_CONTEXT_TERMS = frozenset(TABLES["prefixes"]["address_context"])
 
     # A header addressed to the person filling a form ("Your company name").
     _READER_PREFIX = "your_"
@@ -562,16 +518,11 @@ class FuzzyMatchStrategy(MatchStrategy):
 
 
 # ── Social URL data table ──
-# (canonical, domain(s), path_regex_suffix)
-# Adding a new platform = 1 row here.
-_SOCIAL_URL_DEFS: tuple[tuple[str, str | tuple[str, ...], str], ...] = (
-    ("linkedin", "linkedin.com", r"(in|company|pub|school)/"),
-    ("twitter", ("twitter.com", "x.com"), r"[a-zA-Z0-9_]+/?$"),
-    ("instagram", "instagram.com", r"[a-zA-Z0-9_.]+/?$"),
-    ("github", "github.com", r"[a-zA-Z0-9\-]+/?$"),
-    ("facebook", ("facebook.com", "fb.com"), r"[a-zA-Z0-9.]+/?$"),
-    ("youtube", "youtube.com", r"((channel|c)/[a-zA-Z0-9\-_]+|@[a-zA-Z0-9\-_]+)/?$"),
-    ("tiktok", "tiktok.com", r"@[a-zA-Z0-9_.]+/?$"),
+# (canonical, domain(s), path_regex_suffix) rows come from tables.json "social_urls".
+# Adding a new platform = 1 row there.
+_SOCIAL_URL_DEFS: tuple[tuple[str, tuple[str, ...], str], ...] = tuple(
+    (entry["canonical"], tuple(entry["domains"]), entry["path"])
+    for entry in TABLES["social_urls"]
 )
 
 
@@ -579,10 +530,7 @@ def _build_social_url_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
     """Generate compiled social URL regexes from *_SOCIAL_URL_DEFS*."""
     result: list[tuple[str, re.Pattern[str]]] = []
     for canonical, domains, path in _SOCIAL_URL_DEFS:
-        if isinstance(domains, tuple):
-            domain_re = "|".join(re.escape(d) for d in domains)
-        else:
-            domain_re = re.escape(domains)
+        domain_re = "|".join(re.escape(d) for d in domains)
         result.append(
             (
                 canonical,
@@ -634,35 +582,9 @@ class HeuristicMatchStrategy(MatchStrategy):
         ("birthday", re.compile(r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$")),
         ("birthday", re.compile(r"^\d{1,2}\.\d{1,2}\.\d{2,4}$")),
     )
-    _PHONE_HEADER_HINTS = frozenset(
-        {
-            "cell",
-            "fax",
-            "mobile",
-            "phone",
-            "phones",
-            "sms",
-            "tel",
-            "telephone",
-            "whatsapp",
-        }
-    )
-    _BIRTHDAY_HEADER_HINTS = frozenset(
-        {
-            "birth",
-            "birthday",
-            "birthdate",
-            "bday",
-            "dob",
-        }
-    )
-    _BIRTHDAY_HEADER_PHRASES = frozenset(
-        {
-            "birth_date",
-            "date_of_birth",
-            "day_of_birth",
-        }
-    )
+    _PHONE_HEADER_HINTS = frozenset(TABLES["header_hints"]["phone"])
+    _BIRTHDAY_HEADER_HINTS = frozenset(TABLES["header_hints"]["birthday"])
+    _BIRTHDAY_HEADER_PHRASES = frozenset(TABLES["header_hints"]["birthday_phrases"])
     # A bare five-digit run is the one genuinely ambiguous postal shape: an
     # order total, an account balance, an employee number and a US ZIP are
     # indistinguishable as values, so filing "45000" as a postal code is a coin
@@ -671,29 +593,8 @@ class HeuristicMatchStrategy(MatchStrategy):
     # (K1A 0B1, SW1A 1AA) and ZIP+4 are distinctive enough to stand on their
     # own and keep working with no header hint.
     _AMBIGUOUS_POSTAL_RE = re.compile(r"^\d{5}$")
-    _POSTAL_HEADER_HINTS = frozenset(
-        {
-            "cep",
-            "cp",
-            "eircode",
-            "pincode",
-            "plz",
-            "postal",
-            "postalcode",
-            "postcode",
-            "zip",
-            "zipcode",
-        }
-    )
-    _POSTAL_HEADER_PHRASES = frozenset(
-        {
-            "postal_code",
-            "post_code",
-            "zip_code",
-            "codigo_postal",
-            "code_postal",
-        }
-    )
+    _POSTAL_HEADER_HINTS = frozenset(TABLES["header_hints"]["postal"])
+    _POSTAL_HEADER_PHRASES = frozenset(TABLES["header_hints"]["postal_phrases"])
 
     @property
     def name(self) -> str:

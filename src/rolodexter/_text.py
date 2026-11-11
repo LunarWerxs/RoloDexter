@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from ._tables import TABLES
+
 # ── Address title-casing helpers ──
 # ``str.title()`` mangles real-world address tokens (``MCDONALD`` → ``Mcdonald``,
 # ``5TH`` → ``5Th``, possessives like ``Macy's`` → ``Macy'S``).  These helpers do
@@ -31,28 +33,13 @@ def _cap_part(part: str) -> str:
 # US states, DC and territories, then Canadian provinces and territories.
 # Owned here, not in ``_geo``, because the place casing below needs it and
 # ``_geo`` imports this module; ``StateNormalizer._CODES`` is this set.
-_REGION_CODES: frozenset[str] = frozenset(
-    (
-        *("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI"),
-        *("ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI"),
-        *("MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC"),
-        *("ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT"),
-        *("VT", "VA", "WA", "WV", "WI", "WY", "DC", "PR", "VI", "GU", "AS"),
-        *("MP", "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE"),
-        *("QC", "SK", "YT"),
-    )
-)
+_REGION_CODES: frozenset[str] = frozenset(TABLES["text"]["region_codes"])
 
 # Words written in capitals wherever they stand in an all-caps place value:
 # compass points, post-office and military mail words, and country
 # abbreviations.  Region codes are kept upper too, but only where a region
 # code stands (see _region_position), so "LA JOLLA" still reads "La Jolla".
-_ALWAYS_UPPER: frozenset[str] = frozenset(
-    {
-        *("N", "S", "E", "W", "NE", "NW", "SE", "SW"),
-        *("PO", "APO", "FPO", "DC", "USA", "US", "UK"),
-    }
-)
+_ALWAYS_UPPER: frozenset[str] = frozenset(TABLES["text"]["always_upper"])
 
 _DIGIT_RE = re.compile(r"[0-9]")
 _NON_ALNUM_RE = re.compile(r"[^A-Za-z0-9]")

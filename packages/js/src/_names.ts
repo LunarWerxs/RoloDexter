@@ -2,6 +2,7 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { pyCollapseSpace, pySplitSpace, pyStrip } from "./_pycompat.js";
+import { TABLES } from "./_tables.js";
 
 
 function titleWord(word: string): string {
@@ -30,24 +31,13 @@ function hasDeliberateCapital(word: string): boolean {
 // Owned here, not in _geo.ts, because the place casing below needs it;
 // _geo.ts imports it as its state-code table. Same set as _REGION_CODES in
 // src/rolodexter/_text.py.
-const REGION_CODES: ReadonlySet<string> = new Set([
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI",
-  "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
-  "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC",
-  "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
-  "VT", "VA", "WA", "WV", "WI", "WY", "DC", "PR", "VI", "GU", "AS",
-  "MP", "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE",
-  "QC", "SK", "YT",
-]);
+const REGION_CODES: ReadonlySet<string> = new Set(TABLES.text.region_codes);
 
 // Words written in capitals wherever they stand in an all-caps place value:
 // compass points, post-office and military mail words, and country
 // abbreviations. Region codes are kept upper too, but only where a region
 // code stands (see regionPosition), so "LA JOLLA" still reads "La Jolla".
-const ALWAYS_UPPER: ReadonlySet<string> = new Set([
-  "N", "S", "E", "W", "NE", "NW", "SE", "SW",
-  "PO", "APO", "FPO", "DC", "USA", "US", "UK",
-]);
+const ALWAYS_UPPER: ReadonlySet<string> = new Set(TABLES.text.always_upper);
 
 /** Python's `str.isupper()`: has a cased letter and no lowercase one. */
 function isAllCaps(text: string): boolean {
@@ -244,14 +234,7 @@ const NAME_SUFFIXES = new Map([
 // all-lower spelling is not re-cased to "MacHado". Same list as
 // _NOT_MAC_NAMES in src/rolodexter/_normalizers.py. Real Mac-names
 // ("Macaulay", "Macdonald") stay out so the rule still applies to them.
-const NOT_MAC_NAMES: ReadonlySet<string> = new Set([
-  "macaluso", "macario", "macarena", "macchia", "macchio", "mace",
-  "maceda", "macedo", "macedonio", "macek", "macey", "macha",
-  "machado", "machen", "machiavelli", "machin", "macho", "machowski",
-  "machuca", "macias", "maciej", "maciejewski", "maciel", "mack",
-  "mackenzie", "mackey", "mackie", "mackiewicz", "mackin", "macklin",
-  "mackowiak", "macon", "macri", "macy",
-]);
+const NOT_MAC_NAMES: ReadonlySet<string> = new Set(TABLES.mac_exceptions);
 
 // nameparser's Mac/Mc shape: "mac" or "mc" and at least two more letters.
 const MAC_NAME_RE = /^(ma?c)[\p{L}\p{N}_]{2,}/iu;

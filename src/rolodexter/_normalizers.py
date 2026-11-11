@@ -17,6 +17,7 @@ from typing import Any
 
 from ._geo import CountryNormalizer, StateNormalizer
 from ._models import MappingWarning, WarningCategory
+from ._tables import TABLES
 from ._text import _smart_titlecase
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -205,16 +206,7 @@ def _modern_nameparser() -> bool:
 # carries the same list in _names.ts.  Real Mac-names ("Macaulay",
 # "Macdonald") stay out so the rule still applies to them; "Mackenzie" is in
 # because the plain spelling is the usual one, as a given name especially.
-_NOT_MAC_NAMES: frozenset[str] = frozenset(
-    {
-        *("macaluso", "macario", "macarena", "macchia", "macchio", "mace"),
-        *("maceda", "macedo", "macedonio", "macek", "macey", "macha"),
-        *("machado", "machen", "machiavelli", "machin", "macho", "machowski"),
-        *("machuca", "macias", "maciej", "maciejewski", "maciel", "mack"),
-        *("mackenzie", "mackey", "mackie", "mackiewicz", "mackin", "macklin"),
-        *("mackowiak", "macon", "macri", "macy"),
-    }
-)
+_NOT_MAC_NAMES: frozenset[str] = frozenset(TABLES["mac_exceptions"])
 
 # What nameparser's Mac/Mc rule produced: "MacHado", "McDonald".
 _MAC_CASED_RE = re.compile(r"^(?:Mac|Mc)[A-Z]")
@@ -312,6 +304,10 @@ class NameNormalizer:
         "op",
         "el",
         "af",
+        # nameparser 2.8 dropped these two from its own particles; 1.x and the
+        # JavaScript package keep them.
+        "bon",
+        "heer",
     )
     _constants: Any = None
     _constants_lock = threading.Lock()
@@ -738,53 +734,24 @@ class ListNormalizer:
 
 # Category sets — each canonical field belongs to exactly one normalizer group.
 # Adding a new CanonicalField? Just add it to the right set below.
-_PHONE_FIELDS: frozenset[str] = frozenset(
-    {"phone", "home_phone", "work_phone", "fax", "whatsapp"}
-)
-_NAME_FIELDS: frozenset[str] = frozenset(
-    {
-        "first_name",
-        "last_name",
-        "full_name",
-        "middle_name",
-        "nickname",
-        "prefix",
-        "suffix",
-    }
-)
-_ADDRESS_FIELDS: frozenset[str] = frozenset(
-    {"address_line1", "address_line2", "city", "full_address"}
-)
-_BOOLEAN_FIELDS: frozenset[str] = frozenset({"email_opt_out", "subscribed", "verified"})
-_LIST_FIELDS: frozenset[str] = frozenset({"tags"})
-_DATE_FIELDS: frozenset[str] = frozenset(
-    {"birthday", "created_at", "updated_at", "last_contacted"}
-)
+_PHONE_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["phone"])
+_NAME_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["name"])
+_ADDRESS_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["address"])
+_BOOLEAN_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["boolean"])
+_LIST_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["list"])
+_DATE_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["date"])
 # Date fields that record a moment, so their time and zone are kept.
-_TIMESTAMP_FIELDS: frozenset[str] = frozenset(
-    {"created_at", "updated_at", "last_contacted"}
-)
-_SOCIAL_FIELDS: frozenset[str] = frozenset(
-    {
-        "website",
-        "linkedin",
-        "twitter",
-        "facebook",
-        "instagram",
-        "github",
-        "youtube",
-        "tiktok",
-        "discord",
-        "telegram",
-    }
-)
+_TIMESTAMP_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["timestamp"])
+_SOCIAL_FIELDS: frozenset[str] = frozenset(TABLES["field_sets"]["social"])
 
 # Suffixes that mark a header as naming a *reference* to a record rather than
 # holding the record's value.  Used to veto a derived (normalized/fuzzy) match
 # onto a value-bearing field; an explicit alias in patterns.json still wins,
 # since the truth table is allowed to say that e.g. ``twitter_id`` really is
 # the handle for a given export format.
-_REFERENCE_SUFFIX_RE = re.compile(r"_(?:id|ids|uuid|guid|key|ref|fk)$")
+_REFERENCE_SUFFIX_RE = re.compile(
+    "_(?:" + "|".join(TABLES["header_hints"]["reference_suffixes"]) + ")$"
+)
 
 
 def _is_reference_header(header: str) -> bool:

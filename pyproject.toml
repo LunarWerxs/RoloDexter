@@ -106,7 +106,7 @@ Changelog = "https://github.com/LunarWerxs/RoloDexter/blob/main/CHANGELOG.md"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"rolodexter" = ["patterns.json", "i18n/.gitkeep"]
+"rolodexter" = ["patterns.json", "tables.json", "i18n/.gitkeep"]
 
 # ── Pytest ────────────────────────────────────────────────────────────
 

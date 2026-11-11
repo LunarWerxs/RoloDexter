@@ -7,6 +7,7 @@ import type { PatternData } from "./_models.js";
 import { isPossiblePhone } from "./_phone.js";
 import { pyStrip } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
+import { TABLES } from "./_tables.js";
 
 export interface ContactMapperOptions {
   patterns?: PatternData;
@@ -57,21 +58,14 @@ const MAX_REWRITE_HEADER_LEN = 200;
  * itself, so the bare group ("e_mail") may stand in for it. Python:
  * `_VALUE_PROPERTIES`.
  */
-const VALUE_PROPERTIES = new Set(["value", "address", "number", "url", "formatted"]);
+const VALUE_PROPERTIES = new Set(TABLES.value_properties);
 
 /**
  * Trailing words that describe another column instead of holding a value
  * ("E-mail 1 - Type", "E-mail Display Name", "Phone Ext"). Python:
  * `_QUALIFIER_TAILS`.
  */
-const QUALIFIER_TAILS: readonly (readonly string[])[] = [
-  ["display", "name"],
-  ["type"],
-  ["label"],
-  ["kind"],
-  ["ext"],
-  ["extension"],
-];
+const QUALIFIER_TAILS: readonly (readonly string[])[] = TABLES.qualifier_tails;
 
 /**
  * The qualifier a header ends with ("type", "display_name") after at least one
@@ -102,7 +96,7 @@ const VALUE_BEARING_FIELDS = valueBearingFields();
 // Suffixes marking a header as naming a reference rather than holding a value.
 // An explicit alias in patterns.json still wins: the truth table is allowed to
 // say that a given export's "<platform>_id" really is the handle.
-const REFERENCE_SUFFIX_RE = /_(?:id|ids|uuid|guid|key|ref|fk)$/;
+const REFERENCE_SUFFIX_RE = new RegExp("_(?:" + TABLES.header_hints.reference_suffixes.join("|") + ")$");
 
 function isReferenceHeader(header: string): boolean {
   return REFERENCE_SUFFIX_RE.test(underscore(splitCamel(header)));
@@ -428,15 +422,18 @@ function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | und
   );
 }
 
-const SOCIAL_URL_PATTERNS: Array<[string, RegExp]> = [
-  ["linkedin", /^https?:\/\/(www\.)?linkedin\.com\/(in|company|pub|school)\//i],
-  ["twitter", /^https?:\/\/(www\.)?(twitter\.com|x\.com)\/[a-zA-Z0-9_]+\/?$/i],
-  ["instagram", /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9_.]+\/?$/i],
-  ["github", /^https?:\/\/(www\.)?github\.com\/[a-zA-Z0-9-]+\/?$/i],
-  ["facebook", /^https?:\/\/(www\.)?(facebook\.com|fb\.com)\/[a-zA-Z0-9.]+\/?$/i],
-  ["youtube", /^https?:\/\/(www\.)?youtube\.com\/((channel|c)\/[a-zA-Z0-9_-]+|@[a-zA-Z0-9_-]+)\/?$/i],
-  ["tiktok", /^https?:\/\/(www\.)?tiktok\.com\/@[a-zA-Z0-9_.]+\/?$/i],
-];
+const SOCIAL_URL_PATTERNS: Array<[string, RegExp]> = TABLES.social_urls.map(
+  (def): [string, RegExp] => [
+    def.canonical,
+    new RegExp(
+      "^https?://(www\\.)?(?:" +
+        def.domains.map((domain) => domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
+        ")/" +
+        def.path,
+      "i",
+    ),
+  ],
+);
 
 const HEURISTIC_PATTERNS: Array<[string, RegExp]> = [
   ["email", /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/],
@@ -454,34 +451,17 @@ const HEURISTIC_PATTERNS: Array<[string, RegExp]> = [
   ["birthday", /^\d{1,2}\.\d{1,2}\.\d{2,4}$/],
 ];
 
-const PHONE_HEADER_HINTS = new Set(["cell", "fax", "mobile", "phone", "phones", "sms", "tel", "telephone", "whatsapp"]);
+const PHONE_HEADER_HINTS = new Set(TABLES.header_hints.phone);
 // A bare five-digit run is the one genuinely ambiguous postal shape: an order
 // total, an account balance and a US ZIP are indistinguishable as values, so
 // filing "45000" as a postal code is a coin flip. Like the phone and birthday
 // shapes, require corroboration from the header for that pattern alone; the
 // alphanumeric shapes (K1A 0B1, SW1A 1AA) and ZIP+4 stand on their own.
 const AMBIGUOUS_POSTAL_RE = /^\d{5}$/;
-const POSTAL_HEADER_HINTS = new Set([
-  "cep",
-  "cp",
-  "eircode",
-  "pincode",
-  "plz",
-  "postal",
-  "postalcode",
-  "postcode",
-  "zip",
-  "zipcode",
-]);
-const POSTAL_HEADER_PHRASES = new Set([
-  "postal_code",
-  "post_code",
-  "zip_code",
-  "codigo_postal",
-  "code_postal",
-]);
-const BIRTHDAY_HEADER_HINTS = new Set(["birth", "birthday", "birthdate", "bday", "dob"]);
-const BIRTHDAY_HEADER_PHRASES = new Set(["birth_date", "date_of_birth", "day_of_birth"]);
+const POSTAL_HEADER_HINTS = new Set(TABLES.header_hints.postal);
+const POSTAL_HEADER_PHRASES = new Set(TABLES.header_hints.postal_phrases);
+const BIRTHDAY_HEADER_HINTS = new Set(TABLES.header_hints.birthday);
+const BIRTHDAY_HEADER_PHRASES = new Set(TABLES.header_hints.birthday_phrases);
 
 function headerTerms(header: string): { normalized: string; terms: Set<string> } {
   const normalized = underscore(splitCamel(header));

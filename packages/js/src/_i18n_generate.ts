@@ -10,27 +10,10 @@ import type { AsyncTranslateFunction, GenerateLanguageAsyncOptions, GenerateLang
 import { assertPythonOptionsKeys, isPlainObject, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, pythonRangePositionalTypeError, valueError } from "./_pycompat.js";
 import { loadDefaultPatterns } from "./_registry.js";
 import { require } from "./_runtime.js";
+import { TABLES } from "./_tables.js";
 let unidecode: ((value: string) => string) | undefined;
 
-const I18N_SKIP_FIELDS = new Set([
-  "created_at",
-  "updated_at",
-  "last_contacted",
-  "utm_parameters",
-  "metadata",
-  "score",
-  "owner",
-  "tags",
-  "lead_status",
-  "lifecycle_stage",
-  "email_opt_out",
-  "currency",
-  "source",
-  "referrer_url",
-  "timezone",
-  "discord",
-  "telegram",
-]);
+const I18N_SKIP_FIELDS = new Set([...TABLES.i18n_skip.timestamp, ...TABLES.i18n_skip.crm, ...TABLES.i18n_skip.platform]);
 
 function asciiFold(text: string): string | undefined {
   const stripped = text.normalize("NFKD").replace(/\p{Diacritic}/gu, "").trim();

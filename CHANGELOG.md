@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One data file for the tables both packages keep.** The confidence
+  values, field groups, header prefixes and hints, social URL patterns,
+  country and state tables, casing word lists, the Mac/Mc exceptions and the
+  40-language table now live in `tables.json`, beside `patterns.json`. Both
+  packages read it (the wheel ships it; the npm build copies it into `dist`),
+  so the two can no longer drift. The exported constant names are unchanged,
+  and no verdict, cleaned value or warning changes. In the npm type
+  declarations the seven confidence constants are typed `number` (they were
+  their literal values, such as `1`). A test fails if the npm package's
+  name-particle list names a particle nameparser does not know; it found
+  `bon` and `heer`, which nameparser 2.8 dropped, so Python now adds them back
+  itself and keeps them lowercase inside a name on every nameparser version,
+  as npm does.
 - **A header that starts with "Your" resolves without the fuzzy layer.**
   Form exports title a column with the question the person answered ("Your
   company name", "Your work email", "Your billing city"). The normalized

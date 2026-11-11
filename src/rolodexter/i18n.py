@@ -58,6 +58,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
+from ._tables import TABLES
+
 DEFAULT_TRANSLATE_TIMEOUT: float = 10.0
 DEFAULT_TRANSLATE_RETRIES: int = 1
 DEFAULT_TRANSLATE_RETRY_BACKOFF: float = 0.5
@@ -87,46 +89,7 @@ __all__ = [
 # The translation code is what deep-translator/Google Translate expects.
 
 SUPPORTED_LANGUAGES: dict[str, tuple[str, str]] = {
-    "es": ("es", "Spanish"),
-    "fr": ("fr", "French"),
-    "de": ("de", "German"),
-    "pt": ("pt", "Portuguese"),
-    "it": ("it", "Italian"),
-    "nl": ("nl", "Dutch"),
-    "pl": ("pl", "Polish"),
-    "ro": ("ro", "Romanian"),
-    "tr": ("tr", "Turkish"),
-    "ru": ("ru", "Russian"),
-    "ja": ("ja", "Japanese"),
-    "zh": ("zh-CN", "Chinese (Simplified)"),
-    "ko": ("ko", "Korean"),
-    "ar": ("ar", "Arabic"),
-    "hi": ("hi", "Hindi"),
-    "sv": ("sv", "Swedish"),
-    "da": ("da", "Danish"),
-    "nb": ("no", "Norwegian"),
-    "fi": ("fi", "Finnish"),
-    "cs": ("cs", "Czech"),
-    "uk": ("uk", "Ukrainian"),
-    "el": ("el", "Greek"),
-    "hu": ("hu", "Hungarian"),
-    "th": ("th", "Thai"),
-    "vi": ("vi", "Vietnamese"),
-    "id": ("id", "Indonesian"),
-    "ms": ("ms", "Malay"),
-    "he": ("iw", "Hebrew"),
-    "bg": ("bg", "Bulgarian"),
-    "hr": ("hr", "Croatian"),
-    "sk": ("sk", "Slovak"),
-    "sl": ("sl", "Slovenian"),
-    "sr": ("sr", "Serbian"),
-    "lt": ("lt", "Lithuanian"),
-    "lv": ("lv", "Latvian"),
-    "et": ("et", "Estonian"),
-    "ca": ("ca", "Catalan"),
-    "tl": ("tl", "Filipino"),
-    "sw": ("sw", "Swahili"),
-    "af": ("af", "Afrikaans"),
+    code: (pair[0], pair[1]) for code, pair in TABLES["languages"].items()
 }
 
 
@@ -438,31 +401,14 @@ def _translate_batch_on(  # pylint: disable=too-many-arguments
 # just decide *why* it's skipped and add it to the right set.
 
 # Timestamps — machine-generated, never user-labeled in other languages
-_TIMESTAMP_SKIP: frozenset[str] = frozenset(
-    {"created_at", "updated_at", "last_contacted"}
-)
+_TIMESTAMP_SKIP: frozenset[str] = frozenset(TABLES["i18n_skip"]["timestamp"])
 
 # CRM / pipeline internals — English-only technical concepts
-_CRM_SKIP: frozenset[str] = frozenset(
-    {
-        "utm_parameters",
-        "metadata",
-        "score",
-        "owner",
-        "tags",
-        "lead_status",
-        "lifecycle_stage",
-        "email_opt_out",
-        "currency",
-        "source",
-        "referrer_url",
-        "timezone",
-    }
-)
+_CRM_SKIP: frozenset[str] = frozenset(TABLES["i18n_skip"]["crm"])
 
 # Niche platforms whose name IS the universal label
 # (major platforms like linkedin/twitter/facebook DO get translated aliases)
-_PLATFORM_SKIP: frozenset[str] = frozenset({"discord", "telegram"})
+_PLATFORM_SKIP: frozenset[str] = frozenset(TABLES["i18n_skip"]["platform"])
 
 _SKIP_FIELDS: frozenset[str] = _TIMESTAMP_SKIP | _CRM_SKIP | _PLATFORM_SKIP
 

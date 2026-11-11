@@ -1,0 +1,4 @@
+export interface SocialUrlDef { readonly canonical: string; readonly domains: readonly string[]; readonly path: string; }
+  readonly canonical: string
+  readonly domains: readonly string[]
+  readonly path: string

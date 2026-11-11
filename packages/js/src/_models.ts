@@ -2,14 +2,15 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { lockPythonFrozenFields, pyRepr, pyStrip, pythonEquals, pythonIncludes, pythonLiteral, setOwnProperty } from "./_pycompat.js";
+import { TABLES } from "./_tables.js";
 
-export const EXACT_MATCH_CONFIDENCE = 1.0;
-export const NORMALIZED_MATCH_CONFIDENCE = 0.95;
-export const FUZZY_MATCH_THRESHOLD = 80;
-export const FUZZY_HIGH_CONFIDENCE = 0.85;
-export const FUZZY_LOW_CONFIDENCE = 0.7;
-export const FUZZY_LENGTH_RATIO = 0.75;
-export const HEURISTIC_CONFIDENCE = 0.6;
+export const EXACT_MATCH_CONFIDENCE: number = TABLES.confidence.exact;
+export const NORMALIZED_MATCH_CONFIDENCE: number = TABLES.confidence.normalized;
+export const FUZZY_MATCH_THRESHOLD: number = TABLES.confidence.fuzzy_threshold;
+export const FUZZY_HIGH_CONFIDENCE: number = TABLES.confidence.fuzzy_high;
+export const FUZZY_LOW_CONFIDENCE: number = TABLES.confidence.fuzzy_low;
+export const FUZZY_LENGTH_RATIO: number = TABLES.confidence.fuzzy_length_ratio;
+export const HEURISTIC_CONFIDENCE: number = TABLES.confidence.heuristic;
 
 export class RolodexterError extends Error {
   constructor(message?: string) {
@@ -354,72 +355,22 @@ function canonicalFieldValue(canonicalField: CanonicalFieldValue): string {
   return typeof canonicalField === "string" ? canonicalField : canonicalField.value;
 }
 
-const PHONE_FIELDS = new Set(["phone", "home_phone", "work_phone", "fax", "whatsapp"]);
-const NAME_FIELDS = new Set([
-  "first_name",
-  "last_name",
-  "full_name",
-  "middle_name",
-  "nickname",
-  "prefix",
-  "suffix",
-]);
-const ADDRESS_FIELDS = new Set(["address_line1", "address_line2", "city", "full_address"]);
-const BOOLEAN_FIELDS = new Set(["email_opt_out", "subscribed", "verified"]);
-const LIST_FIELDS = new Set(["tags"]);
-const DATE_FIELDS = new Set(["birthday", "created_at", "updated_at", "last_contacted"]);
-const SOCIAL_FIELDS = new Set([
-  "website",
-  "linkedin",
-  "twitter",
-  "facebook",
-  "instagram",
-  "github",
-  "youtube",
-  "tiktok",
-  "discord",
-  "telegram",
-]);
+const PHONE_FIELDS = new Set(TABLES.field_sets.phone);
+const NAME_FIELDS = new Set(TABLES.field_sets.name);
+const ADDRESS_FIELDS = new Set(TABLES.field_sets.address);
+const BOOLEAN_FIELDS = new Set(TABLES.field_sets.boolean);
+const LIST_FIELDS = new Set(TABLES.field_sets.list);
+const DATE_FIELDS = new Set(TABLES.field_sets.date);
+const SOCIAL_FIELDS = new Set(TABLES.field_sets.social);
 
-const COMPANY_PREFIXES = new Set([
-  "account",
-  "accounts",
-  "org",
-  "organization",
-  "organisations",
-  "organizations",
-  "organisation",
-  "company",
-  "companies",
-  "firm",
-  "business",
-  "enterprise",
-]);
+const COMPANY_PREFIXES = new Set(TABLES.prefixes.company);
 
-const VENDOR_PREFIXES = [
-  "hs_",
-  "hubspot_",
-  "sf_",
-  "salesforce_",
-  "sl_",
-  "smartlead_",
-];
+const VENDOR_PREFIXES = [...TABLES.prefixes.vendor];
 
 // Same set as the form_prefixes Python keeps through _ADDRESS_CONTEXT_TERMS.
 // "contact_" ("Contact Province") reached its field by fuzzy containment until
 // FUZZY_LENGTH_RATIO went to 0.75; stripping it reaches the field directly.
-const ADDRESS_PREFIXES = [
-  "contact_",
-  "business_",
-  "mailing_",
-  "home_",
-  "other_",
-  "personal_",
-  "shipping_",
-  "billing_",
-  "primary_",
-  "secondary_",
-];
+const ADDRESS_PREFIXES = TABLES.prefixes.address_context.map((term) => `${term}_`);
 
 function isMatched(match: FieldMatch): boolean {
   return match.canonical !== UNKNOWN_MATCH;

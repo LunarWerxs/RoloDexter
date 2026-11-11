@@ -8,49 +8,9 @@ import { fileURLToPath } from "node:url";
 import type { LanguageData } from "./_models.js";
 import { emitRolodexterWarning, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, pythonTypeName } from "./_pycompat.js";
 import { moduleUrl } from "./_runtime.js";
+import { TABLES } from "./_tables.js";
 
-export const SUPPORTED_LANGUAGES: Record<string, readonly [string, string]> = Object.freeze({
-  es: ["es", "Spanish"],
-  fr: ["fr", "French"],
-  de: ["de", "German"],
-  pt: ["pt", "Portuguese"],
-  it: ["it", "Italian"],
-  nl: ["nl", "Dutch"],
-  pl: ["pl", "Polish"],
-  ro: ["ro", "Romanian"],
-  tr: ["tr", "Turkish"],
-  ru: ["ru", "Russian"],
-  ja: ["ja", "Japanese"],
-  zh: ["zh-CN", "Chinese (Simplified)"],
-  ko: ["ko", "Korean"],
-  ar: ["ar", "Arabic"],
-  hi: ["hi", "Hindi"],
-  sv: ["sv", "Swedish"],
-  da: ["da", "Danish"],
-  nb: ["no", "Norwegian"],
-  fi: ["fi", "Finnish"],
-  cs: ["cs", "Czech"],
-  uk: ["uk", "Ukrainian"],
-  el: ["el", "Greek"],
-  hu: ["hu", "Hungarian"],
-  th: ["th", "Thai"],
-  vi: ["vi", "Vietnamese"],
-  id: ["id", "Indonesian"],
-  ms: ["ms", "Malay"],
-  he: ["iw", "Hebrew"],
-  bg: ["bg", "Bulgarian"],
-  hr: ["hr", "Croatian"],
-  sk: ["sk", "Slovak"],
-  sl: ["sl", "Slovenian"],
-  sr: ["sr", "Serbian"],
-  lt: ["lt", "Lithuanian"],
-  lv: ["lv", "Latvian"],
-  et: ["et", "Estonian"],
-  ca: ["ca", "Catalan"],
-  tl: ["tl", "Filipino"],
-  sw: ["sw", "Swahili"],
-  af: ["af", "Afrikaans"],
-});
+export const SUPPORTED_LANGUAGES: Record<string, readonly [string, string]> = Object.freeze({ ...TABLES.languages });
 
 function packageI18nDir(): string | undefined {
   const path = fileURLToPath(new URL("./i18n", moduleUrl));
