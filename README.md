@@ -33,10 +33,12 @@ RoloDexter is maintained as a dual-package repository:
 | Python | `rolodexter` | [`src/rolodexter`](src/rolodexter) | [`pyproject.toml`](pyproject.toml) | [PyPI](https://pypi.org/project/rolodexter/) |
 | JavaScript / TypeScript | `rolodexter` | [`packages/js/src`](packages/js/src) | [`packages/js/package.json`](packages/js/package.json) | [npm](https://www.npmjs.com/package/rolodexter) |
 
-The Python package remains the canonical implementation and owns the shared
-`patterns.json` alias table. The NPM package lives under `packages/js`, syncs
-that alias table during build, and has its own README, TypeScript sources,
-tests, package metadata, and publish workflow.
+The Python package remains the canonical implementation and owns the two
+shared data files: the `patterns.json` alias table and `tables.json`, which
+holds the confidence values, header prefixes and hints, social URL patterns,
+country and state tables, casing word lists and the 40-language table. The NPM
+package lives under `packages/js`, syncs both files during build, and has its
+own README, TypeScript sources, tests and package metadata.
 
 ## The Problem
 
@@ -516,7 +518,8 @@ src/rolodexter/
 ├── core.py          # ContactMapper, PatternRegistry, strategies, normalizers
 ├── _phone.py        # E.164 phone parser (wraps libphonenumber)
 ├── i18n.py          # On-demand i18n generator (40 languages, cached)
-└── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
+├── patterns.json    # Master alias table (600+ aliases, 62 canonical fields)
+└── tables.json      # Shared data tables both packages read (confidence, geo, word lists)
 ```
 
 ## Contributing
