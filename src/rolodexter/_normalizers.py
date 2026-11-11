@@ -220,6 +220,46 @@ _NOT_MAC_NAMES: frozenset[str] = frozenset(
 _MAC_CASED_RE = re.compile(r"^(?:Mac|Mc)[A-Z]")
 
 
+# nameparser 1.x's suffix acronyms that 2.8 does not write in capitals: it
+# writes the first group in mixed case ("BSc", "MDiv") or as a word ("Esq"),
+# and reads the second as a family name ("Thi Mai", "Kim Sa"). Derived by
+# running every 1.4.0 suffix acronym through nameparser 2.8.2.
+_NOT_CAPITALIZED_SUFFIXES = frozenset(
+    {
+        "bsc", "bt", "chfc", "cpht", "diplac", "dmin", "drph", "dsc", "esq",
+        "kt", "mdiv", "msc", "pharmd", "phc", "phd", "psyd", "rph", "thd",
+        "thm",
+        "ap", "cha", "gc", "leed", "mai", "nicet", "ph", "rai", "sa", "sra",
+    }
+)  # fmt: skip
+
+
+def _case_like_modern_nameparser(hn: Any) -> None:
+    """Case a capitalized ``HumanName`` (nameparser < 2.8) as 2.8 and npm do.
+
+    nameparser 1.x lowercases a family name made only of a particle
+    ("Jennifer le", "Ludwig van") and title-cases a credential suffix
+    ("Cpa", "Mba"); 2.x and the JavaScript package write "Jennifer Le" and
+    "CPA". A particle inside a name ("Jean le Pen") is not the family name on
+    its own, so it is left as nameparser cased it. Releases 2.0-2.7 already
+    case both, and their ``HumanName`` refuses assignment, so nothing is
+    assigned unless it changes.
+    """
+    if hn.last and hn.last.islower():
+        hn.last = hn.last[:1].upper() + hn.last[1:]
+    acronyms = hn.C.suffix_acronyms
+    suffixes = [
+        word.upper()
+        if word.isalpha()
+        and word.lower() in acronyms
+        and word.lower() not in _NOT_CAPITALIZED_SUFFIXES
+        else word
+        for word in hn.suffix_list
+    ]
+    if suffixes != list(hn.suffix_list):
+        hn.suffix_list = suffixes
+
+
 def _undo_unwanted_mac_case(source: str, result: str) -> str:
     """Re-case a "MacHado" nameparser made where the Mac rule does not belong.
 
@@ -395,6 +435,7 @@ class NameNormalizer:
                 _protect_bom(text.lower()), constants=cls._nameparser_constants()
             )
             hn.capitalize()
+            _case_like_modern_nameparser(hn)
             result = _unprotect_bom(str(hn))
         # ``nameparser`` >= 1.2 leaves a *leading* recognized particle
         # lowercase (e.g. "ter braak" -> "ter Braak"), whereas older

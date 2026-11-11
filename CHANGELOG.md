@@ -191,7 +191,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Mackenzie` are no longer re-cased to `MacHado` and so on: the Mac/Mc rule
   applies only to a name that arrived all upper or all lower and is not on a
   34-name list kept the same in both packages. npm: `Jennifer Le` keeps `Le`,
-  and `CPA`, `M.D.` and `Ph.D.` are cased as written.
+  and `CPA`, `M.D.` and `Ph.D.` are cased as written. Python gives the same on
+  nameparser 1.x (what pip installs on Python 3.10), which wrote
+  `Jennifer le` and `Cpa`.
 - **Phone numbers that start with `011` or `00` are read in the given region
   first.** With a region set, both packages parse the number in that region
   before treating a leading `011` / `00` as a dial-out prefix, so Johannesburg
