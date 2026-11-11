@@ -51,6 +51,7 @@ function simplify(value) {
   if (typeof value === "boolean" || typeof value === "number") return { n: num(value) };
   if (Array.isArray(value)) return value.map(simplify);
   const name = value.constructor?.name;
+  if (name === "MappingMatches") return sortedObject(value.entries());
   if (name === "MappingResult") {
     return {
       normalized: simplify(value.normalized),

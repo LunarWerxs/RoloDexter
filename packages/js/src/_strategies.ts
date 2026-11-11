@@ -28,13 +28,65 @@ function splitCamel(value: string): string {
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2");
 }
 
+// Python's `\w` on text is Unicode-aware (letters and digits of any script,
+// plus "_"); JS's `\w` is ASCII-only and would turn "Teléfono" into "tel_fono".
+const NON_WORD_RE = /[^\p{L}\p{N}_]/gu;
+// Python's str.isupper(), which the camelCase checks use (the split itself
+// stays ASCII, as Python's [a-z]/[A-Z] pattern does).
+const UPPERCASE_RE = /\p{Lu}/u;
+
 function underscore(value: string): string {
   return value
     .replace(/[\s-]+/g, "_")
     .toLowerCase()
-    .replace(/[^\w]/g, "_")
+    .replace(NON_WORD_RE, "_")
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * Headers longer than this skip the rewrite (normalized) and fuzzy layers; the
+ * exact lookup still runs. Header text is as attacker-controlled as a cell
+ * value, and the indexed-header pattern backtracks quadratically on long runs
+ * of spaces. Python: `_MAX_REWRITE_HEADER_LEN`.
+ */
+const MAX_REWRITE_HEADER_LEN = 200;
+
+/**
+ * The property of a "Group N - Property" header that names the group's value
+ * itself, so the bare group ("e_mail") may stand in for it. Python:
+ * `_VALUE_PROPERTIES`.
+ */
+const VALUE_PROPERTIES = new Set(["value", "address", "number", "url", "formatted"]);
+
+/**
+ * Trailing words that describe another column instead of holding a value
+ * ("E-mail 1 - Type", "E-mail Display Name", "Phone Ext"). Python:
+ * `_QUALIFIER_TAILS`.
+ */
+const QUALIFIER_TAILS: readonly (readonly string[])[] = [
+  ["display", "name"],
+  ["type"],
+  ["label"],
+  ["kind"],
+  ["ext"],
+  ["extension"],
+];
+
+/**
+ * The qualifier a header ends with ("type", "display_name") after at least one
+ * other word, ignoring index numbers; else undefined. Python: `_qualifier_tail`.
+ */
+function qualifierTail(header: string): string | undefined {
+  const words = underscore(splitCamel(pyStrip(header)))
+    .split("_")
+    .filter((word) => word && !/^\p{Nd}+$/u.test(word));
+  for (const tail of QUALIFIER_TAILS) {
+    if (words.length > tail.length && tail.every((word, i) => words[words.length - tail.length + i] === word)) {
+      return tail.join("_");
+    }
+  }
+  return undefined;
 }
 
 // Fields that hold a contactable value rather than a reference to a record.
@@ -77,8 +129,9 @@ function pushDotSuffixCandidates(h: string, out: string[]): void {
   if (suffixLower) {
     out.push(suffixLower);
   }
-  if (/[A-Z]/.test(suffixRaw.slice(1))) {
-    const snakeSuffix = splitCamel(suffixRaw).toLowerCase().replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  if (UPPERCASE_RE.test(suffixRaw.slice(1))) {
+    // Python: _normalize_header(suffix_raw) (camel split, then non-word runs to "_").
+    const snakeSuffix = underscore(splitCamel(suffixRaw));
     if (snakeSuffix && snakeSuffix !== suffixLower) {
       out.push(snakeSuffix);
     }
@@ -87,22 +140,32 @@ function pushDotSuffixCandidates(h: string, out: string[]): void {
 
 /** Push the indexed-group ("Phone 1 - Value") derived candidates for header `h` onto `out`. */
 function pushIndexedCandidates(h: string, out: string[]): void {
-  const indexed = /^(.+?)\s+\d+\s*(?:[-\u2013\u2014]\s*)?(.+)$/.exec(h);
+  const indexed = /^(.+?)\s+\p{Nd}+\s*(?:[-\u2013\u2014]\s*)?(.+)$/u.exec(h);
   if (!indexed) {
     return;
   }
   const group = pyStrip(indexed[1] ?? "").replace(/[\s-]+/g, "_").toLowerCase();
   const prop = pyStrip(indexed[2] ?? "").replace(/[\s-]+/g, "_").toLowerCase();
   if (group && prop) {
-    out.push(`${group}_${prop}`, prop, group);
+    // organization_name, name; the bare group ("e_mail") only when the property
+    // names the group's value, never for "Type" or "Label".
+    out.push(`${group}_${prop}`, prop);
+    if (VALUE_PROPERTIES.has(prop)) {
+      out.push(group);
+    }
   }
 }
 
 /** A header addressed to the person filling a form ("Your company name"). */
 const READER_PREFIX = "your_";
 
-/** Push vendor/address prefix-stripped variants of `uscore` onto `out`. */
-function pushPrefixCandidates(uscore: string, out: string[]): void {
+/**
+ * Push vendor/address prefix-stripped variants of `uscore` onto `out`. What is
+ * left after "contact_" is kept off a value field when it names a reference:
+ * contact_email_id is the contact's email record, not an email address.
+ * Python: `NormalizedMatchStrategy._candidates_context_stripped`.
+ */
+function pushPrefixCandidates(uscore: string, out: string[], registry: PatternRegistry): void {
   for (const prefix of VENDOR_PREFIXES) {
     if (uscore.startsWith(prefix)) {
       out.push(uscore.slice(prefix.length));
@@ -110,7 +173,11 @@ function pushPrefixCandidates(uscore: string, out: string[]): void {
   }
   for (const prefix of ADDRESS_PREFIXES) {
     if (uscore.startsWith(prefix)) {
-      out.push(uscore.slice(prefix.length));
+      const rest = uscore.slice(prefix.length);
+      if (prefix === "contact_" && isReferenceHeader(rest) && isValueBearing(registry, rest)) {
+        continue;
+      }
+      out.push(rest);
     }
   }
 }
@@ -121,7 +188,7 @@ function pushPrefixCandidates(uscore: string, out: string[]): void {
  * Form exports title a column with the question the person answered. Python:
  * `NormalizedMatchStrategy._candidates_reader_prefix`. Added in 2.14.0.
  */
-function pushReaderPrefixCandidates(uscore: string, out: string[]): void {
+function pushReaderPrefixCandidates(uscore: string, out: string[], registry: PatternRegistry): void {
   if (!uscore.startsWith(READER_PREFIX)) {
     return;
   }
@@ -130,7 +197,7 @@ function pushReaderPrefixCandidates(uscore: string, out: string[]): void {
     return;
   }
   out.push(rest);
-  pushPrefixCandidates(rest, out);
+  pushPrefixCandidates(rest, out, registry);
 }
 
 /** Push `_id`-stripped bases (and their vendor-prefix-stripped inner forms) for existing candidates onto `out`. */
@@ -166,8 +233,9 @@ function normalizedCandidates(header: string, registry: PatternRegistry): string
     out.push(uscore);
   }
 
-  if (/[A-Z]/.test(h.slice(1))) {
-    const snake = splitCamel(h).toLowerCase().replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  if (UPPERCASE_RE.test(h.slice(1))) {
+    // Python: _normalize_header(h) (camel split, then non-word runs to "_").
+    const snake = underscore(splitCamel(h));
     if (snake && snake !== uscore) {
       out.push(snake);
     }
@@ -176,32 +244,38 @@ function normalizedCandidates(header: string, registry: PatternRegistry): string
   pushDotSuffixCandidates(h, out);
   pushIndexedCandidates(h, out);
 
-  const numStripped = uscore.replace(/_\d+/g, "").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  const numStripped = uscore.replace(/_\p{Nd}+/gu, "").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
   if (numStripped && numStripped !== uscore) {
     out.push(numStripped);
   }
 
-  pushPrefixCandidates(uscore, out);
-  pushReaderPrefixCandidates(uscore, out);
+  pushPrefixCandidates(uscore, out, registry);
+  pushReaderPrefixCandidates(uscore, out, registry);
   pushIdBaseCandidates(out, registry);
 
   return out;
 }
 
 function fuzzyClean(header: string): string {
-  return pyStrip(header.toLowerCase()).replace(/[^\w]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return pyStrip(header.toLowerCase()).replace(NON_WORD_RE, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+// Headers on which fuzzball's ratio/partial_ratio pair (scored by fuzzyScore
+// below) and rapidfuzz's WRatio still pick a different field or confidence
+// tier: the recorded Python verdict. Every other header is scored here and
+// agrees with Python without an entry (e.g. phone_ext, ownerid and
+// reply_to_email are unmatched in both).
 const PYTHON_FUZZY_COMPAT = new Map<string, { canonical: string; confidence: number } | null>([
-  ["replyt", { canonical: "owner", confidence: FUZZY_HIGH_CONFIDENCE }],
-  ["tel_nationa", { canonical: "country", confidence: FUZZY_HIGH_CONFIDENCE }],
-  ["tl_national", { canonical: "country", confidence: FUZZY_HIGH_CONFIDENCE }],
-  ["streetaddress2", { canonical: "address_line2", confidence: FUZZY_HIGH_CONFIDENCE }],
-  ["address_level", { canonical: "address_line1", confidence: FUZZY_HIGH_CONFIDENCE }],
+  ["replyt", { canonical: "email", confidence: FUZZY_LOW_CONFIDENCE }],
+  ["repyto", { canonical: "email", confidence: FUZZY_LOW_CONFIDENCE }],
   ["rplyto", { canonical: "email", confidence: FUZZY_LOW_CONFIDENCE }],
+  ["tel_nationa", { canonical: "phone", confidence: FUZZY_LOW_CONFIDENCE }],
+  ["tl_national", { canonical: "phone", confidence: FUZZY_LOW_CONFIDENCE }],
   ["tel_naitonal", { canonical: "phone", confidence: FUZZY_LOW_CONFIDENCE }],
   ["tel_loca", { canonical: "phone", confidence: FUZZY_LOW_CONFIDENCE }],
   ["tl_local", { canonical: "phone", confidence: FUZZY_LOW_CONFIDENCE }],
+  ["streetaddress2", { canonical: "address_line2", confidence: FUZZY_HIGH_CONFIDENCE }],
+  ["address_level", { canonical: "city", confidence: FUZZY_LOW_CONFIDENCE }],
   ["street_line", { canonical: "address_line1", confidence: FUZZY_HIGH_CONFIDENCE }],
   ["ddress_line3", { canonical: "address_line2", confidence: FUZZY_LOW_CONFIDENCE }],
   ["ddress_level2", { canonical: "city", confidence: FUZZY_LOW_CONFIDENCE }],
@@ -215,21 +289,74 @@ function fuzzyScore(a: string, b: string): number {
   if (direct >= 85) {
     return direct;
   }
+  // An alias far shorter than the header (or the reverse) gets no partial
+  // credit: "phone" inside "phone_ext" is a qualifier on the phone, not the
+  // phone. Python reaches the same verdict through FUZZY_LENGTH_RATIO.
   const shorter = Math.min(a.length, b.length);
   const longer = Math.max(a.length, b.length);
+  if (!(longer > 0 && shorter / longer >= FUZZY_LENGTH_RATIO)) {
+    return direct;
+  }
   const partial = fuzzyPartialRatio(a, b);
   if (partial === 100) {
     return Math.max(direct, 90);
   }
-  if (longer > 0 && shorter / longer >= FUZZY_LENGTH_RATIO) {
-    if (partial >= 85) {
-      return Math.max(direct, Math.round(partial * 0.95));
-    }
+  if (partial >= 85) {
+    return Math.max(direct, Math.round(partial * 0.95));
   }
   return direct;
 }
 
+interface LengthIndex {
+  aliases: string[];
+  lengths: number[];
+}
+
+// A registry's aliases are fixed once it is built (languages and overrides are
+// applied in its constructor), so each registry's length-sorted alias list is
+// computed once instead of copied and filtered on every fuzzy miss.
+const LENGTH_INDEXES = new WeakMap<PatternRegistry, LengthIndex>();
+
+function lengthIndex(registry: PatternRegistry): LengthIndex {
+  let index = LENGTH_INDEXES.get(registry);
+  if (!index) {
+    // Stable sort by length keeps registry order within a length, as Python's
+    // FuzzyMatchStrategy._get_length_index does, so ties resolve the same way.
+    const aliases = registry.all_aliases
+      .filter((alias) => alias.length > 2)
+      .sort((left, right) => left.length - right.length);
+    index = { aliases, lengths: aliases.map((alias) => alias.length) };
+    LENGTH_INDEXES.set(registry, index);
+  }
+  return index;
+}
+
+function lowerBound(values: number[], target: number, inclusive: boolean): number {
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (inclusive ? (values[mid] as number) <= target : (values[mid] as number) < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+/** Aliases whose length can pass FUZZY_LENGTH_RATIO against `cleanLength`. */
+function aliasesInLengthBand(registry: PatternRegistry, cleanLength: number): string[] {
+  const { aliases, lengths } = lengthIndex(registry);
+  const lo = lowerBound(lengths, Math.ceil(cleanLength * FUZZY_LENGTH_RATIO), false);
+  const hi = lowerBound(lengths, Math.floor(cleanLength / FUZZY_LENGTH_RATIO), true);
+  return aliases.slice(lo, hi);
+}
+
 function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | undefined {
+  if (header.length > MAX_REWRITE_HEADER_LEN || qualifierTail(header)) {
+    return undefined;
+  }
   const clean = fuzzyClean(header);
   if (!clean) {
     return undefined;
@@ -248,16 +375,7 @@ function fuzzyMatch(header: string, registry: PatternRegistry): FieldMatch | und
     const verdict = PYTHON_FUZZY_COMPAT.get(clean);
     return veto(verdict ? fieldMatch(header, verdict.canonical, verdict.confidence, "fuzzy") : undefined);
   }
-  if (clean === "reply_to_email") {
-    return undefined;
-  }
-  if (clean === "repyto") {
-    return veto(fieldMatch(header, "owner", FUZZY_HIGH_CONFIDENCE, "fuzzy"));
-  }
-  if (clean === "ownerid") {
-    return veto(fieldMatch(header, "owner", FUZZY_LOW_CONFIDENCE, "fuzzy"));
-  }
-  const aliases = registry.all_aliases.filter((alias) => alias.length > 2);
+  const aliases = aliasesInLengthBand(registry, clean.length);
   if (aliases.length === 0) {
     return undefined;
   }
@@ -423,6 +541,11 @@ function heuristicMatch(header: string, value: string | undefined, defaultRegion
     if (canonical === "postal_code" && AMBIGUOUS_POSTAL_RE.test(cleaned) && !hasPostalHeaderHint(header)) {
       continue;
     }
+    // "Phone 1 - Type" describes the phone column; a phone-shaped value in it
+    // is still not this contact's phone.
+    if (qualifierTail(header)) {
+      return undefined;
+    }
     return fieldMatch(header, canonical, HEURISTIC_CONFIDENCE, "heuristic");
   }
   return undefined;
@@ -507,7 +630,17 @@ export class NormalizedMatchStrategy extends MatchStrategy {
   }
 
   match(header: string): FieldMatch | undefined {
+    if (header.length > MAX_REWRITE_HEADER_LEN) {
+      return undefined;
+    }
+    // A qualifier header ("E-mail 1 - Type") may only match an alias that keeps
+    // the qualifier ("business_type"); dropping it ("e_mail", "label") would
+    // file the type label as the value.
+    const tail = qualifierTail(header);
     for (const candidate of normalizedCandidates(header, this.#registry)) {
+      if (tail !== undefined && !candidate.endsWith(`_${tail}`)) {
+        continue;
+      }
       const canonical = this.#registry.exact_lookup(candidate);
       if (canonical) {
         return fieldMatch(header, canonical, NORMALIZED_MATCH_CONFIDENCE, this.name);

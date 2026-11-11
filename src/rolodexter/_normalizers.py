@@ -6,8 +6,11 @@ Extracted verbatim from ``core.py``, which re-imports every name here so
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
+import math
+import numbers
 import re
 import threading
 from typing import Any
@@ -19,6 +22,29 @@ from ._text import _smart_titlecase
 # ═══════════════════════════════════════════════════════════════════════
 #  NORMALIZERS
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _whole_number_text(value: Any) -> str | None:
+    """The digit text of a whole number (``4155550100``, ``94107.0``), else None.
+
+    Phones and postcodes arrive as numbers from JSON and from spreadsheet or
+    DataFrame columns of digits.  ``True`` is not a number here, and a float
+    with a fraction is not a whole number.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, numbers.Integral):
+        return str(int(value))
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return None
+
+
+def _is_missing(value: Any) -> bool:
+    """True for an empty cell: ``None``, a float NaN, or pandas' ``NA``."""
+    if value is None or type(value).__name__ == "NAType":
+        return True
+    return isinstance(value, float) and math.isnan(value)
 
 
 class PhoneNormalizer:
@@ -34,6 +60,9 @@ class PhoneNormalizer:
 
     @classmethod
     def normalize(cls, value: str, *, default_region: str | None = None) -> str:
+        digits = _whole_number_text(value)
+        if digits is not None:
+            value = digits
         if not value or not isinstance(value, str):
             return value
 
@@ -171,6 +200,56 @@ def _modern_nameparser() -> bool:
     return isinstance(version, tuple) and tuple(version[:2]) >= (2, 8)
 
 
+# Names that begin "Mac"/"Mc" but are not Mac-names, so an all-caps or
+# all-lower spelling is not re-cased to "MacHado".  The JavaScript package
+# carries the same list in _names.ts.  Real Mac-names ("Macaulay",
+# "Macdonald") stay out so the rule still applies to them; "Mackenzie" is in
+# because the plain spelling is the usual one, as a given name especially.
+_NOT_MAC_NAMES: frozenset[str] = frozenset(
+    {
+        *("macaluso", "macario", "macarena", "macchia", "macchio", "mace"),
+        *("maceda", "macedo", "macedonio", "macek", "macey", "macha"),
+        *("machado", "machen", "machiavelli", "machin", "macho", "machowski"),
+        *("machuca", "macias", "maciej", "maciejewski", "maciel", "mack"),
+        *("mackenzie", "mackey", "mackie", "mackiewicz", "mackin", "macklin"),
+        *("mackowiak", "macon", "macri", "macy"),
+    }
+)
+
+# What nameparser's Mac/Mc rule produced: "MacHado", "McDonald".
+_MAC_CASED_RE = re.compile(r"^(?:Mac|Mc)[A-Z]")
+
+
+def _undo_unwanted_mac_case(source: str, result: str) -> str:
+    """Re-case a "MacHado" nameparser made where the Mac rule does not belong.
+
+    The rule fits only a word that arrived without casing of its own (all
+    upper or all lower) and is not a known non-Mac name: ``mcdonald`` and
+    ``MACARTHUR`` become ``McDonald`` and ``MacArthur``, while ``Machado``,
+    ``MACHADO`` and ``Mcdonald`` (cased that way by the source) keep the
+    plain spelling.  A word cased on purpose (``MacArthur``) is put back
+    afterwards by :func:`_restore_deliberate_capitals`.
+    """
+    sources: dict[str, str] = {}
+    for word in source.split():
+        for segment in _NAME_SEGMENT_RE.split(word):
+            sources.setdefault(segment.lower(), segment)
+    out: list[str] = []
+    for chunk in re.split(r"(\s+)", result):
+        pieces = _NAME_SEGMENT_RE.split(chunk)
+        for i, piece in enumerate(pieces):
+            if not _MAC_CASED_RE.match(piece):
+                continue
+            original = sources.get(piece.lower())
+            if original is None:
+                continue
+            uncased = original.isupper() or original.islower()
+            if not uncased or original.lower() in _NOT_MAC_NAMES:
+                pieces[i] = piece.capitalize()
+        out.append("".join(pieces))
+    return "".join(out)
+
+
 class NameNormalizer:
     """Normalize and parse names via ``nameparser``.
 
@@ -291,7 +370,14 @@ class NameNormalizer:
         text = value.strip()
         if not text:
             return value
+        # Keep the value when nameparser finds no name in it: 2.x returns an
+        # empty string for punctuation or invisible characters alone, where
+        # 1.x and the JavaScript package keep the value as written.
+        return _cased_name(text) or text
 
+    @classmethod
+    def _case(cls, text: str) -> str:
+        """Case one stripped, non-empty name; :func:`_cased_name` caches it."""
         from nameparser import HumanName  # legacy path only; 2.8+ warns on use
 
         # nameparser re-derives casing from an all-lowercase copy.  That is
@@ -317,6 +403,7 @@ class NameNormalizer:
         # without disturbing internal particle casing ("Jan van der Berg").
         if result[:1].islower():
             result = result[:1].upper() + result[1:]
+        result = _undo_unwanted_mac_case(text, result)
         result = _restore_deliberate_capitals(text, result)
         # nameparser 2.4 keeps a post-nominal "PhD" as written; 2.3 wrote
         # "Ph.D.", which the tests and the JavaScript package both return.
@@ -356,6 +443,13 @@ class NameNormalizer:
         }
 
 
+# Contact exports repeat the same names row after row; parsing one is the
+# costliest cleaning step, so each distinct stripped name is cased once.
+@functools.lru_cache(maxsize=4096)
+def _cased_name(text: str) -> str:
+    return NameNormalizer._case(text)  # pylint: disable=protected-access
+
+
 class AddressNormalizer:
     @staticmethod
     def normalize(value: str) -> str:
@@ -382,6 +476,9 @@ class PostalCodeNormalizer:
 
     @classmethod
     def normalize(cls, value: str) -> str:
+        digits = _whole_number_text(value)
+        if digits is not None:
+            value = digits
         if not value or not isinstance(value, str):
             return value
         cleaned = value.strip().upper()
@@ -401,13 +498,17 @@ class DateNormalizer:
     :func:`value_warnings`.  What is normalized:
 
     * already-ISO values, with or without a time part (``2024-03-15``,
-      ``2024-03-15T09:30:00Z``) — the time is dropped;
+      ``2024-03-15T09:30:00Z``) — the time is dropped, except on the
+      timestamp fields (``created_at``, ``updated_at``, ``last_contacted``),
+      which keep it and its zone (``2024-03-15T09:30:00Z``);
     * slash- or dot-separated values where one component is unambiguous
       because it exceeds 12 (``25/03/2024``, ``2024/03/15``, ``15.03.2024``);
     * ``YYYY/MM/DD``, where a four-digit leading year fixes the order.
 
     Two-digit years are treated as ambiguous and left alone: mapping ``68`` to
     1968 or 2068 is a guess of exactly the kind this class exists to avoid.
+    A day the month does not have (``2024-02-31``) is not a date and is left
+    unchanged.
 
     .. versionadded:: 2.11.0
     """
@@ -415,15 +516,58 @@ class DateNormalizer:
     _ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$")
     _YMD_RE = re.compile(r"^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$")
     _DMY_RE = re.compile(r"^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$")
+    # The time part of an ISO value: 09:30, 09:30:00, 09:30:00.123, then an
+    # optional zone (Z, +05:30, +0530, +05).
+    _TIME_RE = re.compile(
+        r"^[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?"
+        r"\s*(?:([Zz])|([+-])(\d{2}):?(\d{2})?)?$"
+    )
+    _MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
     @classmethod
     def _iso(cls, year: int, month: int, day: int) -> str | None:
-        if not 1 <= month <= 12 or not 1 <= day <= 31:
+        if not 1 <= month <= 12 or day < 1:
+            return None
+        leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        last = 29 if month == 2 and leap else cls._MONTH_DAYS[month - 1]
+        if day > last:
             return None
         return f"{year:04d}-{month:02d}-{day:02d}"
 
     @classmethod
+    def _iso_time(cls, tail: str) -> str | None:
+        """The ISO time and zone of *tail* (``" 9:30+0530"``), or None."""
+        m = cls._TIME_RE.match(tail)
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), int(m.group(2))
+        second = m.group(3)
+        if hour > 23 or minute > 59 or (second is not None and int(second) > 59):
+            return None
+        out = f"T{hour:02d}:{minute:02d}"
+        if second is not None:
+            out += f":{second}{m.group(4) or ''}"
+        if m.group(5):
+            out += "Z"
+        elif m.group(6):
+            zone_hour, zone_minute = int(m.group(7)), int(m.group(8) or 0)
+            if zone_hour > 14 or zone_minute > 59:
+                return None
+            out += f"{m.group(6)}{zone_hour:02d}:{zone_minute:02d}"
+        return out
+
+    @classmethod
     def normalize(cls, value: str) -> str:
+        return cls._normalize(value, keep_time=False)
+
+    @classmethod
+    def _normalize(cls, value: str, *, keep_time: bool) -> str:
+        """Return *value* as ``YYYY-MM-DD``, or unchanged when it is not a date.
+
+        With *keep_time* (the timestamp fields) an ISO value's time and zone
+        are kept (``2024-03-15T09:30:00Z``); a time part that cannot be read
+        leaves the value unchanged rather than losing it.
+        """
         if not value or not isinstance(value, str):
             return value
         text = value.strip()
@@ -433,7 +577,13 @@ class DateNormalizer:
         m = cls._ISO_RE.match(text) or cls._YMD_RE.match(text)
         if m:
             iso = cls._iso(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-            return iso if iso is not None else value
+            if iso is None:
+                return value
+            tail = text[m.end(3) :]
+            if keep_time and tail:
+                time = cls._iso_time(tail)
+                return iso + time if time is not None else value
+            return iso
 
         m = cls._DMY_RE.match(text)
         if m:
@@ -462,23 +612,43 @@ class DateNormalizer:
 
 
 class BooleanNormalizer:
-    """Normalize boolean-like strings to Python bools."""
+    """Normalize boolean-like strings to Python bools.
 
-    _TRUE = frozenset(
-        {"true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"}
-    )
-    _FALSE = frozenset(
-        {"false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"}
-    )
+    Plain answers (``yes``/``no``, ``true``/``false``, ``1``/``0``,
+    ``on``/``off``, ``y``/``n``) mean the same on every field.  The
+    subscription status words answer a different question on each field:
+    ``unsubscribed`` is True for ``email_opt_out`` and False for
+    ``subscribed``, and on ``verified`` it answers nothing and stays text.
+    :meth:`normalize` reads them as ``subscribed`` does.
+
+    """
+
+    _TRUE = frozenset({"true", "yes", "1", "on", "y"})
+    _FALSE = frozenset({"false", "no", "0", "off", "n"})
+    _SUBSCRIBED_WORDS = frozenset({"subscribed", "opted_in", "opt_in"})
+    _UNSUBSCRIBED_WORDS = frozenset({"unsubscribed", "opted_out", "opt_out"})
 
     @classmethod
     def normalize(cls, value: str) -> bool | str:
+        return cls._for_field(value, "subscribed")
+
+    @classmethod
+    def _for_field(cls, value: str, field: str) -> bool | str:
+        """Clean *value* as the yes/no answer of *field*."""
         if not isinstance(value, str):
             return value
         lower = value.strip().lower()
         if lower in cls._TRUE:
             return True
         if lower in cls._FALSE:
+            return False
+        if field == "subscribed" and lower in cls._SUBSCRIBED_WORDS:
+            return True
+        if field == "subscribed" and lower in cls._UNSUBSCRIBED_WORDS:
+            return False
+        if field == "email_opt_out" and lower in cls._UNSUBSCRIBED_WORDS:
+            return True
+        if field == "email_opt_out" and lower in cls._SUBSCRIBED_WORDS:
             return False
         return value.strip()
 
@@ -549,6 +719,10 @@ _LIST_FIELDS: frozenset[str] = frozenset({"tags"})
 _DATE_FIELDS: frozenset[str] = frozenset(
     {"birthday", "created_at", "updated_at", "last_contacted"}
 )
+# Date fields that record a moment, so their time and zone are kept.
+_TIMESTAMP_FIELDS: frozenset[str] = frozenset(
+    {"created_at", "updated_at", "last_contacted"}
+)
 _SOCIAL_FIELDS: frozenset[str] = frozenset(
     {
         "website",
@@ -600,6 +774,29 @@ _FIELD_NORMALIZERS: dict[str, Any] = {  # maps canonical field → normalizer cl
 _EMAIL_SHAPE_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+def _is_unreadable_phone(value: Any) -> bool:
+    """True for a phone value that is not text and could not become text.
+
+    Whole numbers are turned into digit text by :class:`PhoneNormalizer`, so
+    what is left here (a float with a fraction, a bool, a dict, a list
+    holding anything but text) cannot be a phone number.  An empty cell
+    (``None``, NaN) is not a value at all and is not reported.
+    """
+    if _is_missing(value):
+        return False
+    if isinstance(value, list):
+        return not all(isinstance(item, str) for item in value)
+    return True
+
+
+def _phone_warning(key: str, value: Any) -> MappingWarning:
+    return MappingWarning(
+        f"{key!r}: phone value {value!r} could not be normalized to "
+        "E.164 (set a matching default_region?)",
+        WarningCategory.PHONE_NORMALIZATION,
+    )
+
+
 def value_warnings(key: str, canonical_field: str, value: Any) -> list[MappingWarning]:
     """Return warnings about a *normalized* value that silently degraded.
 
@@ -614,18 +811,14 @@ def value_warnings(key: str, canonical_field: str, value: Any) -> list[MappingWa
        builds on.
     """
     if not isinstance(value, str):
+        if canonical_field in _PHONE_FIELDS and _is_unreadable_phone(value):
+            return [_phone_warning(key, value)]
         return []
     text = value.strip()
     if not text:
         return []
     if canonical_field in _PHONE_FIELDS and not text.startswith("+"):
-        return [
-            MappingWarning(
-                f"{key!r}: phone value {value!r} could not be normalized to "
-                "E.164 (set a matching default_region?)",
-                WarningCategory.PHONE_NORMALIZATION,
-            )
-        ]
+        return [_phone_warning(key, value)]
     if canonical_field == "email" and not _EMAIL_SHAPE_RE.match(text):
         return [
             MappingWarning(
@@ -660,6 +853,10 @@ def normalize_value(
     cls = _FIELD_NORMALIZERS.get(canonical_field, StringNormalizer)
     if cls is PhoneNormalizer:
         return cls.normalize(value, default_region=default_region)
+    if cls is BooleanNormalizer:
+        return cls._for_field(value, canonical_field)  # pylint: disable=protected-access
+    if canonical_field in _TIMESTAMP_FIELDS:
+        return DateNormalizer._normalize(value, keep_time=True)  # pylint: disable=protected-access
     return cls.normalize(value)
 
 

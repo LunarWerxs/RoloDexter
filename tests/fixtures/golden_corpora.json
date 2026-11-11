@@ -1,11 +1,22 @@
 {
   "google_contacts": {
+    "Address 1 - Formatted": "address_line1",
+    "Address 1 - Extended Address": "address_line2",
+    "Address 1 - PO Box": "address_line1",
+    "Address 1 - Street": "address_line1",
+    "Address 1 - Type": "unknown",
+    "E-mail 1 - Type": "unknown",
     "E-mail 1 - Value": "email",
+    "E-mail 2 - Value": "email",
     "Family Name": "last_name",
     "Given Name": "first_name",
     "Organization 1 - Name": "company",
     "Organization 1 - Title": "job_title",
-    "Phone 1 - Value": "phone"
+    "Organization 1 - Type": "unknown",
+    "Phone 1 - Type": "unknown",
+    "Phone 1 - Value": "phone",
+    "Website 1 - Type": "unknown",
+    "Website 1 - Value": "website"
   },
   "hubspot": {
     "city": "city",
@@ -35,7 +46,12 @@
     "Business City": "city",
     "Business Street": "address_line1",
     "Company": "company",
+    "E-mail 2 Address": "email",
+    "E-mail 2 Display Name": "unknown",
+    "E-mail 2 Type": "unknown",
     "E-mail Address": "email",
+    "E-mail Display Name": "unknown",
+    "E-mail Type": "unknown",
     "First Name": "first_name",
     "Home Phone": "home_phone",
     "Job Title": "job_title",

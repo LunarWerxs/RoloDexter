@@ -12,6 +12,9 @@ function simplify(value) {
     return { kind: "error", name: value.name, message: value.message };
   }
   if (value && typeof value === "object") {
+    if (value.constructor?.name === "MappingMatches") {
+      return Object.fromEntries([...value.entries()].map(([key, item]) => [key, simplify(item)]));
+    }
     if (value.constructor?.name === "MappingResult") {
       return {
         normalized: simplify(value.normalized),

@@ -14,7 +14,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image  # type: ignore[import-not-found]  # Pillow is a dev-machine tool, not a project dependency
 
 SITE = Path(__file__).resolve().parent.parent / "docs"
 

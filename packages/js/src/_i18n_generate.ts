@@ -3,12 +3,13 @@
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { SUPPORTED_LANGUAGES, loadCachedLanguage, userI18nCacheDir } from "./_i18n_cache.js";
 import type { AsyncTranslateFunction, GenerateLanguageAsyncOptions, GenerateLanguageOptions, InternalGenerateLanguageOptions, LanguageData, PatternData, TranslateFunction } from "./_models.js";
 import { assertPythonOptionsKeys, isPlainObject, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, pythonRangePositionalTypeError, valueError } from "./_pycompat.js";
 import { loadDefaultPatterns } from "./_registry.js";
-import { moduleUrl, require } from "./_runtime.js";
+import { require } from "./_runtime.js";
 let unidecode: ((value: string) => string) | undefined;
 
 const I18N_SKIP_FIELDS = new Set([
@@ -81,6 +82,11 @@ function deriveFieldPhrases(master: PatternData): Record<string, string> {
     }
   }
   return phrases;
+}
+
+/** @internal The canonical fields a language pack translates (all but I18N_SKIP_FIELDS). */
+export function translatableFields(): Set<string> {
+  return new Set(Object.keys(deriveFieldPhrases(loadDefaultPatterns())));
 }
 
 function englishAliases(master: PatternData): Set<string> {
@@ -171,7 +177,7 @@ function translateWithBudgetSync(
     try {
       const translated = translator(phrase, languageCode, { timeout: options.timeout });
       if (isPromiseLike(translated)) {
-        throw new TypeError("generate_language translator must be synchronous; use generateLanguageAsync for Promise-returning translators");
+        throw new TypeError("generate_language translator must be synchronous; use generateLanguageAsync (exported from rolodexter/i18n) for Promise-returning translators");
       }
       return translationText(translated);
     } catch (error) {
@@ -219,136 +225,169 @@ function unsupportedLanguageError(langCode: string): Error {
   return valueError(`Unsupported language: ${pyRepr(langCode)}. Supported: ${supported}`);
 }
 
-async function generateLanguageData(langCode: string, options: GenerateLanguageAsyncOptions): Promise<LanguageData> {
+/** A generated pack; `failed_fields` lists the fields whose translation failed (M12). */
+type GeneratedLanguageData = LanguageData & { failed_fields?: string[] };
+
+interface GenerationPlan {
+  langCode: string;
+  langName: string;
+  translateCode: string;
+  cacheDir: string | undefined;
+  existing: GeneratedLanguageData | undefined;
+  phrases: Record<string, string>;
+  english: Set<string>;
+  sourceVersion: string;
+  toTranslate: string[];
+}
+
+function planGeneration(langCode: string, options: InternalGenerateLanguageOptions | GenerateLanguageAsyncOptions): GenerationPlan {
   const [translateCode, langName] = SUPPORTED_LANGUAGES[langCode] ?? [];
   if (!translateCode || !langName) {
     throw unsupportedLanguageError(langCode);
   }
   const cacheDir = options.cache_dir;
   const forceFields = normalizeForceFields(options);
-  const existing = options.force ? undefined : loadCachedLanguage(langCode, { cache_dir: cacheDir });
+  const existing: GeneratedLanguageData | undefined = options.force
+    ? undefined
+    : loadCachedLanguage(langCode, { cache_dir: cacheDir });
   const master = loadDefaultPatterns();
   const phrases = deriveFieldPhrases(master);
-  const english = englishAliases(master);
   const existingFields = existing?.fields ?? {};
-  const allCanonicals = new Set(Object.keys(phrases));
+  const previouslyFailed = new Set(existing?.failed_fields ?? []);
   const toTranslate = Object.keys(phrases).filter((canonical) => (
-    options.force || !(canonical in existingFields) || forceFields.has(canonical)
-  ));
-  const timeout = options.timeout ?? 10;
-  const retries = options.retries ?? 1;
-  const retryBackoff = options.retry_backoff ?? 0.5;
-  const translator = options.translator ?? defaultTranslate;
-  const newTranslations: Record<string, string[]> = {};
+    options.force || !(canonical in existingFields) || forceFields.has(canonical) || previouslyFailed.has(canonical)
+  )).sort();
+  return {
+    langCode,
+    langName,
+    translateCode,
+    cacheDir,
+    existing,
+    phrases,
+    english: englishAliases(master),
+    sourceVersion: master.version ?? "unknown",
+    toTranslate,
+  };
+}
 
-  for (const canonical of toTranslate.sort()) {
-    const translated = await translateWithBudget(phrases[canonical] ?? canonical, translateCode, translator, {
-      timeout,
-      retries,
-      retry_backoff: retryBackoff,
-    });
-    if (!translated) {
-      continue;
-    }
-    const filtered = [...aliasVariants(translated)]
-      .filter((variant) => !english.has(variant) && variant.length > 1)
-      .sort();
-    if (filtered.length > 0) {
-      newTranslations[canonical] = filtered;
-    }
-  }
+function novelVariants(translated: string, english: Set<string>): string[] {
+  return [...aliasVariants(translated)]
+    .filter((variant) => !english.has(variant) && variant.length > 1)
+    .sort();
+}
 
+function translationBudget(options: GenerateLanguageOptions): { timeout: number; retries: number; retry_backoff: number } {
+  return {
+    timeout: options.timeout ?? 10,
+    retries: options.retries ?? 1,
+    retry_backoff: options.retry_backoff ?? 0.5,
+  };
+}
+
+/**
+ * Merge new translations over the cached pack and write it. A field whose
+ * translation failed is listed in `failed_fields`, so the pack is not taken
+ * for complete: the next generate call retries exactly those fields (M12).
+ */
+function finishGeneration(plan: GenerationPlan, newTranslations: Record<string, string[]>, failed: string[]): GeneratedLanguageData {
   const merged: Record<string, string[]> = {};
-  for (const [canonical, aliases] of Object.entries(existingFields)) {
-    if (allCanonicals.has(canonical)) {
+  for (const [canonical, aliases] of Object.entries(plan.existing?.fields ?? {})) {
+    if (Object.hasOwn(plan.phrases, canonical)) {
       merged[canonical] = aliases;
     }
   }
   Object.assign(merged, newTranslations);
 
-  const langData: LanguageData = {
-    language_code: langCode,
-    language_name: langName,
+  const langData: GeneratedLanguageData = {
+    language_code: plan.langCode,
+    language_name: plan.langName,
     generated_at: new Date().toISOString().replace("Z", "+00:00"),
-    source_version: master.version ?? "unknown",
+    source_version: plan.sourceVersion,
     fields: merged,
   };
+  if (failed.length > 0) {
+    langData.failed_fields = [...failed].sort();
+  }
 
-  if (Object.keys(merged).length > 0 || existing) {
-    writeLanguageCache(langData, cacheDir);
+  if (Object.keys(merged).length > 0 || plan.existing) {
+    writeLanguageCache(langData, plan.cacheDir);
   } else {
-    warnNoTranslations(langCode);
+    warnNoTranslations(plan.langCode);
   }
   return langData;
+}
+
+async function generateLanguageData(langCode: string, options: GenerateLanguageAsyncOptions): Promise<LanguageData> {
+  const plan = planGeneration(langCode, options);
+  const budget = translationBudget(options);
+  const translator = options.translator ?? defaultTranslate;
+  const newTranslations: Record<string, string[]> = {};
+  const failed: string[] = [];
+
+  for (const canonical of plan.toTranslate) {
+    const translated = await translateWithBudget(plan.phrases[canonical] ?? canonical, plan.translateCode, translator, budget);
+    if (!translated) {
+      failed.push(canonical);
+      continue;
+    }
+    const filtered = novelVariants(translated, plan.english);
+    if (filtered.length > 0) {
+      newTranslations[canonical] = filtered;
+    }
+  }
+  return finishGeneration(plan, newTranslations, failed);
 }
 
 function generateLanguageDataSync(langCode: string, options: InternalGenerateLanguageOptions): LanguageData {
-  const [translateCode, langName] = SUPPORTED_LANGUAGES[langCode] ?? [];
-  if (!translateCode || !langName) {
-    throw unsupportedLanguageError(langCode);
-  }
+  const plan = planGeneration(langCode, options);
   if (!options.translator) {
-    return generateLanguageDataInSubprocess(langCode, options);
+    return generateLanguageDataInSubprocess(plan, options);
   }
-
-  const cacheDir = options.cache_dir;
-  const forceFields = normalizeForceFields(options);
-  const existing = options.force ? undefined : loadCachedLanguage(langCode, { cache_dir: cacheDir });
-  const master = loadDefaultPatterns();
-  const phrases = deriveFieldPhrases(master);
-  const english = englishAliases(master);
-  const existingFields = existing?.fields ?? {};
-  const allCanonicals = new Set(Object.keys(phrases));
-  const toTranslate = Object.keys(phrases).filter((canonical) => (
-    options.force || !(canonical in existingFields) || forceFields.has(canonical)
-  ));
-  const timeout = options.timeout ?? 10;
-  const retries = options.retries ?? 1;
-  const retryBackoff = options.retry_backoff ?? 0.5;
+  const budget = translationBudget(options);
   const newTranslations: Record<string, string[]> = {};
+  const failed: string[] = [];
 
-  for (const canonical of toTranslate.sort()) {
-    const translated = translateWithBudgetSync(phrases[canonical] ?? canonical, translateCode, options.translator, {
-      timeout,
-      retries,
-      retry_backoff: retryBackoff,
-    });
+  for (const canonical of plan.toTranslate) {
+    const translated = translateWithBudgetSync(plan.phrases[canonical] ?? canonical, plan.translateCode, options.translator, budget);
     if (!translated) {
+      failed.push(canonical);
       continue;
     }
-    const filtered = [...aliasVariants(translated)]
-      .filter((variant) => !english.has(variant) && variant.length > 1)
-      .sort();
+    const filtered = novelVariants(translated, plan.english);
     if (filtered.length > 0) {
       newTranslations[canonical] = filtered;
     }
   }
-
-  const merged: Record<string, string[]> = {};
-  for (const [canonical, aliases] of Object.entries(existingFields)) {
-    if (allCanonicals.has(canonical)) {
-      merged[canonical] = aliases;
-    }
-  }
-  Object.assign(merged, newTranslations);
-
-  const langData: LanguageData = {
-    language_code: langCode,
-    language_name: langName,
-    generated_at: new Date().toISOString().replace("Z", "+00:00"),
-    source_version: master.version ?? "unknown",
-    fields: merged,
-  };
-
-  if (Object.keys(merged).length > 0 || existing) {
-    writeLanguageCache(langData, cacheDir);
-  } else {
-    warnNoTranslations(langCode);
-  }
-  return langData;
+  return finishGeneration(plan, newTranslations, failed);
 }
 
-function generateLanguageDataInSubprocess(langCode: string, options: InternalGenerateLanguageOptions): LanguageData {
+// The module the helper process imports must be the one that really exports
+// generateLanguageAsync (H7): this file's own address under ESM. The esbuild
+// CommonJS bundles are single files whose import.meta is empty, so
+// build-cjs.mjs also builds this module as a bundle of its own and defines
+// __ROLODEXTER_CJS_GENERATOR__ as that bundle's file name, a sibling of
+// whichever bundle is running.
+declare const __ROLODEXTER_CJS_GENERATOR__: string | undefined;
+const generatorModuleUrl = typeof __filename !== "undefined" && typeof __ROLODEXTER_CJS_GENERATOR__ === "string"
+  ? pathToFileURL(join(dirname(__filename), __ROLODEXTER_CJS_GENERATOR__)).href
+  : import.meta.url;
+
+const HELPER_STARTUP_SECONDS = 30;
+
+/**
+ * Seconds the helper process may run (M12): every phrase may use every
+ * attempt's timeout and backoff, plus a fixed allowance for Node start-up.
+ * Undefined (no limit) when the caller chose an infinite request timeout.
+ */
+function helperTimeoutSeconds(phraseCount: number, options: GenerateLanguageOptions): number | undefined {
+  const { timeout, retries, retry_backoff: backoff } = translationBudget(options);
+  const attempts = Math.max(0, retries) + 1;
+  const perPhrase = attempts * Math.max(0, timeout) + (Math.max(0, backoff) * attempts * (attempts - 1)) / 2;
+  const total = phraseCount * perPhrase + HELPER_STARTUP_SECONDS;
+  return Number.isFinite(total) ? total : undefined;
+}
+
+function generateLanguageDataInSubprocess(plan: GenerationPlan, options: InternalGenerateLanguageOptions): LanguageData {
   const forceFields = [...normalizeForceFields(options)];
   const payload = {
     force: options.force ?? false,
@@ -359,19 +398,27 @@ function generateLanguageDataInSubprocess(langCode: string, options: InternalGen
     cache_dir: options.cache_dir,
   };
   const script = `
-const moduleUrl = ${JSON.stringify(moduleUrl)};
-const langCode = ${JSON.stringify(langCode)};
+const generatorUrl = ${JSON.stringify(generatorModuleUrl)};
+const langCode = ${JSON.stringify(plan.langCode)};
 const options = JSON.parse(process.argv[1] ?? "{}");
 if (Array.isArray(options.force_fields)) options.force_fields = new Set(options.force_fields);
-const mod = await import(moduleUrl);
-const api = mod.generateLanguageAsync ? mod : mod.default;
+const mod = await import(generatorUrl);
+const api = typeof mod.generateLanguageAsync === "function" ? mod : mod.default;
 const data = await api.generateLanguageAsync(langCode, options);
 process.stdout.write(JSON.stringify(data));
 `;
+  const timeoutSeconds = helperTimeoutSeconds(plan.toTranslate.length, options);
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", script, JSON.stringify(payload)], {
     encoding: "utf8",
     maxBuffer: 50 * 1024 * 1024,
+    timeout: timeoutSeconds === undefined ? undefined : Math.ceil(timeoutSeconds * 1000),
   });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+    throw new Error(
+      `generate_language(${pyRepr(plan.langCode)}) timed out after ${Math.ceil(timeoutSeconds ?? 0)} seconds `
+        + "and its helper process was stopped; the language pack was not updated.",
+    );
+  }
   if (result.error) {
     throw result.error;
   }
@@ -396,8 +443,8 @@ export async function generateLanguageAsync(langCode: string, options: GenerateL
   const forceFields = normalizeForceFields(options);
   const cacheDir = options.cache_dir;
   if (!options.force && forceFields.size === 0) {
-    const cached = loadCachedLanguage(langCode, { cache_dir: cacheDir });
-    if (cached) {
+    const cached: GeneratedLanguageData | undefined = loadCachedLanguage(langCode, { cache_dir: cacheDir });
+    if (cached && !cached.failed_fields?.length) {
       return cached;
     }
   }
@@ -415,8 +462,8 @@ export function generateLanguage(langCode: string, options: InternalGenerateLang
   const forceFields = normalizeForceFields(options);
   const cacheDir = options.cache_dir;
   if (!options.force && forceFields.size === 0) {
-    const cached = loadCachedLanguage(langCode, { cache_dir: cacheDir });
-    if (cached) {
+    const cached: GeneratedLanguageData | undefined = loadCachedLanguage(langCode, { cache_dir: cacheDir });
+    if (cached && !cached.failed_fields?.length) {
       return cached;
     }
   }

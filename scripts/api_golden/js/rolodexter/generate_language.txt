@@ -1,2 +1,2 @@
-# rolodexter.generate_language  api-hash c59df5f1
+# rolodexter.generate_language  api-hash 9ad9055d
 function generate_language(langCode: string, options?: GenerateLanguageOptions): LanguageData

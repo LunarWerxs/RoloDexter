@@ -88,6 +88,9 @@ from ._models import (
     _warning_category as _warning_category,
 )
 from ._models import (
+    _warning_log_line as _warning_log_line,
+)
+from ._models import (
     logger as logger,
 )
 from ._normalizers import (
@@ -308,6 +311,10 @@ class ContactMapper(ContactMapperBase):
         Per-service profiles removed.  The ``default_service`` and
         ``service`` parameters are accepted but ignored.
 
+    .. deprecated:: 2.14.0
+        Passing ``default_service`` or ``service`` emits a
+        :class:`DeprecationWarning`; both will be removed.
+
     .. versionchanged:: 2.6.0
         Added *overrides* parameter for caller-supplied alias mappings
         (e.g. vendor-specific merge fields).
@@ -322,22 +329,6 @@ class ContactMapper(ContactMapperBase):
         (constant-memory iteration), :meth:`compile_schema` (reusable header
         plan), and :meth:`map_dataframe` (pandas).
     """
-
-    __slots__ = (
-        "_cacheable_pipeline",
-        "_confidence_threshold",
-        "_default_region",
-        "_default_service",
-        "_header_cache",
-        "_header_cache_lock",
-        "_header_cache_max_size",
-        "_header_strategies",
-        "_normalize",
-        "_registry",
-        "_strategies",
-        "_strict",
-        "_value_strategies",
-    )
 
     def compile_schema(
         self,
@@ -389,10 +380,11 @@ class ContactMapper(ContactMapperBase):
                 match = self._unknown(key)
             matches[key] = match
         if warnings:
-            for warning in warnings:
-                logger.warning("%s", warning)
+            log_lines = [_warning_log_line(w, matches) for w in warnings]
+            for line in log_lines:
+                logger.warning("%s", line)
             if is_strict:
-                raise NormalizationError("; ".join(warnings))
+                raise NormalizationError("; ".join(log_lines))
         return MappingSchema(matches=matches, mapper=self, default_region=region)
 
     def map_dataframe(
@@ -413,9 +405,16 @@ class ContactMapper(ContactMapperBase):
         field, the first keeps the canonical name and later ones get a
         ``<canonical>__N`` suffix (with a logged warning).
 
+        Every warning :func:`value_warnings` gives (phones that did not reach
+        E.164, emails that are not shaped like one, ambiguous dates) is
+        logged, header and category only, and raised in *strict* mode.  Each
+        distinct cell value of a column is cleaned once per call.
+
         Requires pandas (``pip install rolodexter[pandas]``).
 
         .. versionadded:: 2.8.0
+        .. versionchanged:: 2.14.0
+           Warns on every value warning, dates included.
         """
         try:
             import_module("pandas")
@@ -455,10 +454,12 @@ class ContactMapper(ContactMapperBase):
         if do_norm:
             warnings = self._normalize_dataframe_columns(out, rename, region)
         if warnings:
-            for warning in warnings:
-                logger.warning("%s", warning)
+            headers = [str(c) for c in columns]
+            log_lines = [_warning_log_line(w, headers) for w in warnings]
+            for line in log_lines:
+                logger.warning("%s", line)
             if is_strict:
-                raise NormalizationError("; ".join(warnings))
+                raise NormalizationError("; ".join(log_lines))
         return out
 
     @staticmethod
@@ -506,16 +507,32 @@ class ContactMapper(ContactMapperBase):
     def _normalize_dataframe_columns(
         out: Any, rename: dict[Any, str], region: str | None
     ) -> list[str]:
-        """Normalize each renamed column of `out` in place; return any value warnings."""
+        """Normalize each renamed column of `out` in place; return any value warnings.
+
+        Exports repeat the same cell over and over (a country, a company, a
+        blank), so each distinct ``(field, value)`` is cleaned once per call.
+        The value's type is part of the key: ``1`` and ``True`` are equal in
+        Python but clean differently.  Unhashable cells are cleaned each time.
+        """
         warnings: list[str] = []
+        cleaned: dict[tuple[str, type, Any], Any] = {}
+
+        def clean(field_name: str, value: Any) -> Any:
+            try:
+                key = (field_name, type(value), value)
+                return cleaned[key]
+            except KeyError:
+                result = normalize_value(field_name, value, default_region=region)
+                cleaned[key] = result
+                return result
+            except TypeError:
+                return normalize_value(field_name, value, default_region=region)
+
         for old_name, new_name in rename.items():
             canonical = new_name.split("__", 1)[0]
-            out[new_name] = out[new_name].map(
-                lambda v, c=canonical: normalize_value(c, v, default_region=region)
-            )
-            if canonical in _PHONE_FIELDS or canonical == "email":
-                for final in out[new_name]:
-                    warnings.extend(value_warnings(old_name, canonical, final))
+            out[new_name] = out[new_name].map(lambda v, c=canonical: clean(c, v))
+            for final in out[new_name]:
+                warnings.extend(value_warnings(str(old_name), canonical, final))
         return warnings
 
     @property
@@ -600,11 +617,14 @@ class MappingSchema:
     ) -> MappingSchema:
         """Rebuild a plan saved by :meth:`to_dict` and bind it to *mapper*.
 
-        The restored verdicts are seeded into *mapper*'s header cache, so
-        subsequent :meth:`apply` / :meth:`ContactMapper.map_payload` calls route
-        columns exactly as the saved plan says rather than re-resolving them.
-        That is what makes an import reproducible: the plan wins over whatever
-        the current alias table would decide today.
+        The restored verdicts are seeded into *mapper* (see
+        :meth:`ContactMapper.seed_header_cache`), so subsequent :meth:`apply` /
+        :meth:`ContactMapper.map_payload` calls route columns exactly as the
+        saved plan says rather than re-resolving them.  That is what makes an
+        import reproducible: the plan wins over whatever the current alias
+        table would decide today.  Seeded verdicts are kept apart from the
+        size-limited header cache, so ``header_cache_max_size=0``,
+        :meth:`ContactMapper.clear_cache` and eviction do not drop them.
 
         Value-shape heuristics are per-row by nature and are not part of a
         saved plan, so a header the plan records as ``unknown`` can still be
@@ -612,9 +632,14 @@ class MappingSchema:
         :meth:`ContactMapper.compile_schema` documents.
 
         Raises :class:`PatternLoadError` if *data* is not a plan this version
-        understands.
+        understands, or if a column names a field that is neither a
+        :class:`CanonicalField`, a field of *mapper*'s alias table, nor the
+        target of one of *mapper*'s overrides (a typo would otherwise create
+        a new output field).
 
         .. versionadded:: 2.11.0
+        .. versionchanged:: 2.14.0
+           Refuses a field name that is not a known field.
         """
         if not isinstance(data, dict):
             raise PatternLoadError("Invalid mapping schema: expected an object")
@@ -630,6 +655,11 @@ class MappingSchema:
                 "Invalid mapping schema: 'columns' must be an object"
             )
 
+        known_fields = (
+            {member.value for member in CanonicalField}
+            | set(mapper.registry.canonical_fields)
+            | mapper._override_fields  # pylint: disable=protected-access
+        )
         matches: dict[str, FieldMatch] = {}
         for header, entry in columns.items():
             if not isinstance(header, str) or not isinstance(entry, dict):
@@ -644,6 +674,11 @@ class MappingSchema:
             if not isinstance(canonical, str) or not canonical.strip():
                 raise PatternLoadError(
                     f"Invalid mapping schema: column {header!r} has no canonical field"
+                )
+            if canonical not in known_fields:
+                raise PatternLoadError(
+                    f"Invalid mapping schema: column {header!r} names "
+                    f"{canonical!r}, which is not a canonical field"
                 )
             if not isinstance(strategy, str) or not isinstance(confidence, int | float):
                 raise PatternLoadError(

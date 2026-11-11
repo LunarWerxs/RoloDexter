@@ -106,6 +106,7 @@ test("i18n subpath exposes Python-shaped helper names", async () => {
     "MAX_I18N_WORKERS",
     "SUPPORTED_LANGUAGES",
     "discover_cached",
+    "generateLanguageAsync",
     "generate_language",
     "get_all_cache_dirs",
     "get_cache_dir",
@@ -123,7 +124,8 @@ test("i18n subpath exposes Python-shaped helper names", async () => {
   assert.equal(i18n.DEFAULT_TRANSLATE_RETRIES, 1);
   assert.equal(i18n.DEFAULT_TRANSLATE_RETRY_BACKOFF, 0.5);
   assert.equal(i18n.MAX_I18N_WORKERS, 8);
-  assert.equal("generateLanguageAsync" in i18n, false);
+  // H7: public on the i18n entry (JS only, no Python twin, so not in __all__).
+  assert.equal(typeof i18n.generateLanguageAsync, "function");
   assert.throws(
     () => (i18n.main as unknown as (argv: string[]) => Promise<number>)(["--help"]),
     { name: "TypeError", message: "main() takes 0 positional arguments but 1 was given" },
@@ -199,7 +201,9 @@ test("CommonJS consumers can require root and i18n subpath", () => {
   );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), `${VERSION_FROM_PACKAGE_JSON} Ada function false false function function false`);
+  // H7: the i18n entry offers generateLanguageAsync (the error text of the
+  // synchronous API sends callers there); the core entry still does not.
+  assert.equal(result.stdout.trim(), `${VERSION_FROM_PACKAGE_JSON} Ada function false false function function true`);
 });
 
 test("i18n language codes are validated before they become a file path", () => {

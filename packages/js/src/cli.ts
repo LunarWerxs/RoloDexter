@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createReadStream, createWriteStream, existsSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import type { WriteStream } from "node:fs";
 import { inspect } from "node:util";
 
@@ -16,7 +15,6 @@ import {
   ContactMapper,
   MappingResult,
   MappingSchema,
-  NormalizationError,
   RolodexterError,
   __version__,
 } from "./index.js";
@@ -33,6 +31,26 @@ const MAX_SUMMARY_COLUMNS = 20;
 // from "output written, but some rows did not make it".
 const EXIT_PARTIAL = 2;
 const CLI_EOL = process.platform === "win32" ? "\r\n" : "\n";
+// Accepted --encoding names (case-insensitive) -> the name used in messages.
+// UTF-8 always tolerates a leading byte-order mark, as Excel writes one.
+const ENCODING_NAMES: ReadonlyMap<string, InputEncoding> = new Map<string, InputEncoding>([
+  ["utf-8", "utf-8"],
+  ["utf-8-sig", "utf-8"],
+  ["utf-16", "utf-16"],
+  ["latin-1", "latin-1"],
+  ["iso-8859-1", "latin-1"],
+  ["cp1252", "cp1252"],
+  ["windows-1252", "cp1252"],
+]);
+const DEFAULT_ENCODING: InputEncoding = "utf-8";
+// The delimiter is sniffed from the header line inside this many characters.
+const SNIFF_CHARS = 65_536;
+const SNIFF_DELIMITERS = [",", ";", "\t", "|"];
+// Leading characters a spreadsheet may run as a formula (--csv-safe).
+const CSV_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r"];
+const READ_CHUNK_BYTES = 65_536;
+// Bytes cp1252 leaves undefined; Python's cp1252 codec rejects them.
+const CP1252_UNDEFINED = new Set([0x81, 0x8d, 0x8f, 0x90, 0x9d]);
 
 let brokenPipeExiting = false;
 
@@ -64,6 +82,19 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 
 type Format = "auto" | "csv" | "json" | "jsonl";
 type OnError = "fail" | "skip" | "quarantine";
+type InputEncoding = "utf-8" | "utf-16" | "latin-1" | "cp1252";
+
+/** What the CSV reader had to discard, reported in the stderr summary. */
+interface ReadStats {
+  extraCells: number;
+  extraCellRows: number;
+}
+
+interface TextInputOptions {
+  encoding: InputEncoding;
+  delimiter?: string;
+  readStats?: ReadStats;
+}
 
 interface InputRow {
   kind: "row";
@@ -98,6 +129,10 @@ interface MapArgs {
   override?: string[];
   schemaOut?: string;
   schemaIn?: string;
+  duplicatesOutput?: string;
+  encoding: InputEncoding;
+  delimiter?: string;
+  csvSafe: boolean;
 }
 
 interface ExplainArgs {
@@ -120,6 +155,8 @@ interface ProfileArgs {
   noNormalize: boolean;
   json: boolean;
   maxJsonInputBytes: number | null;
+  encoding: InputEncoding;
+  delimiter?: string;
 }
 
 class CliUsageError extends Error {
@@ -227,7 +264,25 @@ function mapUsage(): string {
     "                        reuse",
     "  --schema-in PATH      Replay a plan saved by --schema-out so columns route",
     "                        identically to that run",
+    "  --duplicates-output PATH",
+    "                        JSONL file for the rows --dedupe drops (created on the",
+    "                        first duplicate)",
+    ...textInputHelp(),
+    "  --csv-safe            Prefix CSV output cells that start with =, +, -, @,",
+    "                        tab or CR with a single quote so spreadsheets do not",
+    "                        run them as formulas",
   ].join("\n");
+}
+
+function textInputHelp(): string[] {
+  return [
+    "  --encoding ENCODING   Input text encoding: utf-8 (default; a byte-order mark",
+    "                        is skipped), utf-8-sig, utf-16, latin-1, iso-8859-1,",
+    "                        cp1252 or windows-1252",
+    "  --delimiter DELIMITER",
+    "                        CSV input delimiter: one character, or 'tab' (default:",
+    "                        tab for .tsv, else detected from the header line)",
+  ];
 }
 
 function mapUsageLine(): string {
@@ -242,6 +297,8 @@ function mapUsageLine(): string {
     "                      [--max-json-input-bytes MAX_JSON_INPUT_BYTES]",
     "                      [--keep-unmapped] [--dedupe] [--override HEADER=FIELD]",
     "                      [--schema-out PATH] [--schema-in PATH]",
+    "                      [--duplicates-output PATH] [--encoding ENCODING]",
+    "                      [--delimiter DELIMITER] [--csv-safe]",
     "                      input",
   ].join("\n");
 }
@@ -301,6 +358,7 @@ function profileUsage(): string {
     "  --max-json-input-bytes MAX_JSON_INPUT_BYTES",
     "                        Maximum bytes to read with non-streaming JSON input; 0",
     "                        disables",
+    ...textInputHelp(),
   ].join("\n");
 }
 
@@ -312,6 +370,7 @@ function profileUsageLine(): string {
     "                          [--min-confidence MIN_CONFIDENCE]",
     "                          [--embedded-phones] [--no-normalize] [--json]",
     "                          [--max-json-input-bytes MAX_JSON_INPUT_BYTES]",
+    "                          [--encoding ENCODING] [--delimiter DELIMITER]",
     "                          input",
   ].join("\n");
 }
@@ -523,6 +582,27 @@ function validateOnError(value: string): OnError {
   throw usageError(mapUsageLine(), "rolodexter map", `argument --on-error: invalid choice: ${pyRepr(value)} (choose from fail, skip, quarantine)`);
 }
 
+/** --encoding: one of ENCODING_NAMES, case-insensitive (argparse type error text). */
+function validateEncoding(raw: string, usageText: string, prog: string): InputEncoding {
+  const name = ENCODING_NAMES.get(raw.toLowerCase());
+  if (name === undefined) {
+    throw usageError(usageText, prog, `argument --encoding: unsupported encoding ${pyRepr(raw)} (choose from ${[...ENCODING_NAMES.keys()].join(", ")})`);
+  }
+  return name;
+}
+
+/** --delimiter: one character, or the word 'tab'. */
+function validateDelimiter(raw: string, usageText: string, prog: string): string {
+  if (raw.toLowerCase() === "tab") {
+    return "\t";
+  }
+  // Python counts code points; a lone astral character is one character there.
+  if ([...raw].length !== 1 || "\"\r\n".includes(raw)) {
+    throw usageError(usageText, prog, `argument --delimiter: expected one character or 'tab', got ${pyRepr(raw)}`);
+  }
+  return raw;
+}
+
 /** Handle one `rolodexter map` CLI token, mutating `args`/`positional`/`unknownShortOptions` in place. Returns the loop index to resume from. */
 function applyMapOption(
   argv: string[],
@@ -626,6 +706,21 @@ function applyMapOptionTail(
     const [value, next] = takeResolvedValue(argv, i, "--schema-in", inlineValue, mapUsageLine(), "rolodexter map");
     args.schemaIn = value;
     return next;
+  } else if (option === "--duplicates-output") {
+    const [value, next] = takeResolvedValue(argv, i, "--duplicates-output", inlineValue, mapUsageLine(), "rolodexter map");
+    args.duplicatesOutput = value;
+    return next;
+  } else if (option === "--encoding") {
+    const [value, next] = takeResolvedValue(argv, i, "--encoding", inlineValue, mapUsageLine(), "rolodexter map");
+    args.encoding = validateEncoding(value, mapUsageLine(), "rolodexter map");
+    return next;
+  } else if (option === "--delimiter") {
+    const [value, next] = takeResolvedValue(argv, i, "--delimiter", inlineValue, mapUsageLine(), "rolodexter map");
+    args.delimiter = validateDelimiter(value, mapUsageLine(), "rolodexter map");
+    return next;
+  } else if (option === "--csv-safe") {
+    rejectExplicitFlagValue("--csv-safe", inlineValue, mapUsageLine(), "rolodexter map");
+    args.csvSafe = true;
   } else if (option === "--help" || arg === "-h") {
     rejectExplicitFlagValue("--help", inlineValue, mapUsageLine(), "rolodexter map");
     throw new CliHelpError(mapUsage());
@@ -663,6 +758,10 @@ function parseMapArgs(argv: string[]): MapArgs {
     "--override",
     "--schema-out",
     "--schema-in",
+    "--duplicates-output",
+    "--encoding",
+    "--delimiter",
+    "--csv-safe",
     "--help",
   ];
   const args: MapArgs = {
@@ -679,6 +778,8 @@ function parseMapArgs(argv: string[]): MapArgs {
     maxJsonInputBytes: DEFAULT_MAX_JSON_INPUT_BYTES,
     keepUnmapped: false,
     dedupe: false,
+    encoding: DEFAULT_ENCODING,
+    csvSafe: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -702,6 +803,9 @@ function parseMapArgs(argv: string[]): MapArgs {
   if (args.quarantineOutput && args.onError !== "quarantine") {
     throw new Error("--quarantine-output requires --on-error quarantine");
   }
+  if (args.duplicatesOutput && !args.dedupe) {
+    throw new Error("--duplicates-output requires --dedupe");
+  }
   if (!Number.isFinite(args.minConfidence) || args.minConfidence < 0 || args.minConfidence > 1) {
     throw new Error("confidence_threshold must be between 0.0 and 1.0");
   }
@@ -711,6 +815,9 @@ function parseMapArgs(argv: string[]): MapArgs {
   }
   if (args.quarantineOutput === "") {
     args.quarantineOutput = undefined;
+  }
+  if (args.duplicatesOutput === "") {
+    args.duplicatesOutput = undefined;
   }
   return args;
 }
@@ -821,6 +928,14 @@ function applyProfileOption(
     const [value, next] = takeResolvedValue(argv, i, "--max-json-input-bytes", inlineValue, profileUsageLine(), "rolodexter profile");
     args.maxJsonInputBytes = optionalLimit(asNonNegativeInt(value, "--max-json-input-bytes", profileUsageLine(), "rolodexter profile"));
     return next;
+  } else if (option === "--encoding") {
+    const [value, next] = takeResolvedValue(argv, i, "--encoding", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.encoding = validateEncoding(value, profileUsageLine(), "rolodexter profile");
+    return next;
+  } else if (option === "--delimiter") {
+    const [value, next] = takeResolvedValue(argv, i, "--delimiter", inlineValue, profileUsageLine(), "rolodexter profile");
+    args.delimiter = validateDelimiter(value, profileUsageLine(), "rolodexter profile");
+    return next;
   } else if (option === "--help" || arg === "-h") {
     rejectExplicitFlagValue("--help", inlineValue, profileUsageLine(), "rolodexter profile");
     throw new CliHelpError(profileUsage());
@@ -850,6 +965,8 @@ function parseProfileArgs(argv: string[]): ProfileArgs {
     "--no-normalize",
     "--json",
     "--max-json-input-bytes",
+    "--encoding",
+    "--delimiter",
     "--help",
   ];
   const args: ProfileArgs = {
@@ -862,6 +979,7 @@ function parseProfileArgs(argv: string[]): ProfileArgs {
     noNormalize: false,
     json: false,
     maxJsonInputBytes: DEFAULT_MAX_JSON_INPUT_BYTES,
+    encoding: DEFAULT_ENCODING,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -905,6 +1023,8 @@ class PythonCsvParser {
   /** A `\r` ended a record; a `\n` right after it belongs to the same line break. */
   private skipLineFeed = false;
 
+  constructor(private readonly delimiter = ",") {}
+
   push(text: string): string[][] {
     const records: string[][] = [];
     let { record, field, inQuotes, atFieldStart, recordStarted, quotePending, skipLineFeed } = this;
@@ -939,14 +1059,18 @@ class PythonCsvParser {
         inQuotes = true;
         atFieldStart = false;
         recordStarted = true;
-      } else if (char === ",") {
+      } else if (char === this.delimiter) {
         record.push(field);
         field = "";
         atFieldStart = true;
         recordStarted = true;
       } else if (char === "\r" || char === "\n") {
         skipLineFeed = char === "\r";
-        record.push(field);
+        // A line with no characters at all is an empty record, as csv.reader
+        // yields [] for it; a line holding only "" is one empty cell.
+        if (recordStarted || record.length > 0 || field) {
+          record.push(field);
+        }
         records.push(record);
         record = [];
         field = "";
@@ -987,17 +1111,115 @@ class PythonCsvParser {
   }
 }
 
-/** Yield CSV records one at a time while the file streams in. */
-async function* readCsvRecords(path: string): AsyncGenerator<string[]> {
-  const parser = new PythonCsvParser();
-  let bomChecked = false;
-  for await (const chunk of createReadStream(path, { encoding: "utf8" })) {
-    let text = chunk as string;
-    if (!bomChecked && text) {
-      text = text.replace(/^﻿/, "");
-      bomChecked = true;
+function decodeErrorMessage(path: string, encoding: InputEncoding): string {
+  return `cannot decode ${path} as ${encoding} text; pass --encoding with the file's real encoding (e.g. --encoding cp1252)`;
+}
+
+/**
+ * Incremental strict decoder for the --encoding names. Undecodable bytes
+ * throw (the caller turns that into one message naming --encoding) instead
+ * of becoming replacement characters. A UTF-8 byte-order mark is dropped;
+ * UTF-16 follows its byte-order mark, little-endian without one, like
+ * Python's utf-16 codec.
+ */
+class InputDecoder {
+  #decoder: TextDecoder | undefined;
+  #started = false;
+
+  constructor(private readonly encoding: InputEncoding) {}
+
+  decode(bytes: Uint8Array, final: boolean): string {
+    if (this.encoding === "latin-1") {
+      return Buffer.from(bytes).toString("latin1");
     }
-    yield* parser.push(text);
+    if (this.encoding === "cp1252" && bytes.some((byte) => CP1252_UNDEFINED.has(byte))) {
+      throw new TypeError("undefined cp1252 byte");
+    }
+    if (!this.#started) {
+      this.#started = true;
+      const label = this.encoding === "utf-16"
+        ? (bytes[0] === 0xfe && bytes[1] === 0xff ? "utf-16be" : "utf-16le")
+        : this.encoding === "cp1252" ? "windows-1252" : "utf-8";
+      this.#decoder = new TextDecoder(label, { fatal: true });
+    }
+    return this.#decoder?.decode(bytes, { stream: !final }) ?? "";
+  }
+}
+
+/** Yield the decoded text of *path* chunk by chunk, read synchronously. */
+function* readTextChunks(path: string, encoding: InputEncoding): Generator<string> {
+  const decoder = new InputDecoder(encoding);
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(READ_CHUNK_BYTES);
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      let text: string;
+      try {
+        text = decoder.decode(buffer.subarray(0, read), read === 0);
+      } catch {
+        throw new Error(decodeErrorMessage(path, encoding));
+      }
+      if (text) {
+        yield text;
+      }
+      if (read === 0) {
+        return;
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Pick the delimiter of a CSV header line: count `,`, `;`, tab and `|`
+ * outside double quotes up to the first line break; the most frequent wins.
+ * None found, or a tie, means comma. The Python CLI runs the identical
+ * algorithm.
+ */
+function sniffDelimiter(text: string): string {
+  const counts = new Map<string, number>(SNIFF_DELIMITERS.map((delim): [string, number] => [delim, 0]));
+  let inQuotes = false;
+  for (const char of text) {
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+    } else if (inQuotes) {
+      continue;
+    } else if (char === "\r" || char === "\n") {
+      break;
+    } else if (counts.has(char)) {
+      counts.set(char, (counts.get(char) ?? 0) + 1);
+    }
+  }
+  const best = Math.max(...counts.values());
+  const winners = [...counts.entries()].filter(([, count]) => count === best);
+  return best === 0 || winners.length > 1 ? "," : (winners[0]?.[0] ?? ",");
+}
+
+/** Yield CSV records one at a time while the file is read. */
+function* readCsvRecords(path: string, options: TextInputOptions): Generator<string[]> {
+  const chunks = readTextChunks(path, options.encoding);
+  let delimiter = options.delimiter ?? (path.toLowerCase().endsWith(".tsv") ? "\t" : undefined);
+  let pending = "";
+  if (delimiter === undefined) {
+    // Buffer just enough text to sniff the header line, as Python reads it.
+    // (Manual next(): a for-of `break` would close the generator and file.)
+    while (pending.length < SNIFF_CHARS) {
+      const next = chunks.next();
+      if (next.done) {
+        break;
+      }
+      pending += next.value;
+    }
+    delimiter = sniffDelimiter(pending.slice(0, SNIFF_CHARS));
+  }
+  const parser = new PythonCsvParser(delimiter);
+  if (pending) {
+    yield* parser.push(pending);
+  }
+  for (const chunk of chunks) {
+    yield* parser.push(chunk);
   }
   yield* parser.end();
 }
@@ -1161,10 +1383,10 @@ function parsePythonJson(raw: string): unknown {
   return revivePythonJsonConstants(JSON.parse(rewritten) as unknown);
 }
 
-async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
+function* readCsvRows(path: string, options: TextInputOptions, mapper?: ContactMapper): Generator<InputRow | RowFailure> {
   let headers: string[] | undefined;
   let lineNumber = 1;
-  for await (const record of readCsvRecords(path)) {
+  for (const record of readCsvRecords(path, options)) {
     if (headers === undefined) {
       const rawHeaders = record.map(String);
       const [deduped, renamed] = dedupeHeaders(rawHeaders);
@@ -1180,8 +1402,14 @@ async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerato
       continue;
     }
     lineNumber += csvRecordLineSpan(record);
-    if (record.length === 1 && record[0] === "") {
+    if (record.length === 0) {
+      // A blank line is not an empty contact; the Python CLI skips it too.
       continue;
+    }
+    if (record.length > headers.length && options.readStats) {
+      // Surplus cells have no header to map: dropped, but counted.
+      options.readStats.extraCells += record.length - headers.length;
+      options.readStats.extraCellRows += 1;
     }
     const data: Record<string, unknown> = {};
     for (const [index, header] of headers.entries()) {
@@ -1191,13 +1419,30 @@ async function* readCsvRows(path: string, mapper?: ContactMapper): AsyncGenerato
   }
 }
 
-async function* readJsonlRows(path: string): AsyncGenerator<InputRow | RowFailure> {
-  const lines = createInterface({
-    crlfDelay: Infinity,
-    input: createReadStream(path, { encoding: "utf8" }),
-  });
+/** Split decoded text into lines on \r\n, \r or \n, as Python's text mode does. */
+function* readTextLines(path: string, encoding: InputEncoding): Generator<string> {
+  let pending = "";
+  for (const chunk of readTextChunks(path, encoding)) {
+    pending += chunk;
+    // Hold back a trailing \r: it may be the first half of a \r\n that the
+    // next chunk completes.
+    const cut = pending.endsWith("\r") ? pending.length - 1 : pending.length;
+    const parts = pending.slice(0, cut).split(/\r\n|\r|\n/);
+    pending = (parts.pop() ?? "") + pending.slice(cut);
+    yield* parts;
+  }
+  if (pending) {
+    const parts = pending.split(/\r\n|\r|\n/);
+    if (parts[parts.length - 1] === "") {
+      parts.pop();
+    }
+    yield* parts;
+  }
+}
+
+function* readJsonlRows(path: string, encoding: InputEncoding): Generator<InputRow | RowFailure> {
   let lineNumber = 0;
-  for await (const line of lines) {
+  for (const line of readTextLines(path, encoding)) {
     lineNumber += 1;
     const raw = line.trim();
     if (!raw) {
@@ -1216,16 +1461,22 @@ async function* readJsonlRows(path: string): AsyncGenerator<InputRow | RowFailur
   }
 }
 
-async function* readJsonRows(path: string, maxJsonBytes: number | null): AsyncGenerator<InputRow | RowFailure> {
+function* readJsonRows(path: string, maxJsonBytes: number | null, encoding: InputEncoding): Generator<InputRow | RowFailure> {
   if (maxJsonBytes !== null) {
-    const bytes = Buffer.byteLength(readFileSync(path));
+    const bytes = statSync(path).size;
     if (bytes > maxJsonBytes) {
       throw new Error(
         `JSON input is ${bytes} bytes, above the ${maxJsonBytes} byte materialization limit; use JSONL for streaming input or raise --max-json-input-bytes`,
       );
     }
   }
-  const jsonText = readFileSync(path, "utf8");
+  const jsonBytes = readFileSync(path);
+  let jsonText: string;
+  try {
+    jsonText = new InputDecoder(encoding).decode(jsonBytes, true);
+  } catch {
+    throw new Error(decodeErrorMessage(path, encoding));
+  }
   let parsed: unknown;
   try {
     parsed = parsePythonJson(jsonText);
@@ -1245,16 +1496,32 @@ async function* readJsonRows(path: string, maxJsonBytes: number | null): AsyncGe
   }
 }
 
-async function* readRows(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null, mapper?: ContactMapper): AsyncGenerator<InputRow | RowFailure> {
+/**
+ * Yield rows or row-level failures from *path*. Synchronous, so `profile`
+ * can feed it straight into `ContactMapper.profile` and stream.
+ */
+function* readRows(
+  path: string,
+  format: Exclude<Format, "auto">,
+  maxJsonBytes: number | null,
+  options: TextInputOptions,
+  mapper?: ContactMapper,
+): Generator<InputRow | RowFailure> {
   if (format === "csv") {
-    yield* readCsvRows(path, mapper);
+    yield* readCsvRows(path, options, mapper);
     return;
   }
   if (format === "jsonl") {
-    yield* readJsonlRows(path);
+    yield* readJsonlRows(path, options.encoding);
     return;
   }
-  yield* readJsonRows(path, maxJsonBytes);
+  yield* readJsonRows(path, maxJsonBytes, options.encoding);
+}
+
+function reportExtraCells(path: string, readStats: ReadStats): void {
+  if (readStats.extraCells) {
+    logStderr(`warning: ${readStats.extraCells} extra cell(s) in ${readStats.extraCellRows} row(s) of ${path} had no header column and were dropped`);
+  }
 }
 
 function pythonTypeName(value: unknown): string {
@@ -1279,9 +1546,23 @@ function pythonTypeName(value: unknown): string {
   return typeof value;
 }
 
+/** Python's str() for the scalar values a mapped list can hold. */
+function pythonStr(value: unknown): string {
+  if (value === true) {
+    return "True";
+  }
+  if (value === false) {
+    return "False";
+  }
+  if (value === null || value === undefined) {
+    return "None";
+  }
+  return String(value);
+}
+
 function scalarize(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(String).join("; ");
+    return value.map(pythonStr).join("; ");
   }
   if (value && typeof value === "object") {
     return pythonCompactJson(value);
@@ -1297,7 +1578,38 @@ function pythonPrettyJson(value: unknown): string {
   return pythonJson(value, 2);
 }
 
+// Model fields Python declares as float, so json.dumps writes 1.0 where a JS
+// number prints 1. Applied only to model dicts (a saved plan, a profile), never
+// to contact data, whose numbers keep the spelling their source gave them.
+const MODEL_FLOAT_FIELDS = new Set(["confidence", "match_rate"]);
+
+class PythonFloat {
+  constructor(readonly value: number) {}
+}
+
+function markModelFloats(value: unknown, key?: string): unknown {
+  if (typeof value === "number" && key !== undefined && MODEL_FLOAT_FIELDS.has(key)) {
+    return new PythonFloat(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => markModelFloats(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([itemKey, item]) => [itemKey, markModelFloats(item, itemKey)]),
+    );
+  }
+  return value;
+}
+
+function pythonModelJson(value: unknown): string {
+  return pythonPrettyJson(markModelFloats(value));
+}
+
 function pythonJson(value: unknown, indent?: number, level = 0): string {
+  if (value instanceof PythonFloat) {
+    return Number.isInteger(value.value) ? `${value.value}.0` : pythonJson(value.value);
+  }
   if (typeof value === "number") {
     if (Number.isNaN(value)) {
       return "NaN";
@@ -1394,17 +1706,26 @@ function rowPayload(result: MappingResult, keepUnmapped: boolean): Record<string
     while (Object.prototype.hasOwnProperty.call(merged, target)) {
       target += "_";
     }
-    merged[target] = value;
+    // setOwnProperty: a column literally named __proto__ must survive.
+    setOwnProperty(merged, target, value);
   }
   return merged;
+}
+
+/** Prefix text a spreadsheet would run as a formula with a single quote. */
+function csvSafeCell(value: unknown): unknown {
+  if (typeof value === "string" && CSV_FORMULA_PREFIXES.some((prefix) => value.startsWith(prefix))) {
+    return `'${value}`;
+  }
+  return value;
 }
 
 function formatRows(
   results: MappingResult[],
   format: Exclude<Format, "auto">,
   maxRows: number | null,
-  outputPath: string | undefined,
   keepUnmapped: boolean,
+  csvSafe: boolean,
 ): string {
   const rows = results.map((result) => rowPayload(result, keepUnmapped));
   if (format === "jsonl") {
@@ -1427,19 +1748,45 @@ function formatRows(
       }
     }
   }
-  const text = stringifyCsv(rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, scalarize(value)]))), {
-    header: true,
-    columns: fieldnames,
-  });
-  if (!outputPath) {
-    return text.replace(/\n/g, process.platform === "win32" ? "\r\r\n" : "\r\n");
+  const cell = csvSafe ? csvSafeCell : (value: unknown) => value;
+  // Arrays, not objects keyed by column name: a column called __proto__ or
+  // a numeric name keeps its place. Python's csv module ends every record
+  // with \r\n and writes True/False for booleans; csv-stringify's defaults
+  // are \n and 1/"".
+  const records = [
+    fieldnames.map((name) => cell(name)),
+    ...rows.map((row) => fieldnames.map((name) => cell(
+      Object.prototype.hasOwnProperty.call(row, name) ? scalarize(row[name]) : "",
+    ))),
+  ];
+  const options = {
+    record_delimiter: "\r\n",
+    cast: { boolean: (value: boolean) => (value ? "True" : "False") },
+  };
+  if (fieldnames.length === 0) {
+    return "\r\n".repeat(records.length);
   }
-  return text.replace(/\n/g, "\r\n");
+  if (fieldnames.length === 1) {
+    // csv.writer quotes a record whose only cell is empty, so it does not
+    // read back as a blank line.
+    return records
+      .map((record) => (record[0] === "" || record[0] === null || record[0] === undefined ? "\"\"\r\n" : stringifyCsv([record], options)))
+      .join("");
+  }
+  return stringifyCsv(records, options);
 }
 
-function writeAtomic(path: string | undefined, text: string): void {
+/**
+ * Write a whole output file atomically, or to stdout. `raw` skips the
+ * console newline translation: CSV already carries its own \r\n.
+ */
+function writeAtomic(path: string | undefined, text: string, raw = false): void {
   if (!path) {
-    writeStdout(text);
+    if (raw) {
+      process.stdout.write(text);
+    } else {
+      writeStdout(text);
+    }
     return;
   }
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
@@ -1574,7 +1921,7 @@ function comparablePath(path: string): string {
  * failures. Since the default path is derived from the input or output
  * name, a clean re-run would silently destroy the previous run's rejects.
  */
-class LazyQuarantineWriter {
+class LazyJsonlWriter {
   readonly #path: string;
   #writer: TextWriter | undefined;
 
@@ -1582,15 +1929,11 @@ class LazyQuarantineWriter {
     this.#path = path;
   }
 
-  async write(failure: RowFailure): Promise<void> {
+  async write(record: Record<string, unknown>): Promise<void> {
     if (!this.#writer) {
       this.#writer = createTextWriter(this.#path);
     }
-    await this.#writer.write(`${pythonCompactJson({
-      row: failure.rowNumber,
-      error: failure.error,
-      raw: failure.raw,
-    })}\n`);
+    await this.#writer.write(`${pythonCompactJson(record)}\n`);
   }
 
   async close(): Promise<void> {
@@ -1605,7 +1948,7 @@ class LazyQuarantineWriter {
 async function handleFailure(
   failure: RowFailure,
   args: MapArgs,
-  quarantineWriter: LazyQuarantineWriter | undefined,
+  quarantineWriter: LazyJsonlWriter | undefined,
 ): Promise<number> {
   if (args.onError === "fail") {
     throw new Error(`row ${failure.rowNumber}: ${failure.error}`);
@@ -1617,7 +1960,7 @@ async function handleFailure(
   if (!quarantineWriter) {
     throw new Error("--on-error quarantine requires a quarantine output");
   }
-  await quarantineWriter.write(failure);
+  await quarantineWriter.write({ row: failure.rowNumber, error: failure.error, raw: failure.raw });
   logStderr(`warning: quarantined row ${failure.rowNumber}: ${failure.error}`);
   return 1;
 }
@@ -1627,11 +1970,15 @@ interface MapStats {
   duplicates: number;
   droppedHeaders: Map<string, number>;
   lowConfidence: Map<string, number>;
+  // Every header seen, in first-seen order, so --schema-out does not have
+  // to re-read the input file (which would re-emit its warnings).
+  headersSeen: Set<string>;
 }
 
 /** Record which columns were dropped or matched only weakly. */
 function noteResult(stats: MapStats, result: MappingResult): void {
   for (const match of result.field_matches) {
+    stats.headersSeen.add(match.original);
     if (!match.is_matched) {
       stats.droppedHeaders.set(match.original, (stats.droppedHeaders.get(match.original) ?? 0) + 1);
     } else if (match.confidence < REVIEW_CONFIDENCE) {
@@ -1657,14 +2004,10 @@ function summarizeColumns(label: string, counts: Map<string, number>, hint: stri
   }
 }
 
-/** Return the first row's header names without consuming the whole file. */
-async function peekHeaders(path: string, format: Exclude<Format, "auto">, maxJsonBytes: number | null): Promise<string[]> {
-  for await (const item of readRows(path, format, maxJsonBytes)) {
-    if (item.kind === "row") {
-      return Object.keys(item.data);
-    }
-  }
-  return [];
+/** The side files a map run may write; each opens on its first record. */
+interface SideWriters {
+  quarantine: LazyJsonlWriter | undefined;
+  duplicates: LazyJsonlWriter | undefined;
 }
 
 /** Map one input row/failure into `results` or `outputWriter`, mutating `stats`/`seenKeys` in place. Returns the amount to add to the streamed row count. */
@@ -1673,13 +2016,14 @@ async function processMapRow(
   args: MapArgs,
   mapper: ContactMapper,
   stats: MapStats,
-  seenKeys: Set<string>,
-  quarantineWriter: LazyQuarantineWriter | undefined,
+  seenKeys: Map<string, number>,
+  sideWriters: SideWriters,
   streamJsonl: boolean,
   outputWriter: TextWriter | undefined,
   results: MappingResult[],
   outputFormat: Format,
 ): Promise<number> {
+  const quarantineWriter = sideWriters.quarantine;
   if (item.kind === "failure") {
     stats.failed += await handleFailure(item, args, quarantineWriter);
     return 0;
@@ -1688,6 +2032,11 @@ async function processMapRow(
   try {
     result = mapper.map_payload(item.data, { extract_embedded_phones: args.embeddedPhones });
   } catch (error) {
+    // Only the mapping errors --on-error is for; anything else is a bug and
+    // must stop the run, not skip every row.
+    if (!(error instanceof RolodexterError)) {
+      throw error;
+    }
     stats.failed += await handleFailure({
       kind: "failure",
       rowNumber: item.rowNumber,
@@ -1700,12 +2049,23 @@ async function processMapRow(
   noteResult(stats, result);
   if (args.dedupe) {
     const keys = result.get_identity_keys();
-    if (keys.length > 0 && keys.some((key) => seenKeys.has(key))) {
+    const key = keys.find((candidate) => seenKeys.has(candidate));
+    if (key !== undefined) {
       stats.duplicates += 1;
+      const firstRow = seenKeys.get(key);
+      await sideWriters.duplicates?.write({
+        row: item.rowNumber,
+        error: `duplicate of row ${firstRow}`,
+        raw: item.data,
+        key,
+        first_row: firstRow,
+      });
       return 0;
     }
-    for (const key of keys) {
-      seenKeys.add(key);
+    for (const identity of keys) {
+      if (!seenKeys.has(identity)) {
+        seenKeys.set(identity, item.rowNumber);
+      }
     }
   }
 
@@ -1737,6 +2097,23 @@ function resolveQuarantinePath(args: MapArgs): string | undefined {
   return quarantinePath;
 }
 
+/** Validates the --duplicates-output path against the other files of the run. */
+function checkDuplicatesPath(args: MapArgs, quarantinePath: string | undefined): void {
+  const path = args.duplicatesOutput;
+  if (!path) {
+    return;
+  }
+  if (comparablePath(path) === comparablePath(args.input)) {
+    throw new Error("duplicates output must differ from the input path");
+  }
+  if (args.output && comparablePath(path) === comparablePath(args.output)) {
+    throw new Error("duplicates output must differ from the mapped output path");
+  }
+  if (quarantinePath && comparablePath(path) === comparablePath(quarantinePath)) {
+    throw new Error("duplicates output must differ from the quarantine output path");
+  }
+}
+
 /** Builds the final "Mapped N row(s) -> ..." status line, split out of `commandMap` so its own
  * small decision tree doesn't compound with the ingestion/write pipeline above it. */
 function buildMapSummaryMessage(
@@ -1749,6 +2126,9 @@ function buildMapSummaryMessage(
   let message = `Mapped ${count} row(s) -> ${args.output || "stdout"} (${outputFormat})`;
   if (stats.duplicates) {
     message += `; dropped ${stats.duplicates} duplicate row(s)`;
+    if (args.duplicatesOutput) {
+      message += ` -> ${args.duplicatesOutput}`;
+    }
   }
   if (stats.failed) {
     if (args.onError === "quarantine") {
@@ -1800,45 +2180,56 @@ async function commandMap(argv: string[]): Promise<number> {
     if (!existsSync(args.schemaIn)) {
       throw new Error(fileNotFoundMessage(args.schemaIn));
     }
-    const data = parsePythonJson(readFileSync(args.schemaIn, "utf8"));
+    const schemaText = readFileSync(args.schemaIn, "utf8");
+    let data: unknown;
+    try {
+      data = parsePythonJson(schemaText);
+    } catch (error) {
+      throw new Error(pythonJsonDecodeMessage(schemaText, error as Error));
+    }
     MappingSchema.from_dict(data as Record<string, unknown>, mapper);
   }
 
   const quarantinePath = resolveQuarantinePath(args);
+  checkDuplicatesPath(args, quarantinePath);
 
-  const stats: MapStats = { failed: 0, duplicates: 0, droppedHeaders: new Map(), lowConfidence: new Map() };
-  const seenKeys = new Set<string>();
-  const items = readRows(args.input, inputFormat, args.maxJsonInputBytes, mapper);
+  const stats: MapStats = { failed: 0, duplicates: 0, droppedHeaders: new Map(), lowConfidence: new Map(), headersSeen: new Set() };
+  const seenKeys = new Map<string, number>();
+  const readStats: ReadStats = { extraCells: 0, extraCellRows: 0 };
+  const items = readRows(args.input, inputFormat, args.maxJsonInputBytes, { encoding: args.encoding, delimiter: args.delimiter, readStats }, mapper);
   const results: MappingResult[] = [];
   let count = 0;
   const streamJsonl = outputFormat === "jsonl";
   const outputWriter = streamJsonl ? createTextWriter(args.output) : undefined;
-  const quarantineWriter = quarantinePath ? new LazyQuarantineWriter(quarantinePath) : undefined;
+  const sideWriters: SideWriters = {
+    quarantine: quarantinePath ? new LazyJsonlWriter(quarantinePath) : undefined,
+    duplicates: args.duplicatesOutput ? new LazyJsonlWriter(args.duplicatesOutput) : undefined,
+  };
 
   try {
-    for await (const item of items) {
-      count += await processMapRow(item, args, mapper, stats, seenKeys, quarantineWriter, streamJsonl, outputWriter, results, outputFormat);
+    for (const item of items) {
+      count += await processMapRow(item, args, mapper, stats, seenKeys, sideWriters, streamJsonl, outputWriter, results, outputFormat);
     }
 
     if (streamJsonl) {
       await closeTextWriter(outputWriter);
-      await quarantineWriter?.close();
     } else {
-      const output = formatRows(results, outputFormat, args.maxMaterializedRows, args.output, args.keepUnmapped);
-      writeAtomic(args.output, output);
-      await quarantineWriter?.close();
+      const output = formatRows(results, outputFormat, args.maxMaterializedRows, args.keepUnmapped, args.csvSafe);
+      writeAtomic(args.output, output, outputFormat === "csv");
       count = results.length;
     }
+    await sideWriters.quarantine?.close();
+    await sideWriters.duplicates?.close();
   } catch (error) {
     await abortTextWriter(outputWriter);
-    await quarantineWriter?.abort();
+    await sideWriters.quarantine?.abort();
+    await sideWriters.duplicates?.abort();
     throw error;
   }
 
   if (args.schemaOut) {
-    const headers = await peekHeaders(args.input, inputFormat, args.maxJsonInputBytes);
-    const schema = mapper.compile_schema(headers);
-    writeAtomic(args.schemaOut, `${pythonPrettyJson(schema.to_dict())}\n`);
+    const schema = mapper.compile_schema([...stats.headersSeen]);
+    writeAtomic(args.schemaOut, `${pythonModelJson(schema.to_dict())}\n`);
   }
 
   if (!args.keepUnmapped) {
@@ -1853,6 +2244,7 @@ async function commandMap(argv: string[]): Promise<number> {
     stats.lowConfidence,
     "review these, then pin them with --override HEADER=field or raise --min-confidence",
   );
+  reportExtraCells(args.input, readStats);
 
   logStderr(buildMapSummaryMessage(count, args, stats, outputFormat, quarantinePath));
   return stats.failed ? EXIT_PARTIAL : 0;
@@ -1902,30 +2294,35 @@ async function commandProfile(argv: string[]): Promise<number> {
     throw new Error(fileNotFoundMessage(args.input));
   }
 
-  // Note: unlike `map`, --max-json-input-bytes is intentionally not applied
-  // here - it mirrors the Python CLI, whose profile command parses the flag
-  // but never wires it into the read.
   const maxRows = optionalLimit(args.maxRows);
-  const rows: Record<string, unknown>[] = [];
-  for await (const item of readRows(args.input, inputFormat, DEFAULT_MAX_JSON_INPUT_BYTES, mapper)) {
-    if (item.kind === "failure") {
-      throw new Error(`row ${item.rowNumber}: ${item.error}`);
-    }
-    rows.push(item.data);
-    if (maxRows !== null && rows.length >= maxRows) {
-      break;
+  const readStats: ReadStats = { extraCells: 0, extraCellRows: 0 };
+  const items = readRows(args.input, inputFormat, args.maxJsonInputBytes, { encoding: args.encoding, delimiter: args.delimiter, readStats }, mapper);
+  // Streamed: the profile pulls one row at a time, as the Python CLI does.
+  function* rows(): Generator<Record<string, unknown>> {
+    for (const item of items) {
+      if (item.kind === "failure") {
+        throw new Error(`row ${item.rowNumber}: ${item.error}`);
+      }
+      yield item.data;
     }
   }
 
-  const profile = mapper.profile(rows, {
-    max_rows: maxRows,
-    extract_embedded_phones: args.embeddedPhones,
-  });
+  let profile: ReturnType<ContactMapper["profile"]>;
+  try {
+    profile = mapper.profile(rows(), {
+      max_rows: maxRows,
+      extract_embedded_phones: args.embeddedPhones,
+    });
+  } finally {
+    // --max-rows stops early: close the file the reader still holds open.
+    items.return(undefined);
+  }
   if (args.json) {
-    writeStdout(`${pythonPrettyJson(profile.to_dict())}\n`);
+    writeStdout(`${pythonModelJson(profile.to_dict())}\n`);
   } else {
     logStdout(profile.explain());
   }
+  reportExtraCells(args.input, readStats);
   return 0;
 }
 
@@ -1947,6 +2344,23 @@ function commandFields(argv: string[] = []): number {
     logStdout(field.value);
   }
   return 0;
+}
+
+// Built-in error types that only a bug raises; the CLI's own messages and
+// file-system errors are plain `Error`s.
+const INTERNAL_ERROR_TYPES = [TypeError, ReferenceError, RangeError, SyntaxError, EvalError, URIError];
+
+/** The one stderr line for a failed run; a bug says so instead of passing as bad input. */
+function cliErrorLine(error: unknown): string {
+  if (error instanceof RolodexterError) {
+    return `error: ${error.message}`;
+  }
+  if (error instanceof Error && !INTERNAL_ERROR_TYPES.some((type) => error instanceof type)) {
+    return `error: ${error.message}`;
+  }
+  const name = error instanceof Error ? error.constructor.name : typeof error;
+  const message = error instanceof Error ? error.message : String(error);
+  return `error: internal error: ${name}: ${message}`;
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -1987,10 +2401,7 @@ if (runningAsMain(import.meta.url)) {
         logStderr(error.message);
         process.exitCode = error.exitCode;
       } else {
-        const message = (error instanceof RolodexterError || error instanceof NormalizationError || error instanceof Error)
-          ? error.message
-          : String(error);
-        logStderr(`error: ${message}`);
+        logStderr(cliErrorLine(error));
         process.exitCode = 1;
       }
     });

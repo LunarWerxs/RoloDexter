@@ -16,19 +16,9 @@ function findPackageRoot(from) {
   throw new Error("Could not find package.json");
 }
 
-function findRepoRoot(from) {
-  let current = from;
-  while (current !== dirname(current)) {
-    if (existsSync(resolve(current, ".git"))) {
-      return current;
-    }
-    current = dirname(current);
-  }
-  throw new Error("Could not find .git directory");
-}
-
 const packageRoot = findPackageRoot(here);
-const repoRoot = findRepoRoot(packageRoot);
+// packages/js/scripts/sync-patterns.mjs -> the repo root is three levels up.
+const repoRoot = resolve(here, "..", "..", "..");
 const source = resolve(repoRoot, "src", "rolodexter", "patterns.json");
 const target = resolve(packageRoot, "src", "patterns.json");
 

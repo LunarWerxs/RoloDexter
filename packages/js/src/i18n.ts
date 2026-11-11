@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { writeSync } from "node:fs";
 
-import { generateLanguageAsync } from "./_i18n_generate.js";
+import { generateLanguageAsync as internalGenerateLanguageAsync, translatableFields } from "./_i18n_generate.js";
 import { runningAsMain } from "./_runtime.js";
 import {
   SUPPORTED_LANGUAGES,
@@ -14,6 +14,7 @@ import {
   load_cached as coreLoadCached,
 } from "./index.js";
 import type { LanguageData } from "./index.js";
+import { assertPythonOptionsKeys, isPlainObject } from "./_pycompat.js";
 
 export { SUPPORTED_LANGUAGES } from "./index.js";
 
@@ -90,6 +91,25 @@ export function generate_language(langCode: string, options: GenerateLanguageOpt
   }
   return generateLanguageSync(langCode, options);
 }
+
+/**
+ * Generate (or return the cached) language pack for `langCode` without
+ * blocking the process: the asynchronous form of generate_language(). The
+ * same options, and the same cache. A pack that lists `failed_fields` is not
+ * complete and is generated again, retrying only those fields.
+ */
+export function generateLanguageAsync(langCode: string, options: GenerateLanguageOptions = {}): Promise<LanguageData> {
+  if (arguments.length < 1) {
+    throw missingRequiredArg("generateLanguageAsync", "lang_code");
+  }
+  if (arguments.length > 2 || (arguments.length === 2 && !isPlainObject(options))) {
+    throw positionalTypeError("generateLanguageAsync", 1, arguments.length);
+  }
+  assertPythonOptionsKeys("generateLanguageAsync", options as Record<string, unknown>, GENERATE_LANGUAGE_OPTION_KEYS);
+  return internalGenerateLanguageAsync(langCode, options);
+}
+
+const GENERATE_LANGUAGE_OPTION_KEYS = new Set(["force", "force_fields", "timeout", "retries", "retry_backoff"]);
 
 export function discover_cached(): Record<string, string> {
   if (arguments.length > 0) {
@@ -400,6 +420,35 @@ function targetLanguages(raw: string | undefined): string[] {
   return requested.map((code) => normalizeLanguageCode(code) as string);
 }
 
+function retranslateFields(raw: string | undefined): Set<string> | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const requested = raw.split(",").map((field) => field.trim()).filter(Boolean);
+  const known = translatableFields();
+  const unknown = requested.filter((field) => !known.has(field));
+  if (unknown.length > 0) {
+    throw new I18nUsageError(
+      `argument --retranslate-fields: unknown or untranslated field(s): ${unknown.map(pyRepr).join(", ")}`,
+    );
+  }
+  return requested.length > 0 ? new Set(requested) : undefined;
+}
+
+type GeneratedLanguageData = LanguageData & { failed_fields?: string[] };
+
+/** One result line; "N of M fields" and the failed names when some failed (M12). */
+function languageResultLine(code: string, data: GeneratedLanguageData): string {
+  const fieldCount = Object.keys(data.fields ?? {}).length;
+  const aliasCount = Object.values(data.fields ?? {}).reduce((total, aliases) => total + aliases.length, 0);
+  const failed = data.failed_fields ?? [];
+  if (failed.length === 0) {
+    return `  [${code}] ${data.language_name}: ${fieldCount} fields, ${aliasCount} aliases`;
+  }
+  return `  [${code}] ${data.language_name}: ${fieldCount} of ${translatableFields().size} fields, `
+    + `${aliasCount} aliases; ${failed.length} failed (${failed.join(", ")})`;
+}
+
 async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {
   let args: I18nArgs;
   try {
@@ -422,9 +471,7 @@ async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {
   }
 
   const languages = targetLanguages(args.languages);
-  const force_fields = args.retranslateFields
-    ? new Set(args.retranslateFields.split(",").map((field) => field.trim()).filter(Boolean))
-    : undefined;
+  const force_fields = retranslateFields(args.retranslateFields);
 
   writeCliStdout(`\nGenerating ${languages.length} language(s)...`);
   if (args.dryRun) {
@@ -443,6 +490,7 @@ async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {
 
   writeCliStdout(`  Cache dir: ${get_cache_dir()}\n`);
   const failures: Array<[string, string]> = [];
+  const incomplete: string[] = [];
   let nextLanguage = 0;
   const workerCount = boundedWorkers(args.workers, languages.length);
   async function runWorker(): Promise<void> {
@@ -450,16 +498,17 @@ async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {
       const code = languages[nextLanguage] as string;
       nextLanguage += 1;
     try {
-      const data = await generateLanguageAsync(code, {
+      const data: GeneratedLanguageData = await internalGenerateLanguageAsync(code, {
         force: args.force,
         force_fields,
         timeout: args.timeout,
         retries: args.retries,
         retry_backoff: args.retry_backoff,
       });
-      const fieldCount = Object.keys(data.fields ?? {}).length;
-      const aliasCount = Object.values(data.fields ?? {}).reduce((total, aliases) => total + aliases.length, 0);
-      writeCliStdout(`  [${code}] ${data.language_name}: ${fieldCount} fields, ${aliasCount} aliases`);
+      if (data.failed_fields?.length) {
+        incomplete.push(code);
+      }
+      writeCliStdout(languageResultLine(code, data));
     } catch (error) {
       failures.push([code, (error as Error).message]);
       writeCliStdout(`  [${code}] FAILED: ${(error as Error).message}`);
@@ -467,12 +516,18 @@ async function mainWithArgs(argv = process.argv.slice(2)): Promise<number> {
   }
   }
   await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  if (incomplete.length > 0) {
+    writeCliStdout(`\nIncomplete ${incomplete.length} language(s): ${incomplete.sort().join(", ")}; run again to retry the failed fields.`);
+  }
   if (failures.length > 0) {
     writeCliStdout(`\nFailed ${failures.length} language(s):`);
     for (const [code, error] of failures) {
       writeCliStdout(`  [${code}] ${error}`);
     }
     return 1;
+  }
+  if (incomplete.length > 0) {
+    return 2;
   }
   writeCliStdout("\nDone.");
   return 0;

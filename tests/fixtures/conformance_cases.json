@@ -5,7 +5,7 @@
       "field": "phone",
       "value": "555-0143",
       "default_region": "US",
-      "expected": "+15550143"
+      "expected": "555-0143"
     },
     {
       "id": "name_particle_title_suffix",

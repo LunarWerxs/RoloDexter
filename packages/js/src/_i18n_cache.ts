@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LanguageData } from "./_models.js";
-import { pythonMissingRequiredArg, pythonPositionalTypeError } from "./_pycompat.js";
+import { emitRolodexterWarning, pyRepr, pythonMissingRequiredArg, pythonPositionalTypeError, pythonTypeName } from "./_pycompat.js";
 import { moduleUrl } from "./_runtime.js";
 
 export const SUPPORTED_LANGUAGES: Record<string, readonly [string, string]> = Object.freeze({
@@ -53,21 +53,17 @@ export const SUPPORTED_LANGUAGES: Record<string, readonly [string, string]> = Ob
 });
 
 function packageI18nDir(): string | undefined {
-  const pythonPathSep = process.platform === "win32" ? ";" : ":";
-  for (const entry of (process.env.PYTHONPATH ?? "").split(pythonPathSep)) {
-    if (!entry) {
-      continue;
-    }
-    const pythonSourceCache = join(entry, "rolodexter", "i18n");
-    if (existsSync(pythonSourceCache)) {
-      return pythonSourceCache;
-    }
-  }
   const path = fileURLToPath(new URL("./i18n", moduleUrl));
   return existsSync(path) ? path : undefined;
 }
 
+// ROLODEXTER_CACHE_DIR, when set and non-empty, replaces the user cache folder
+// for both reading and writing language packs (contract C5, same as i18n.py).
 function userI18nCacheDir(): string {
+  const override = process.env.ROLODEXTER_CACHE_DIR;
+  if (override) {
+    return override;
+  }
   let base: string;
   if (process.platform === "win32") {
     base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
@@ -154,6 +150,8 @@ export function normalizeLanguageCode(langCode: unknown): string | undefined {
   return Object.hasOwn(SUPPORTED_LANGUAGES, candidate) ? candidate : undefined;
 }
 
+const CACHE_SCHEMA_KEYS = ["language_code", "language_name", "fields"] as const;
+
 /**
  * Shape check for a generated i18n cache file.
  *
@@ -162,27 +160,35 @@ export function normalizeLanguageCode(langCode: unknown): string | undefined {
  * Validating alias types here also stops a non-string entry throwing out of
  * ContactMapper construction.
  */
-function validateCacheSchema(data: unknown): LanguageData | undefined {
-  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+function validateCacheSchema(data: unknown, path: string): LanguageData | undefined {
+  // Same reasons and text as i18n.py's _validate_cache_schema (L23).
+  const reject = (detail: string): undefined => {
+    emitRolodexterWarning(`Ignoring corrupt i18n cache file ${path}: ${detail}.`);
     return undefined;
+  };
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return reject(`expected a JSON object, got ${pythonTypeName(data)}`);
   }
   const record = data as Record<string, unknown>;
-  for (const key of ["language_code", "language_name", "fields"]) {
-    if (!(key in record)) {
-      return undefined;
-    }
+  const missing = CACHE_SCHEMA_KEYS.filter((key) => !Object.hasOwn(record, key));
+  if (missing.length > 0) {
+    return reject(`missing required key(s) ${missing.join(", ")}`);
   }
   const fields = record.fields;
   if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
-    return undefined;
+    return reject(`'fields' must be an object, got ${pythonTypeName(fields)}`);
   }
   for (const [canonical, aliases] of Object.entries(fields as Record<string, unknown>)) {
     if (!canonical.trim()) {
-      return undefined;
+      return reject("field names must be non-empty strings");
     }
     if (!Array.isArray(aliases) || aliases.some((alias) => typeof alias !== "string" || !alias.trim())) {
-      return undefined;
+      return reject(`aliases for field ${pyRepr(canonical)} must be non-empty strings`);
     }
+  }
+  const failed = record.failed_fields;
+  if (failed !== undefined && (!Array.isArray(failed) || failed.some((field) => typeof field !== "string"))) {
+    return reject("'failed_fields' must be a list of field names");
   }
   return data as LanguageData;
 }
@@ -201,10 +207,11 @@ export function loadCachedLanguage(langCode: string, options: { cache_dir?: stri
     let parsed: unknown;
     try {
       parsed = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
+    } catch (error) {
+      emitRolodexterWarning(`Ignoring corrupt i18n cache file ${path}: ${(error as Error).message}`);
       continue;
     }
-    const validated = validateCacheSchema(parsed);
+    const validated = validateCacheSchema(parsed, path);
     if (validated !== undefined) {
       return validated;
     }

@@ -37,7 +37,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 JS_SWEEP = Path(__file__).with_name("parity_sweep_js.mjs")
@@ -55,24 +55,106 @@ import rolodexter as r  # noqa: E402
 
 REGIONS = [None, "US", "GB", "DE", "AU", "IN", "BR", "JP", "ZZ", "", "us"]
 
-NAME_FIELDS = {"first_name", "last_name", "full_name", "middle_name", "nickname", "prefix", "suffix"}
+NAME_FIELDS = {
+    "first_name",
+    "last_name",
+    "full_name",
+    "middle_name",
+    "nickname",
+    "prefix",
+    "suffix",
+}
 PHONE_FIELDS = {"phone", "mobile", "work_phone", "home_phone", "fax", "whatsapp"}
 
 HEADER_ROOTS = [
-    "fname", "first name", "First_Name", "FirstName", "first-name", "given name",
-    "surname", "last name", "LastName", "family name", "full name", "name",
-    "email", "e-mail", "E_Mail", "emailAddress", "email address", "mail",
-    "phone", "Phone Number", "mobile", "cell", "telephone", "tel", "work phone",
-    "company", "Compny", "organisation", "organization", "employer", "biz",
-    "title", "job title", "position", "role", "address", "address 1", "street",
-    "city", "town", "state", "province", "zip", "postal code", "postcode",
-    "country", "birthday", "dob", "date of birth", "website", "url", "linkedin",
-    "twitter", "notes", "comments", "tags", "labels", "source", "owner",
-    "created", "created at", "updated", "score", "revenue", "currency",
-    "Mystery", "Column X", "", " ", "__proto__", "constructor", "id",
-    "primary_phone_id", "contact_email_id", "website_id", "email_ref",
-    "owner_id", "shipping_company_id", "cust_plz", "nom", "prenom", "correo",
-    "telefono", "empresa", "firma", "vorname", "nachname", "e-post",
+    "fname",
+    "first name",
+    "First_Name",
+    "FirstName",
+    "first-name",
+    "given name",
+    "surname",
+    "last name",
+    "LastName",
+    "family name",
+    "full name",
+    "name",
+    "email",
+    "e-mail",
+    "E_Mail",
+    "emailAddress",
+    "email address",
+    "mail",
+    "phone",
+    "Phone Number",
+    "mobile",
+    "cell",
+    "telephone",
+    "tel",
+    "work phone",
+    "company",
+    "Compny",
+    "organisation",
+    "organization",
+    "employer",
+    "biz",
+    "title",
+    "job title",
+    "position",
+    "role",
+    "address",
+    "address 1",
+    "street",
+    "city",
+    "town",
+    "state",
+    "province",
+    "zip",
+    "postal code",
+    "postcode",
+    "country",
+    "birthday",
+    "dob",
+    "date of birth",
+    "website",
+    "url",
+    "linkedin",
+    "twitter",
+    "notes",
+    "comments",
+    "tags",
+    "labels",
+    "source",
+    "owner",
+    "created",
+    "created at",
+    "updated",
+    "score",
+    "revenue",
+    "currency",
+    "Mystery",
+    "Column X",
+    "",
+    " ",
+    "__proto__",
+    "constructor",
+    "id",
+    "primary_phone_id",
+    "contact_email_id",
+    "website_id",
+    "email_ref",
+    "owner_id",
+    "shipping_company_id",
+    "cust_plz",
+    "nom",
+    "prenom",
+    "correo",
+    "telefono",
+    "empresa",
+    "firma",
+    "vorname",
+    "nachname",
+    "e-post",
 ]
 
 FIXTURES: list[dict[str, Any]] = [
@@ -178,7 +260,13 @@ def _build_payload_corpus(all_headers: list[str]) -> list[dict[str, Any]]:
         for hindex, header in enumerate(unique_headers[::3])
         for vindex, value in enumerate(VALUES[::4])
     ]
-    option_sets = [{}, {"depth": 1}, {"depth": 2}, {"depth": 3}, {"extract_embedded_phones": True}]
+    option_sets = [
+        {},
+        {"depth": 1},
+        {"depth": 2},
+        {"depth": 3},
+        {"extract_embedded_phones": True},
+    ]
     mapper_sets = [
         {},
         {"strict": True},
@@ -201,14 +289,40 @@ def _build_payload_corpus(all_headers: list[str]) -> list[dict[str, Any]]:
 
 
 def _build_phone_corpus() -> list[dict[str, Any]]:
-    phone_values = [v for v in VALUES if isinstance(v, str)] + [None, 123, True, [], {}]
+    phone_values: list[Any] = [v for v in VALUES if isinstance(v, str)] + [
+        None,
+        123,
+        True,
+        [],
+        {},
+    ]
     phones: list[dict[str, Any]] = [
-        {"id": f"ph|{fn}|{region}|{index}", "fn": fn, "value": value, "default_region": region}
-        for fn in ("parse", "format_e164", "format_international", "format_national", "is_valid", "number_type")
+        {
+            "id": f"ph|{fn}|{region}|{index}",
+            "fn": fn,
+            "value": value,
+            "default_region": region,
+        }
+        for fn in (
+            "parse",
+            "format_e164",
+            "format_international",
+            "format_national",
+            "is_valid",
+            "number_type",
+        )
         for region in REGIONS
         for index, value in enumerate(phone_values)
     ]
-    pairs = ["+1 202 555 0143", "2025550143", "202-555-0143", "+44 20 7946 0958", "", "junk", "555-0143"]
+    pairs = [
+        "+1 202 555 0143",
+        "2025550143",
+        "202-555-0143",
+        "+44 20 7946 0958",
+        "",
+        "junk",
+        "555-0143",
+    ]
     phones.extend(
         {
             "id": f"phmatch|{a_index}|{b_index}|{region}",
@@ -250,14 +364,21 @@ def _build_object_corpus() -> list[dict[str, Any]]:
         for index, fixture in enumerate(FIXTURES)
     ]
     objects.extend(
-        {"id": f"objemb|{index}", "payload": fixture, "options": {"extract_embedded_phones": True}}
+        {
+            "id": f"objemb|{index}",
+            "payload": fixture,
+            "options": {"extract_embedded_phones": True},
+        }
         for index, fixture in enumerate(FIXTURES)
     )
     return objects
 
 
 def _build_language_corpus() -> list[dict[str, Any]]:
-    return [{"id": f"lang|{code}", "lang_code": code} for code in sorted(r.SUPPORTED_LANGUAGES)]
+    return [
+        {"id": f"lang|{code}", "lang_code": code}
+        for code in sorted(r.SUPPORTED_LANGUAGES)
+    ]
 
 
 def build_corpus() -> dict[str, list[dict[str, Any]]]:
@@ -381,24 +502,28 @@ def phone_case(item: dict[str, Any]) -> Any:
         return r.format_e164(value, region)
     # These three take a parsed PhoneNumber, not a raw string.
     if fn == "format_international":
-        return r.format_international(r.parse(value, region))
+        return r.format_international(cast(Any, r.parse(value, region)))
     if fn == "format_national":
-        return r.format_national(r.parse(value, region))
+        return r.format_national(cast(Any, r.parse(value, region)))
     if fn == "number_type":
-        return r.number_type(r.parse(value, region))
+        return r.number_type(cast(Any, r.parse(value, region)))
     if fn == "is_valid":
         return r.is_valid(value, region)
     if fn == "is_number_match":
         return r.is_number_match(item["a"], item["b"], region)
     if fn == "matcher":
         return list(
-            r.PhoneNumberMatcher(value, default_region=region, max_matches=item.get("max_matches"))
+            r.PhoneNumberMatcher(
+                value, default_region=region, max_matches=item.get("max_matches")
+            )
         )
     raise ValueError(f"unknown phone fn {fn}")
 
 
 def result_helpers(item: dict[str, Any]) -> dict[str, Any]:
-    result = r.ContactMapper().map_payload(decode(item["payload"]), **item.get("options", {}))
+    result = r.ContactMapper().map_payload(
+        decode(item["payload"]), **item.get("options", {})
+    )
     return {
         "matched_count": result.matched_count,
         "unmatched_count": result.unmatched_count,
@@ -420,39 +545,54 @@ def language(item: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def python_results(corpus: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+def python_results(
+    corpus: dict[str, list[dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     out["normalize"] = {
         item["id"]: capture(
             lambda item=item: r.normalize_value(
-                item["field"], decode(item.get("value")), default_region=item.get("default_region")
+                item["field"],
+                decode(item.get("value")),
+                default_region=item.get("default_region"),
             )
         )
         for item in corpus["normalize"]
     }
     out["schemas"] = {
         item["id"]: capture(
-            lambda item=item: r.ContactMapper(**item.get("mapper_options", {})).compile_schema(
-                item["headers"]
-            )
+            lambda item=item: r.ContactMapper(
+                **item.get("mapper_options", {})
+            ).compile_schema(item["headers"])
         )
         for item in corpus["schemas"]
     }
     out["payloads"] = {
         item["id"]: capture(
-            lambda item=item: r.ContactMapper(**item.get("mapper_options", {})).map_payload(
-                decode(item["payload"]), **item.get("options", {})
-            )
+            lambda item=item: r.ContactMapper(
+                **item.get("mapper_options", {})
+            ).map_payload(decode(item["payload"]), **item.get("options", {}))
         )
         for item in corpus["payloads"]
     }
-    out["phones"] = {item["id"]: capture(lambda item=item: phone_case(item)) for item in corpus["phones"]}
-    out["objects"] = {item["id"]: capture(lambda item=item: result_helpers(item)) for item in corpus["objects"]}
-    out["languages"] = {item["id"]: capture(lambda item=item: language(item)) for item in corpus["languages"]}
+    out["phones"] = {
+        item["id"]: capture(lambda item=item: phone_case(item))
+        for item in corpus["phones"]
+    }
+    out["objects"] = {
+        item["id"]: capture(lambda item=item: result_helpers(item))
+        for item in corpus["objects"]
+    }
+    out["languages"] = {
+        item["id"]: capture(lambda item=item: language(item))
+        for item in corpus["languages"]
+    }
     return out
 
 
-def js_results(corpus: dict[str, list[dict[str, Any]]], out_path: Path) -> dict[str, dict[str, Any]]:
+def js_results(
+    corpus: dict[str, list[dict[str, Any]]], out_path: Path
+) -> dict[str, dict[str, Any]]:
     subprocess.run(
         [_node(), str(JS_SWEEP), str(out_path)],
         input=json.dumps(corpus),
@@ -466,7 +606,10 @@ def js_results(corpus: dict[str, list[dict[str, Any]]], out_path: Path) -> dict[
         check=True,
         cwd=ROOT,
     )
-    return json.loads(out_path.read_text(encoding="utf-8"))
+    results: dict[str, dict[str, Any]] = json.loads(
+        out_path.read_text(encoding="utf-8")
+    )
+    return results
 
 
 def _node() -> str:
@@ -493,7 +636,9 @@ NAME_UNICODE = "name: Unicode case mapping differs between the runtimes"
 # and the two parse commas and emoji differently.  Neither output is a name;
 # closing this class means agreeing on how to case a value that is not what
 # the field is for, which is not worth a behavior change to either package.
-NAME_NOT_A_NAME = "name: non-name text in a name field (URL, email, address, separators)"
+NAME_NOT_A_NAME = (
+    "name: non-name text in a name field (URL, email, address, separators)"
+)
 BOM = "JS trim() strips U+FEFF, Python strip() does not"
 FUZZY = "fuzzy header tie-break on headers that match nothing"
 DOWNSTREAM = "payload result, downstream of a normalizer or matcher"
@@ -571,7 +716,9 @@ def stage_order() -> list[str]:
     return [RAISED, *layers, "normalize", ASSEMBLY, "phone", "i18n"]
 
 
-def _flatten_encoded(payload: Any, depth: int, prefix: str = "", current: int = 1) -> dict[str, Any]:
+def _flatten_encoded(
+    payload: Any, depth: int, prefix: str = "", current: int = 1
+) -> dict[str, Any]:
     """map_payload's flattening, on the corpus's encoded form (markers are leaves)."""
     if not isinstance(payload, dict):
         return {}
@@ -585,7 +732,9 @@ def _flatten_encoded(payload: Any, depth: int, prefix: str = "", current: int = 
     return out
 
 
-def trace_requests(index: dict[str, tuple[str, dict[str, Any]]], entries: list[str]) -> list[dict[str, Any]]:
+def trace_requests(
+    index: dict[str, tuple[str, dict[str, Any]]], entries: list[str]
+) -> list[dict[str, Any]]:
     """One request per header of every diverging case that runs the header pipeline."""
     requests: list[dict[str, Any]] = []
     for entry in entries:
@@ -599,7 +748,9 @@ def trace_requests(index: dict[str, tuple[str, dict[str, Any]]], entries: list[s
         if region is None:
             region = mapper_options.get("default_region", "US")
         if section == "schemas":
-            pairs: list[tuple[str, Any]] = [(header, None) for header in item["headers"]]
+            pairs: list[tuple[str, Any]] = [
+                (header, None) for header in item["headers"]
+            ]
             normalize = False
         else:
             depth = max(1, min(options.get("depth", 1), 5))
@@ -624,13 +775,17 @@ def trace_case(item: dict[str, Any]) -> dict[str, Any]:
     """Python half of traceCase() in parity_sweep_js.mjs; the two must match."""
     mapper = r.ContactMapper(**item["mapper_options"])
     value = decode(item["value"])
-    layers = mapper.trace_header(item["header"], value=value, default_region=item["default_region"])
+    layers = mapper.trace_header(
+        item["header"], value=value, default_region=item["default_region"]
+    )
     selected = next((step for step in layers if step["selected"]), None)
     normalized = None
     if selected is not None and item["normalize"]:
         canonical = selected["canonical"]
         normalized = capture(
-            lambda: r.normalize_value(canonical, value, default_region=item["default_region"])
+            lambda: r.normalize_value(
+                canonical, value, default_region=item["default_region"]
+            )
         )
     return {"layers": layers, "normalized": normalized}
 
@@ -641,7 +796,9 @@ def first_divergent_stage(py: Any, js: Any) -> str | None:
         return None
     if "ok" not in py or "ok" not in js:
         return RAISED
-    for py_step, js_step in itertools.zip_longest(py["ok"]["layers"], js["ok"]["layers"]):
+    for py_step, js_step in itertools.zip_longest(
+        py["ok"]["layers"], js["ok"]["layers"]
+    ):
         if py_step != js_step:
             return str((py_step or js_step)["layer"])
         if py_step["selected"] == {"n": "true"}:
@@ -661,12 +818,15 @@ def attribute(
     order: list[str],
 ) -> dict[str, str]:
     """Charge each diverging case to the earliest stage that differs."""
+
     def rank(stage: str) -> int:
         return order.index(stage) if stage in order else len(order)
 
     per_case: dict[str, list[str]] = {}
     for request in requests:
-        stage = first_divergent_stage(py_traces[request["id"]], js_traces[request["id"]])
+        stage = first_divergent_stage(
+            py_traces[request["id"]], js_traces[request["id"]]
+        )
         if stage is not None:
             per_case.setdefault(request["case"], []).append(stage)
     stages: dict[str, str] = {}
@@ -699,12 +859,27 @@ class SweepReport:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--update-baseline", action="store_true", help="record today's divergences as accepted")
-    parser.add_argument("--show", metavar="SECTION", help="print example diffs from one section")
+    parser.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="record today's divergences as accepted",
+    )
+    parser.add_argument(
+        "--show", metavar="SECTION", help="print example diffs from one section"
+    )
     parser.add_argument(
         "--json",
         action="store_true",
         help="print the per-stage summary as JSON instead of the text report",
+    )
+    parser.add_argument(
+        "--no-languages",
+        action="store_true",
+        help=(
+            "skip the 40-language section; it calls generate_language, which "
+            "translates over the network wherever the packs are not cached "
+            "(CI and the release job run with this)"
+        ),
     )
     return parser.parse_args()
 
@@ -716,7 +891,10 @@ def _diverging_cases(
     diverging: list[str] = []
     for section in python_side:
         if python_side[section].keys() != js_side[section].keys():
-            print(f"corpus mismatch in {section}: the two runs saw different cases", file=sys.stderr)
+            print(
+                f"corpus mismatch in {section}: the two runs saw different cases",
+                file=sys.stderr,
+            )
             return None
         diverging.extend(
             f"{section}/{case_id}"
@@ -753,7 +931,10 @@ def _trace_divergences(
     """Trace only the diverging cases on both sides, so a clean sweep pays nothing."""
     if not requests:
         return {}, {}
-    py_traces = {request["id"]: capture(lambda request=request: trace_case(request)) for request in requests}
+    py_traces = {
+        request["id"]: capture(lambda request=request: trace_case(request))
+        for request in requests
+    }
     trace_corpus: dict[str, list[dict[str, Any]]] = {section: [] for section in corpus}
     trace_corpus["traces"] = requests
     js_traces = js_results(trace_corpus, scratch)["traces"]
@@ -770,7 +951,10 @@ def _count_stages(
             sum(1 for entry in diverging if stages[entry] == stage),
             sum(1 for entry in new if stages[entry] == stage),
         )
-        for stage in sorted(set(stages.values()), key=lambda s: order.index(s) if s in order else len(order))
+        for stage in sorted(
+            set(stages.values()),
+            key=lambda s: order.index(s) if s in order else len(order),
+        )
     }
 
 
@@ -791,9 +975,17 @@ def _print_json_report(report: SweepReport) -> int:
                 ],
                 "earliest_stage": next(iter(report.stage_counts), None),
                 "earliest_new_stage": next(
-                    (stage for stage, (_, new_count) in report.stage_counts.items() if new_count), None
+                    (
+                        stage
+                        for stage, (_, new_count) in report.stage_counts.items()
+                        if new_count
+                    ),
+                    None,
                 ),
-                "new_cases": [{"case": entry, "stage": report.stages[entry]} for entry in report.new],
+                "new_cases": [
+                    {"case": entry, "stage": report.stages[entry]}
+                    for entry in report.new
+                ],
             },
             indent=1,
         )
@@ -844,7 +1036,9 @@ def _print_examples(report: SweepReport, show: str) -> None:
 
 def _print_baseline_drift(report: SweepReport) -> int:
     if report.fixed:
-        print(f"\n{len(report.fixed)} baselined divergence(s) now agree - rerun with --update-baseline:")
+        print(
+            f"\n{len(report.fixed)} baselined divergence(s) now agree - rerun with --update-baseline:"
+        )
         for entry in report.fixed[:10]:
             print(f"  {entry}")
     if report.new:
@@ -856,7 +1050,9 @@ def _print_baseline_drift(report: SweepReport) -> int:
 
 
 def _print_text_report(report: SweepReport, show: str | None) -> int:
-    print(f"{report.total} cases, {len(report.diverging)} diverging ({len(report.accepted)} accepted)")
+    print(
+        f"{report.total} cases, {len(report.diverging)} diverging ({len(report.accepted)} accepted)"
+    )
     _print_label_counts(report)
     _print_stage_counts(report)
     if show:
@@ -868,13 +1064,19 @@ def main() -> int:
     args = _parse_args()
 
     corpus = build_corpus()
+    if args.no_languages:
+        corpus["languages"] = []
     scratch = ROOT / "packages" / "js" / "dist" / ".parity-sweep-js.json"
     scratch.parent.mkdir(parents=True, exist_ok=True)
     python_side = python_results(corpus)
     js_side = js_results(corpus, scratch)
     scratch.unlink(missing_ok=True)
 
-    index = {item["id"]: (section, item) for section, items in corpus.items() for item in items}
+    index = {
+        item["id"]: (section, item)
+        for section, items in corpus.items()
+        for item in items
+    }
     diverging = _diverging_cases(python_side, js_side)
     if diverging is None:
         return 2
@@ -883,7 +1085,11 @@ def main() -> int:
         _write_baseline(diverging)
         return 0
 
-    accepted = set(json.loads(BASELINE.read_text(encoding="utf-8"))["cases"]) if BASELINE.exists() else set()
+    accepted = (
+        set(json.loads(BASELINE.read_text(encoding="utf-8"))["cases"])
+        if BASELINE.exists()
+        else set()
+    )
     new = sorted(set(diverging) - accepted)
     fixed = sorted(accepted - set(diverging))
     total = sum(len(items) for items in corpus.values())

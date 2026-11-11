@@ -3,20 +3,38 @@
 import type { DataFrameLike } from "./_models.js";
 import { setOwnProperty } from "./_pycompat.js";
 
-function flatten(payload: Record<string, unknown>, depth: number, prefix = "", current = 1): Record<string, unknown> {
+/**
+ * Flatten nested plain objects up to `depth` levels, joining keys with ".".
+ * Arrays, including arrays of objects (the shape many contact APIs return),
+ * are never flattened: each stays one value. When two keys flatten to one name
+ * (`{"a.b": 1, a: {b: 2}}`) the later value wins and the name is pushed onto
+ * `collisions` so map_payload can warn instead of losing data silently.
+ */
+function flatten(
+  payload: Record<string, unknown>,
+  depth: number,
+  prefix = "",
+  current = 1,
+  collisions: string[] | null = null,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
+  const put = (name: string, item: unknown): void => {
+    if (collisions !== null && Object.prototype.hasOwnProperty.call(result, name)) {
+      collisions.push(name);
+    }
+    // setOwnProperty, not assignment: a key named "__proto__" must become an
+    // own entry, not the prototype setter (Object.assign has the same trap).
+    setOwnProperty(result, name, item);
+  };
   for (const [key, value] of Object.entries(payload)) {
     const fullKey = prefix ? `${prefix}${key}` : key;
     if (value && typeof value === "object" && !Array.isArray(value) && current < depth) {
-      // Object.assign copies through [[Set]], which would treat a nested key
-      // named "__proto__" as the prototype setter just as a plain assignment
-      // does. Copy key by key instead.
-      const nested = flatten(value as Record<string, unknown>, depth, `${fullKey}.`, current + 1);
+      const nested = flatten(value as Record<string, unknown>, depth, `${fullKey}.`, current + 1, collisions);
       for (const [nestedKey, nestedValue] of Object.entries(nested)) {
-        setOwnProperty(result, nestedKey, nestedValue);
+        put(nestedKey, nestedValue);
       }
     } else {
-      setOwnProperty(result, fullKey, value);
+      put(fullKey, value);
     }
   }
   return result;

@@ -1,6 +1,7 @@
 // Module-relative runtime handles (the ESM url and a CommonJS require).
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,10 +27,29 @@ function runningAsMain(callerModuleUrl: string | undefined): boolean {
   if (!entry) {
     return false;
   }
-  if (typeof __filename !== "undefined") {
-    return __filename === entry;
+  const modulePath = typeof __filename !== "undefined"
+    ? __filename
+    : callerModuleUrl !== undefined ? fileURLToPath(callerModuleUrl) : undefined;
+  if (modulePath === undefined) {
+    return false;
   }
-  return callerModuleUrl !== undefined && fileURLToPath(callerModuleUrl) === entry;
+  // Compare real paths, not the strings (H5). npm, npx and Yarn install a
+  // command on macOS and Linux as a symlink (node_modules/.bin/rolodexter ->
+  // ../rolodexter/dist/src/cli.js). Node puts the symlink in argv[1] but
+  // loads the module from its real path, so a string compare was false and
+  // the command exited 0 having done nothing.
+  const entryReal = realPath(entry);
+  return entryReal !== undefined && entryReal === realPath(modulePath);
+}
+
+function realPath(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    // argv[1] that names no file (`node -` or a bare `node ./cli` that Node
+    // resolved by adding .js) cannot be this module's file.
+    return undefined;
+  }
 }
 
 

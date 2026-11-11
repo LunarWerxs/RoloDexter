@@ -127,9 +127,9 @@ test("fuzzy matching follows Python typo recovery guards", () => {
       return [match.canonical, match.confidence, match.strategy];
     }),
     [
-      ["owner", 0.85, "fuzzy"],
+      ["email", 0.7, "fuzzy"],
       ["unknown", 0, "none"],
-      ["owner", 0.7, "fuzzy"],
+      ["unknown", 0, "none"],
     ],
   );
   assert.equal(mapper.identify("Job Titel").strategy, "fuzzy");
@@ -150,15 +150,17 @@ test("fuzzy matching follows Python typo recovery guards", () => {
       ["address_line1", 0.7, "fuzzy"],
     ],
   );
+  // M9 (audit 2026-11-11): a header that only contains a short alias no longer
+  // matches it at 0.85; these now follow Python to no match / 0.70.
   const placeholder = mapper.identify("field_1");
-  assert.equal(placeholder.canonical, "industry");
-  assert.equal(placeholder.strategy, "fuzzy");
-  assert.equal(mapper.identify("Phoneish").canonical, "phone");
-  assert.equal(mapper.identify("Phoneish").confidence, 0.85);
-  assert.equal(mapper.identify("Emailish").canonical, "email");
-  assert.equal(mapper.identify("Emailish").confidence, 0.85);
+  assert.equal(placeholder.canonical, "unknown");
+  assert.equal(placeholder.strategy, "none");
+  assert.equal(mapper.identify("Phoneish").canonical, "unknown");
+  assert.equal(mapper.identify("Phoneish").confidence, 0);
+  assert.equal(mapper.identify("Emailish").canonical, "unknown");
+  assert.equal(mapper.identify("Emailish").confidence, 0);
   assert.equal(mapper.identify("moblie").canonical, "phone");
-  assert.equal(mapper.identify("moblie").confidence, 0.85);
+  assert.equal(mapper.identify("moblie").confidence, 0.7);
   assert.equal(mapper.identify("addressline").canonical, "address_line1");
   assert.equal(mapper.identify("addressline").confidence, 0.85);
   assert.equal(mapper.identify("Column 1").canonical, "unknown");
@@ -183,11 +185,11 @@ test("fuzzy matching follows Python typo recovery guards", () => {
       return [match.canonical, match.confidence, match.strategy];
     }),
     [
-      ["owner", 0.85, "fuzzy"],
-      ["country", 0.85, "fuzzy"],
-      ["country", 0.85, "fuzzy"],
+      ["email", 0.7, "fuzzy"],
+      ["phone", 0.7, "fuzzy"],
+      ["phone", 0.7, "fuzzy"],
       ["address_line2", 0.85, "fuzzy"],
-      ["address_line1", 0.85, "fuzzy"],
+      ["city", 0.7, "fuzzy"],
       ["email", 0.7, "fuzzy"],
       ["phone", 0.7, "fuzzy"],
       ["phone", 0.7, "fuzzy"],
@@ -224,7 +226,10 @@ test("heuristics avoid ambiguous dates and bare numeric phone IDs", () => {
 
   assert.equal(heuristic.match("Mystery Column", "1990-05-15"), undefined);
   assert.equal(heuristic.match("raw_numeric_token", "2025550143"), undefined);
-  assert.deepEqual(new ContactMapper().map_payload({ "Mystery Phone": 2025550143 }).normalized, {});
+  // A whole number is read as its digits (as in Python), so a phone-hinted
+  // header still maps it; a bare number under a meaningless header does not.
+  assert.deepEqual(new ContactMapper().map_payload({ "Mystery Phone": 2025550143 }).normalized, { phone: "+12025550143" });
+  assert.deepEqual(new ContactMapper().map_payload({ raw_numeric_token: 2025550143 }).normalized, {});
 
   const birthday = heuristic.match("custom_birth_marker", "1990-05-15");
   assert.ok(birthday);
@@ -400,7 +405,8 @@ test("public strategy classes and custom strategy pipeline work", () => {
 test("strict mode raises on warnings", () => {
   assert.throws(
     () => new ContactMapper({ strict: true }).map_payload({ phone: "not a phone" }),
-    /default_region\?/,
+    // L14: the error names the header and category, never the value.
+    /^NormalizationError: 'phone': phone_normalization$/,
   );
 });
 
@@ -444,8 +450,10 @@ test("mapper warnings are observable when Node warning listeners opt in", () => 
     process.off("rolodexterWarning" as "warning", listener);
   }
 
-  assert.ok(seen.some((warning) => warning.includes("dropped low-confidence match to 'phone'")));
-  assert.ok(seen.some((warning) => warning.includes("dropped low-confidence match to 'company'")));
+  // L14 (contract C6): the event names the header and the category, never the value.
+  assert.ok(seen.includes("'Mystery': low_confidence"));
+  assert.ok(seen.includes("'Compny': low_confidence"));
+  assert.ok(seen.every((warning) => !warning.includes("202-555-0143")));
   assert.ok(seen.some((warning) => warning.includes("map_dataframe: column 'first_name' also maps to 'first_name'")));
 });
 

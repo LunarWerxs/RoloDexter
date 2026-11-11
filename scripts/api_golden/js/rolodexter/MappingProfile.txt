@@ -1,7 +1,8 @@
-# rolodexter.MappingProfile  api-hash 1cfcc339
+# rolodexter.MappingProfile  api-hash ed7307d8
 class MappingProfile
-  constructor(rows_seen: number, fields_seen: number, matched_count: number, unmatched_count: number, canonical_counts: Record<string, number>, unmapped_counts: Record<string, number>, strategy_counts: Record<string, number>, warning_counts: Record<string, number>): MappingProfile
+  constructor(rows_seen: number, fields_seen: number, matched_count: number, unmatched_count: number, canonical_counts: Record<string, number>, unmapped_counts: Record<string, number>, strategy_counts: Record<string, number>, warning_counts: Record<string, number>, embedded_phone_count?: number): MappingProfile
   readonly canonical_counts: Record<string, number>
+  readonly embedded_phone_count: number
   explain(): string
   readonly fields_seen: number
   readonly match_rate: number

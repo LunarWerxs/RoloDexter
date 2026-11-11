@@ -113,7 +113,7 @@ class TestLoading:
         assert registry.exact_lookup("fname") == "first_name"
 
     def test_version(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.10.0"
+        assert registry.version == "2.13.0"
 
     def test_custom_patterns(self) -> None:
         custom = {

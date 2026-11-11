@@ -18,13 +18,54 @@ const ISO_DATE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/;
 const YMD_DATE_RE = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/;
 const DMY_DATE_RE = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/;
 const SHORT_YEAR_DATE_RE = /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2}$/;
+// The time part of an ISO value: 09:30, 09:30:00, 09:30:00.123, then an
+// optional zone (Z, +05:30, +0530, +05). Same as DateNormalizer._TIME_RE.
+const ISO_TIME_RE = /^[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?\s*(?:([Zz])|([+-])(\d{2}):?(\d{2})?)?$/;
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+// Date fields that record a moment, so their time and zone are kept.
+const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set(["created_at", "updated_at", "last_contacted"]);
+
+const pad = (n: number, width: number): string => String(n).padStart(width, "0");
 
 function isoDate(year: number, month: number, day: number): string | undefined {
-  if (month < 1 || month > 12 || day < 1 || day > 31) {
+  if (month < 1 || month > 12 || day < 1) {
     return undefined;
   }
-  const pad = (n: number, width: number): string => String(n).padStart(width, "0");
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const last = month === 2 && leap ? 29 : (MONTH_DAYS[month - 1] ?? 31);
+  if (day > last) {
+    return undefined;
+  }
   return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
+}
+
+/** The ISO time and zone of `tail` (" 9:30+0530" -> "T09:30+05:30"), or undefined. */
+function isoTime(tail: string): string | undefined {
+  const m = ISO_TIME_RE.exec(tail);
+  if (!m) {
+    return undefined;
+  }
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  const second = m[3];
+  if (hour > 23 || minute > 59 || (second !== undefined && Number(second) > 59)) {
+    return undefined;
+  }
+  let out = `T${pad(hour, 2)}:${pad(minute, 2)}`;
+  if (second !== undefined) {
+    out += `:${second}${m[4] ?? ""}`;
+  }
+  if (m[5]) {
+    out += "Z";
+  } else if (m[6]) {
+    const zoneHour = Number(m[7]);
+    const zoneMinute = Number(m[8] ?? 0);
+    if (zoneHour > 14 || zoneMinute > 59) {
+      return undefined;
+    }
+    out += `${m[6]}${pad(zoneHour, 2)}:${pad(zoneMinute, 2)}`;
+  }
+  return out;
 }
 
 /**
@@ -32,14 +73,25 @@ function isoDate(year: number, month: number, day: number): string | undefined {
  * 3 April in most of the world and 4 March in the US, so it is returned
  * unchanged (and reported as a warning) rather than silently reordered.
  */
-function normalizeDate(value: string): string {
+function normalizeDate(value: string, keepTime = false): string {
   const text = pyStrip(value);
   if (!text) {
     return value;
   }
   const ymd = ISO_DATE_RE.exec(text) ?? YMD_DATE_RE.exec(text);
   if (ymd) {
-    return isoDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3])) ?? value;
+    const iso = isoDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+    if (iso === undefined) {
+      return value;
+    }
+    // With keepTime (the timestamp fields) the time and zone are kept; a time
+    // part that cannot be read leaves the value unchanged rather than lost.
+    const tail = text.slice(`${ymd[1]}-${ymd[2]}-${ymd[3]}`.length);
+    if (keepTime && tail) {
+      const time = isoTime(tail);
+      return time === undefined ? value : iso + time;
+    }
+    return iso;
   }
   const dmy = DMY_DATE_RE.exec(text);
   if (dmy) {
@@ -102,14 +154,32 @@ function valueWarnings(key: string, canonicalField: string, value: unknown): str
   return [];
 }
 
-/** Normalize a boolean-field string value ("yes"/"no"/...), mirroring the Python boolean coercion. */
-function normalizeBooleanFieldValue(value: string): boolean | string {
+const SUBSCRIBED_WORDS = ["subscribed", "opted_in", "opt_in"];
+const UNSUBSCRIBED_WORDS = ["unsubscribed", "opted_out", "opt_out"];
+
+/**
+ * Normalize a boolean-field string value as the yes/no answer of `field`,
+ * mirroring Python's BooleanNormalizer. Plain answers (yes/no, true/false,
+ * 1/0, on/off, y/n) mean the same on every field; the subscription status
+ * words are True for "subscribed" and False for "email_opt_out" when they say
+ * "subscribed", the reverse when they say "unsubscribed", and stay text on
+ * "verified".
+ */
+function normalizeBooleanFieldValue(value: string, field: string): boolean | string {
   const lower = pyStrip(value).toLowerCase();
-  if (["true", "yes", "1", "on", "y", "opted_in", "subscribed", "opt_in"].includes(lower)) {
+  if (["true", "yes", "1", "on", "y"].includes(lower)) {
     return true;
   }
-  if (["false", "no", "0", "off", "n", "opted_out", "unsubscribed", "opt_out"].includes(lower)) {
+  if (["false", "no", "0", "off", "n"].includes(lower)) {
     return false;
+  }
+  if (field === "subscribed" || field === "email_opt_out") {
+    if (SUBSCRIBED_WORDS.includes(lower)) {
+      return field === "subscribed";
+    }
+    if (UNSUBSCRIBED_WORDS.includes(lower)) {
+      return field === "email_opt_out";
+    }
   }
   return pyStrip(value);
 }
@@ -162,12 +232,18 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
     const text = pyCollapseSpace(pyStrip(value));
     return text ? smartTitleCase(text) : value;
   }
-  if (field === "postal_code" && typeof value === "string") {
-    const cleaned = pyStrip(value).toUpperCase();
-    return cleaned.replace(/^([A-Z]\d[A-Z])(\d[A-Z]\d)$/, "$1 $2");
+  if (field === "postal_code") {
+    // A postcode that arrived as a whole number (JSON, a spreadsheet column
+    // of digits) is cleaned as its digit text, as in Python.
+    const text = typeof value === "number" && Number.isInteger(value) ? String(value) : value;
+    if (typeof text === "string" && text) {
+      const cleaned = pyStrip(text).toUpperCase();
+      return cleaned.replace(/^([A-Z]\d[A-Z])(\d[A-Z]\d)$/, "$1 $2");
+    }
+    return text;
   }
   if (DATE_FIELDS.has(field) && typeof value === "string") {
-    return normalizeDate(value);
+    return normalizeDate(value, TIMESTAMP_FIELDS.has(field));
   }
   if (field === "country" && typeof value === "string") {
     return normalizeCountry(value);
@@ -176,7 +252,7 @@ export function normalizeValue(canonicalField: CanonicalFieldValue, value: unkno
     return normalizeState(value);
   }
   if (BOOLEAN_FIELDS.has(field) && typeof value === "string") {
-    return normalizeBooleanFieldValue(value);
+    return normalizeBooleanFieldValue(value, field);
   }
   if (LIST_FIELDS.has(field)) {
     return normalizeListFieldValue(value);
@@ -323,7 +399,8 @@ export class BooleanNormalizer {
 
   static normalize(value: unknown): unknown {
     assertValueNormalizerArity("BooleanNormalizer.normalize", arguments.length, 2);
-    return normalizeValue("email_opt_out", value);
+    // Read as the "subscribed" field reads it, as Python's classmethod does.
+    return normalizeValue("subscribed", value);
   }
 }
 
@@ -343,4 +420,4 @@ export class ListNormalizer {
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { valueWarnings };
+export { EMAIL_SHAPE_RE, valueWarnings };

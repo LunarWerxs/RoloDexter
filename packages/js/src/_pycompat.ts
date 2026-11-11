@@ -61,6 +61,10 @@ function pythonLiteral(value: unknown): string {
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>).map(([key, item]) => `${pythonLiteral(key)}: ${pythonLiteral(item)}`).join(", ")}}`;
   }
+  // Python writes the non-finite floats as inf, -inf and nan.
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    return Number.isNaN(value) ? "nan" : value > 0 ? "inf" : "-inf";
+  }
   return String(value);
 }
 
@@ -177,6 +181,13 @@ function assertValueNormalizerArity(
   }
 }
 
+/**
+ * Make the named fields read-only, the way a frozen Python dataclass is.
+ *
+ * An accessor pair (not a read-only data property) so that assigning throws
+ * FrozenInstanceError in every caller, sloppy-mode CommonJS included, where a
+ * write to a non-writable data property is silently ignored instead.
+ */
 function lockPythonFrozenFields(target: object, fields: string[]): void {
   for (const field of fields) {
     const value = (target as Record<string, unknown>)[field];
@@ -208,9 +219,22 @@ function emitRolodexterWarning(message: string): void {
   if (typeof process === "undefined" || typeof process.emit !== "function") {
     return;
   }
+  // Still an Error for listeners, but built without capturing a stack trace:
+  // a warning's stack points into this module and costs time per warning.
+  const stackTraceLimit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 0;
   const warning = new Error(message);
+  Error.stackTraceLimit = stackTraceLimit;
   warning.name = "RolodexterWarning";
   process.emit("rolodexterWarning" as "warning", warning);
+}
+
+/** Emit a Node DeprecationWarning, the JS twin of Python's warnings.warn(..., DeprecationWarning). */
+function emitDeprecationWarning(message: string): void {
+  if (typeof process === "undefined" || typeof process.emitWarning !== "function") {
+    return;
+  }
+  process.emitWarning(message, { type: "DeprecationWarning" });
 }
 
 function emitRolodexterWarnings(warnings: readonly string[]): void {
@@ -339,4 +363,4 @@ function setOwnProperty(target: Record<string, unknown>, key: string, value: unk
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, pyCollapseSpace, pySplitSpace, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError };
+export { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, assertValueNormalizerArity, attributeError, emitDeprecationWarning, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonEquals, pythonIncludes, pythonLiteral, pythonMissingRequiredArg, pythonMissingRequiredArgs, pythonPositionalTypeError, pythonRangePositionalTypeError, pythonTypeName, pyCollapseSpace, pySplitSpace, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError };

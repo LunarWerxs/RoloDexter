@@ -11,13 +11,19 @@
       },
       "devDependencies": {
         "@types/node": "^26.6.5",
+        "@vitalets/google-translate-api": "^9.2.1",
         "esbuild": "^0.28.2",
         "typescript": "^6.0.3",
+        "unidecode": "^1.1.0",
       },
-      "optionalDependencies": {
+      "peerDependencies": {
         "@vitalets/google-translate-api": "^9.2.1",
         "unidecode": "^1.1.0",
       },
+      "optionalPeers": [
+        "@vitalets/google-translate-api",
+        "unidecode",
+      ],
     },
   },
   "packages": {

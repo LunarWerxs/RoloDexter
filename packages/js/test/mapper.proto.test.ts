@@ -37,9 +37,9 @@ test("__proto__ survives as a canonical field name too", () => {
 test("compile_schema keeps a __proto__ header", () => {
   const schema = new ContactMapper().compile_schema([PROTO_KEY, "fname"]);
 
-  assert.deepEqual(Object.keys(schema.matches).sort(), [PROTO_KEY, "fname"]);
+  assert.deepEqual([...schema.matches.keys()].sort(), [PROTO_KEY, "fname"]);
   assert.deepEqual(schema.unmatched_headers(), [PROTO_KEY]);
-  assert.equal(Object.getPrototypeOf(schema.matches), Object.prototype);
+  assert.equal(schema.matches.get(PROTO_KEY)?.canonical, "unknown");
 });
 
 test("a matched __proto__ header reaches column_map", () => {
@@ -58,7 +58,7 @@ test("the mapping lockfile records and restores a __proto__ column", () => {
   assert.deepEqual(Object.keys(lockfile.columns as Record<string, unknown>).sort(), [PROTO_KEY, "fname"]);
 
   const restored = MappingSchema.from_dict(lockfile, new ContactMapper());
-  assert.deepEqual(Object.keys(restored.matches).sort(), [PROTO_KEY, "fname"]);
+  assert.deepEqual([...restored.matches.keys()].sort(), [PROTO_KEY, "fname"]);
 });
 
 test("schema.apply and a seeded header cache keep a __proto__ column", () => {

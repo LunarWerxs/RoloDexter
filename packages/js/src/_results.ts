@@ -2,7 +2,12 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { FieldMatch, PHONE_FIELDS, isMatched } from "./_models.js";
-import { lockPythonFrozenFields, pyRepr, pyString, pyStrip, pythonLiteral, setOwnProperty } from "./_pycompat.js";
+import { EMAIL_SHAPE_RE } from "./_normalizers.js";
+import { lockPythonFrozenFields, pyRepr, pyString, pyStrip, pythonLiteral } from "./_pycompat.js";
+
+// Phone fields whose number belongs to one person. work_phone (often a
+// switchboard) and fax are shared, so they never become identity keys.
+const IDENTITY_PHONE_FIELDS = ["phone", "home_phone", "whatsapp"] as const;
 
 export class MappingProfile {
   readonly rows_seen: number;
@@ -13,6 +18,11 @@ export class MappingProfile {
   readonly unmapped_counts: Record<string, number>;
   readonly strategy_counts: Record<string, number>;
   readonly warning_counts: Record<string, number>;
+  /**
+   * Phones found in free text (extract_embedded_phones). Counted here, not in
+   * fields_seen / matched_count, because they are not columns.
+   */
+  readonly embedded_phone_count: number;
 
   constructor(
     rows_seen: number,
@@ -23,6 +33,7 @@ export class MappingProfile {
     unmapped_counts: Record<string, number>,
     strategy_counts: Record<string, number>,
     warning_counts: Record<string, number>,
+    embedded_phone_count = 0,
   ) {
     this.rows_seen = rows_seen;
     this.fields_seen = fields_seen;
@@ -32,6 +43,7 @@ export class MappingProfile {
     this.unmapped_counts = unmapped_counts;
     this.strategy_counts = strategy_counts;
     this.warning_counts = warning_counts;
+    this.embedded_phone_count = embedded_phone_count;
     lockPythonFrozenFields(this, [
       "rows_seen",
       "fields_seen",
@@ -41,6 +53,7 @@ export class MappingProfile {
       "unmapped_counts",
       "strategy_counts",
       "warning_counts",
+      "embedded_phone_count",
     ]);
   }
 
@@ -64,6 +77,7 @@ export class MappingProfile {
       unmapped_counts: { ...this.unmapped_counts },
       strategy_counts: { ...this.strategy_counts },
       warning_counts: { ...this.warning_counts },
+      embedded_phone_count: this.embedded_phone_count,
     };
   }
 
@@ -190,6 +204,15 @@ export class MappingResult {
     return result;
   }
 
+  /**
+   * Stable, prefixed identifiers for deduplication. Only values that identify
+   * one person become keys: an `email:` key only from a value shaped like an
+   * email address (the check behind the email warning), and a `phone:` key
+   * only from a phone that normalized to E.164 (starts with `+`; an `;ext=`
+   * suffix is dropped from the key). work_phone and fax are left out, because
+   * a switchboard or office fax is shared. Placeholders such as `n/a` or `-`
+   * never become keys.
+   */
   get_identity_keys(): string[] {
     const keys: string[] = [];
     const add = (key: string): void => {
@@ -200,14 +223,20 @@ export class MappingResult {
 
     for (const email of this.get_all_emails()) {
       const text = pyStrip(email).toLowerCase();
-      if (text) {
+      if (text && EMAIL_SHAPE_RE.test(text)) {
         add(`email:${text}`);
       }
     }
-    for (const phone of this.get_all_phones()) {
-      const text = pyStrip(phone);
-      if (text) {
-        add(`phone:${text}`);
+    for (const field of IDENTITY_PHONE_FIELDS) {
+      const raw = this.normalized[field];
+      for (const phone of Array.isArray(raw) ? raw : [raw]) {
+        if (typeof phone !== "string") {
+          continue;
+        }
+        const text = pyStrip(phone).split(";ext=", 1)[0] ?? "";
+        if (text.startsWith("+") && text.length > 1) {
+          add(`phone:${text}`);
+        }
       }
     }
 
@@ -264,63 +293,78 @@ export class MappingResult {
   }
 }
 
-type MappingMatches = Record<string, FieldMatch> & {
-  get(header: string): FieldMatch | null;
-  set(header: string, match: FieldMatch): MappingMatches;
-  entries(): IterableIterator<[string, FieldMatch]>;
-  items(): IterableIterator<[string, FieldMatch]>;
-  [Symbol.iterator](): IterableIterator<[string, FieldMatch]>;
-};
+/**
+ * A saved plan's header -> FieldMatch table, the JS twin of Python's
+ * `MappingSchema.matches` dict. Headers live in a Map, never as properties of
+ * this object, so a header named `get`, `set`, `entries` or `items` is stored
+ * like any other instead of being shadowed by (or shadowing) a method.
+ * `get` returns null for a missing header, as Python's dict.get returns None.
+ */
+class MappingMatches implements Iterable<[string, FieldMatch]> {
+  readonly #map: Map<string, FieldMatch>;
+
+  constructor(entries: Iterable<[string, FieldMatch]> = []) {
+    this.#map = new Map(entries);
+  }
+
+  get size(): number {
+    return this.#map.size;
+  }
+
+  get(header: string): FieldMatch | null {
+    return this.#map.get(header) ?? null;
+  }
+
+  set(header: string, match: FieldMatch): this {
+    this.#map.set(header, match);
+    return this;
+  }
+
+  has(header: string): boolean {
+    return this.#map.has(header);
+  }
+
+  keys(): IterableIterator<string> {
+    return this.#map.keys();
+  }
+
+  values(): IterableIterator<FieldMatch> {
+    return this.#map.values();
+  }
+
+  entries(): IterableIterator<[string, FieldMatch]> {
+    return this.#map.entries();
+  }
+
+  items(): IterableIterator<[string, FieldMatch]> {
+    return this.#map.entries();
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, FieldMatch]> {
+    return this.#map.entries();
+  }
+
+  /** A plain object with the headers as own keys (safe for "__proto__"). */
+  toJSON(): Record<string, FieldMatch> {
+    const out: Record<string, FieldMatch> = {};
+    for (const [header, match] of this.#map) {
+      Object.defineProperty(out, header, { value: match, enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+  }
+}
 
 function makeMappingMatches(
   source: Map<string, FieldMatch> | Record<string, FieldMatch> | Iterable<[string, FieldMatch]> = {},
 ): MappingMatches {
-  const out = {} as MappingMatches;
-  const entries: Iterable<[string, FieldMatch]> = source instanceof Map
-    ? source
-    : typeof (source as Iterable<[string, FieldMatch]>)[Symbol.iterator] === "function"
-      ? source as Iterable<[string, FieldMatch]>
-      : Object.entries(source as Record<string, FieldMatch>);
-
-  for (const [header, match] of entries) {
-    setOwnProperty(out, header, match);
+  if (source instanceof Map || typeof (source as Iterable<[string, FieldMatch]>)[Symbol.iterator] === "function") {
+    return new MappingMatches(source as Iterable<[string, FieldMatch]>);
   }
-
-  Object.defineProperties(out, {
-    get: {
-      value(header: string): FieldMatch | null {
-        return out[header] ?? null;
-      },
-    },
-    set: {
-      value(header: string, match: FieldMatch): MappingMatches {
-        setOwnProperty(out, header, match);
-        return out;
-      },
-    },
-    entries: {
-      value: function* entriesIterator(): IterableIterator<[string, FieldMatch]> {
-        yield* Object.entries(out) as Array<[string, FieldMatch]>;
-      },
-    },
-    items: {
-      value: function* itemsIterator(): IterableIterator<[string, FieldMatch]> {
-        yield* Object.entries(out) as Array<[string, FieldMatch]>;
-      },
-    },
-    [Symbol.iterator]: {
-      value: function* matchesIterator(): IterableIterator<[string, FieldMatch]> {
-        yield* Object.entries(out) as Array<[string, FieldMatch]>;
-      },
-    },
-  });
-
-  return out;
+  return new MappingMatches(Object.entries(source as Record<string, FieldMatch>));
 }
 
 
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { makeMappingMatches };
-export type { MappingMatches };
+export { MappingMatches, makeMappingMatches };

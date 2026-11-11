@@ -33,9 +33,51 @@ FUZZY_LOW_CONFIDENCE: float = 0.70
 # longer header (e.g. ``"tel"`` inside ``"job_titel"``), which silently
 # misroutes the column.  A genuine typo barely changes a header's length, so we
 # require the shorter of (alias, header) to be at least this fraction of the
-# longer before accepting the match.
-FUZZY_LENGTH_RATIO: float = 0.5
+# longer before accepting the match.  0.75 also rejects "alias plus a
+# qualifier" (``phone_ext`` is not ``phone``) and a short alias inside a
+# one-letter slip of a longer one (``tel_nationa`` is not ``nation``).
+FUZZY_LENGTH_RATIO: float = 0.75
 HEURISTIC_CONFIDENCE: float = 0.60
+
+# Headers longer than this skip the rewrite (normalized) and fuzzy layers; the
+# exact lookup still runs.  No real column name comes near it, and header text
+# is as attacker-controlled as a cell value (JSON or form payload keys), while
+# the indexed-header pattern backtracks quadratically on long runs of spaces.
+_MAX_REWRITE_HEADER_LEN: int = 200
+
+# The property of a "Group N - Property" header ("E-mail 1 - Value") that names
+# the group's value itself, so the bare group ("e_mail") may stand in for it.
+_VALUE_PROPERTIES: frozenset[str] = frozenset(
+    {"value", "address", "number", "url", "formatted"}
+)
+
+# Trailing words that describe another column instead of holding a value:
+# "E-mail 1 - Type" holds "* Work", "E-mail Display Name" a label for the
+# address, "Phone Ext" an extension.  Such a header is never the field its
+# leading words name ("E-mail Type" is not the email).
+_QUALIFIER_TAILS: tuple[tuple[str, ...], ...] = (
+    ("display", "name"),
+    ("type",),
+    ("label",),
+    ("kind",),
+    ("ext",),
+    ("extension",),
+)
+
+
+def _qualifier_tail(header: str) -> str | None:
+    """Return the qualifier a header ends with ("type", "display_name"), or None.
+
+    Only a qualifier that follows at least one other word counts: "Display
+    Name" alone is a name column, "E-mail Display Name" is not.  Index numbers
+    are ignored ("E-mail 2 Type" ends with "type" after "e mail").
+    """
+    words = [w for w in _normalize_header(header).split("_") if w and not w.isdigit()]
+    for tail in _QUALIFIER_TAILS:
+        if len(words) > len(tail) and tuple(words[-len(tail) :]) == tail:
+            return "_".join(tail)
+    return None
+
 
 # Fields that hold a contactable value rather than a reference to a record.
 # A header like ``primary_phone_id`` names a foreign key, so the ``_id``-suffix
@@ -142,6 +184,10 @@ class NormalizedMatchStrategy(MatchStrategy):
     # drift — see _ADDRESS_CONTEXT_TERMS.
     _ADDRESS_CONTEXT_TERMS = frozenset(
         {
+            # "Contact Province" names the contact's province.  Before
+            # FUZZY_LENGTH_RATIO went to 0.75 such a header reached its field
+            # by fuzzy containment; stripping the prefix reaches it directly.
+            "contact",
             "business",
             "mailing",
             "home",
@@ -218,7 +264,11 @@ class NormalizedMatchStrategy(MatchStrategy):
             return []
         grp = self._SEP_RE.sub("_", m.group(1).strip()).lower()
         prop = self._SEP_RE.sub("_", m.group(2).strip()).lower()
-        return [f"{grp}_{prop}", prop, grp]  # organization_name, name, organization
+        # organization_name, name; the bare group ("e_mail") only when the
+        # property names the group's value, never for "Type" or "Label".
+        if prop in _VALUE_PROPERTIES:
+            return [f"{grp}_{prop}", prop, grp]
+        return [f"{grp}_{prop}", prop]
 
     def _candidates_number_stripped(self, uscore: str) -> str | None:
         """Step 5: number stripping ("E-mail 2 Address" -> e_mail_address)."""
@@ -240,6 +290,26 @@ class NormalizedMatchStrategy(MatchStrategy):
                     items.append(stripped)
         return items
 
+    def _candidates_context_stripped(self, uscore: str) -> list[str]:
+        """Step 7: strip an address or contact context prefix (billing_city -> city).
+
+        What is left after ``contact_`` is kept off a value field when it names
+        a reference: ``contact_email_id`` is the contact's email record, not
+        an email address (the fuzzy layer's reference-header guard, which this
+        header met before ``contact_`` was stripped).
+        """
+        return [
+            candidate
+            for candidate in self._candidates_prefix_stripped(
+                uscore, self._address_prefixes
+            )
+            if not (
+                uscore.startswith("contact_")
+                and _is_reference_header(candidate)
+                and self._is_value_bearing(candidate)
+            )
+        ]
+
     def _candidates_reader_prefix(self, uscore: str) -> list[str]:
         """Step 7b: drop a leading ``your_`` ("Your work email" -> work_email).
 
@@ -260,7 +330,7 @@ class NormalizedMatchStrategy(MatchStrategy):
         return [
             rest,
             *self._candidates_prefix_stripped(rest, self._VENDOR_PREFIXES),
-            *self._candidates_prefix_stripped(rest, self._address_prefixes),
+            *self._candidates_context_stripped(rest),
         ]
 
     def _candidates_id_stripped(self, out: list[str]) -> list[str]:
@@ -315,7 +385,7 @@ class NormalizedMatchStrategy(MatchStrategy):
             out.append(num_stripped)
 
         out.extend(self._candidates_prefix_stripped(uscore, self._VENDOR_PREFIXES))
-        out.extend(self._candidates_prefix_stripped(uscore, self._address_prefixes))
+        out.extend(self._candidates_context_stripped(uscore))
         out.extend(self._candidates_reader_prefix(uscore))
 
         out.extend(self._candidates_id_stripped(out))
@@ -342,7 +412,15 @@ class NormalizedMatchStrategy(MatchStrategy):
     def match(
         self, header: str, value: str | None = None, **kwargs: object
     ) -> FieldMatch | None:
+        if len(header) > _MAX_REWRITE_HEADER_LEN:
+            return None
+        # A qualifier header ("E-mail 1 - Type") may only match an alias that
+        # keeps the qualifier ("business_type"); dropping it ("e_mail",
+        # "label") would file the type label as the value.
+        tail = _qualifier_tail(header)
         for candidate in self._candidates(header):
+            if tail is not None and not candidate.endswith(f"_{tail}"):
+                continue
             canonical = self._lookup(candidate)
             if canonical is not None:
                 return FieldMatch(
@@ -425,6 +503,8 @@ class FuzzyMatchStrategy(MatchStrategy):
         self, header: str, value: str | None = None, **kwargs: object
     ) -> FieldMatch | None:
         if not self._available:
+            return None
+        if len(header) > _MAX_REWRITE_HEADER_LEN or _qualifier_tail(header):
             return None
         from rapidfuzz import fuzz, process
 
@@ -684,6 +764,10 @@ class HeuristicMatchStrategy(MatchStrategy):
                 and not self._has_postal_header_hint(header)
             ):
                 continue
+            # "Phone 1 - Type" describes the phone column; a phone-shaped
+            # value in it is still not this contact's phone.
+            if _qualifier_tail(header):
+                return None
             return FieldMatch(
                 original=header,
                 canonical=canonical,

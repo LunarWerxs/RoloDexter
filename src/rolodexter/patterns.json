@@ -1,5 +1,5 @@
 {
- "version": "2.10.0",
+ "version": "2.13.0",
  "expansion": {
   "form_prefixes": ["billing_", "shipping_", "your_", "your-", "contact_", "customer_", "applicant_", "name_", "business_", "mailing_", "home_", "other_", "personal_", "primary_", "secondary_"],
   "form_fields": {
@@ -60,8 +60,8 @@
   "job_title": ["title", "job_title", "jobtitle", "position", "role", "designation", "job_role", "occupation", "job", "job_position", "work_title", "professional_title", "function", "job_function", "organization-title", "organization_title", "headline", "professional_headline"],
   "department": ["department", "dept", "division", "team", "group", "section", "business_unit", "area", "dept_name", "organization_department"],
   "industry": ["industry", "sector", "vertical", "market", "field_of_work", "trade", "business_type", "business_industry"],
-  "address_line1": ["address", "address1", "address_1", "line1", "line_1", "street", "street1", "street_address", "address_line_1", "addr1", "addr", "mailing_address", "street_address_1", "primary_address", "mailing_street", "street_line1", "street-address", "address-line1", "home_address"],
-  "address_line2": ["address2", "address_2", "line2", "line_2", "street2", "apt", "suite", "unit", "address_line_2", "addr2", "apartment", "street_address_2", "secondary_address", "floor", "building", "room", "other_street", "street_2", "address-line2", "address-line3", "unit_number", "suite_number", "apt_number"],
+  "address_line1": ["address", "address1", "address_1", "line1", "line_1", "street", "street1", "street_address", "address_line_1", "addr1", "addr", "mailing_address", "street_address_1", "primary_address", "mailing_street", "street_line1", "street-address", "address-line1", "home_address", "po_box", "pobox", "post_office_box"],
+  "address_line2": ["address2", "address_2", "line2", "line_2", "street2", "apt", "suite", "unit", "address_line_2", "addr2", "apartment", "street_address_2", "secondary_address", "floor", "building", "room", "other_street", "street_2", "address-line2", "address-line3", "unit_number", "suite_number", "apt_number", "extended_address"],
   "city": ["city", "locality", "town", "city_name", "municipality", "suburb", "address-level2", "city_town"],
   "state": ["state", "province", "region", "administrative_area", "state_code", "state_province_region", "state_province", "county", "territory", "state_name", "state_region", "address-level1"],
   "postal_code": ["postal_code", "postalcode", "zip", "zipcode", "zip_code", "postcode", "post_code", "zip_postal_code", "pin_code", "pincode", "mailing_postal_code", "postal"],
@@ -83,7 +83,7 @@
   "referrer_url": ["referrer_url", "http_referer", "referer", "referring_url", "referral_url", "page_referrer", "page_url", "form_url", "landing_page_url"],
   "lead_status": ["lead_status", "hs_lead_status", "lead_stage", "prospect_status", "lead_state"],
   "lifecycle_stage": ["lifecycle_stage", "lifecyclestage", "stage", "funnel_stage", "pipeline_stage", "deal_stage", "buyer_stage"],
-  "email_opt_out": ["email_opt_out", "hs_email_optout", "unsubscribed", "opt_out", "opted_out", "email_optout", "do_not_email", "email_consent", "gdpr_consent", "marketing_consent", "consent", "terms_accepted", "privacy_consent", "unsubscribed_from_emails", "data_processing_consent", "sms_consent", "phone_consent", "communication_consent"],
+  "email_opt_out": ["email_opt_out", "hs_email_optout", "unsubscribed", "opt_out", "opted_out", "email_optout", "do_not_email", "unsubscribed_from_emails"],
   "tags": ["tags", "tag", "labels", "label", "categories", "category", "groups", "segments", "lists", "keywords", "interest", "interests"],
   "source": ["source", "lead_source", "acquisition_source", "referral_source", "channel", "origin", "how_did_you_hear", "campaign_source", "traffic_source", "referrer", "referral", "how_heard", "attribution", "signup_source"],
   "utm_parameters": ["utm_parameters", "utm", "utm_data", "tracking_params", "campaign_params"],
@@ -103,7 +103,7 @@
   "metadata": ["metadata", "meta", "custom_fields", "extra", "additional_data", "properties", "attributes", "custom_data", "ip_address"],
   "source_id": ["source_id", "external_id", "orig_id", "original_id", "remote_id", "foreign_id", "system_id", "stripe_id", "crm_id"],
   "source_service": ["source_service", "source_system", "provider", "data_source", "imported_from", "integration", "platform"],
-  "subscribed": ["subscribed", "is_subscribed", "subscription_status", "opted_in", "opt_in", "optin", "email_subscribed", "newsletter", "mailing_list", "subscribe_consent", "marketing_optin", "newsletter_consent", "double_opt_in"],
+  "subscribed": ["subscribed", "is_subscribed", "subscription_status", "opted_in", "opt_in", "optin", "email_subscribed", "newsletter", "mailing_list", "subscribe_consent", "marketing_optin", "newsletter_consent", "double_opt_in", "email_consent", "marketing_consent", "communication_consent"],
   "verified": ["verified", "is_verified", "email_verified", "confirmed", "is_confirmed", "email_confirmed", "validated"]
  }
 }

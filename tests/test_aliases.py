@@ -186,12 +186,21 @@ class TestExtendedOptOutAliases:
     @pytest.mark.parametrize(
         "alias, expected",
         [
-            # Negative / opt-out semantics → email_opt_out
-            ("consent", "email_opt_out"),
-            ("terms_accepted", "email_opt_out"),
-            ("privacy_consent", "email_opt_out"),
-            ("gdpr_consent", "email_opt_out"),
-            ("marketing_consent", "email_opt_out"),
+            # Opt-out words → email_opt_out
+            ("unsubscribed_from_emails", "email_opt_out"),
+            ("do_not_email", "email_opt_out"),
+            # A consent is a yes to being emailed, not an opt-out (H1)
+            ("marketing_consent", "subscribed"),
+            ("email_consent", "subscribed"),
+            ("communication_consent", "subscribed"),
+            # Consents that are not about email marketing map to no field (H1)
+            ("consent", None),
+            ("terms_accepted", None),
+            ("privacy_consent", None),
+            ("gdpr_consent", None),
+            ("data_processing_consent", None),
+            ("sms_consent", None),
+            ("phone_consent", None),
             # Affirmative / opt-in semantics → subscribed
             ("optin", "subscribed"),
             ("opt_in", "subscribed"),
@@ -199,7 +208,7 @@ class TestExtendedOptOutAliases:
         ],
     )
     def test_optout_alias(
-        self, registry: PatternRegistry, alias: str, expected: str
+        self, registry: PatternRegistry, alias: str, expected: str | None
     ) -> None:
         assert registry.exact_lookup(alias) == expected
 
@@ -299,7 +308,7 @@ class TestPatternVersionBump:
     """Verify patterns.json version was bumped for this release."""
 
     def test_version_matches_pattern_table(self, registry: PatternRegistry) -> None:
-        assert registry.version == "2.10.0"
+        assert registry.version == "2.13.0"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -424,7 +433,8 @@ class TestWishlistServicesDynamic:
             ("firstName", "first_name"),
             ("lastName", "last_name"),
             ("phone", "phone"),
-            ("status", "lead_status"),
+            # "status" is deliberately unmapped (too broad: Elastic Email's is a
+            # subscription state); see test_status_alone_maps_to_nothing.
             ("dateAdded", "created_at"),
             # smtp2go
             ("subject", "subject"),
@@ -671,3 +681,8 @@ class TestV23CollisionFixes:
         assert registry.exact_lookup("handle") is None
         # 're' removed from subject (Python module name collision)
         assert registry.exact_lookup("re") is None
+
+    def test_status_alone_maps_to_nothing(self) -> None:
+        """No layer guesses lead_status from a bare 'status' (fuzzy ratio 0.75)."""
+        assert not ContactMapper().identify("status").is_matched
+        assert ContactMapper().identify("Lead Status").canonical == "lead_status"

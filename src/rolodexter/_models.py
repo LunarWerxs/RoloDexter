@@ -7,6 +7,7 @@ Extracted verbatim from ``core.py``, which re-imports every name here so
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from typing import Any
@@ -109,6 +110,10 @@ def _warning_category(warning: str) -> str:
         return WarningCategory.PHONE_NORMALIZATION.value
     if "embedded phone" in warning:
         return WarningCategory.EMBEDDED_PHONE_LIMIT.value
+    if "does not look like an email address" in warning:
+        return WarningCategory.EMAIL_VALIDATION.value
+    if "is ambiguous (day/month order" in warning:
+        return WarningCategory.DATE_AMBIGUOUS.value
     return WarningCategory.OTHER.value
 
 
@@ -202,6 +207,11 @@ class CanonicalField(str, Enum):
     UNKNOWN = "unknown"
 
 
+# Phone fields whose number belongs to one person.  ``work_phone`` (often a
+# switchboard) and ``fax`` are shared, so they never become identity keys.
+_IDENTITY_PHONE_FIELDS: tuple[str, ...] = ("phone", "home_phone", "whatsapp")
+
+
 def _validate_confidence_threshold(value: float) -> float:
     """Return *value* as a float if it is inside the public confidence range."""
     threshold = float(value)
@@ -216,9 +226,31 @@ def _value_for_matching(value: Any) -> str | None:
         return None
     if isinstance(value, str):
         return value
+    if isinstance(value, float) and value.is_integer():
+        # A whole-number float is written as its digits, without ``.0``, so a
+        # phone that arrived as ``4155550100.0`` (pandas, JSON) still has the
+        # shape of a phone.  The JS port writes the same text.
+        return str(int(value))
     if isinstance(value, bool | int | float):
         return str(value)
     return None
+
+
+def _warning_log_line(warning: str, headers: Iterable[str]) -> str:
+    """Return the text logged (or raised) for *warning*: header and category only.
+
+    :attr:`MappingResult.warnings` keep the full text, because it is the
+    caller's own data handed back to the caller.  A log line or an exception
+    message travels further (log shippers, error trackers), so it names only
+    the column the warning is about and the warning's category, never the
+    cell value.  *headers* are the payload keys; the one whose ``repr`` opens
+    the warning is the column it is about.
+    """
+    category = _warning_category(warning)
+    for header in headers:
+        if warning.startswith(f"{header!r}: "):
+            return f"{header!r}: {category}"
+    return category
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -363,7 +395,21 @@ class MappingResult:
         phones, and source IDs. Prefixes keep unlike identifiers in separate
         namespaces, while ``source_service`` scopes vendor IDs when available.
         Empty values are ignored and duplicates are removed.
+
+        Only values that identify one person become keys: an ``email:`` key
+        only from a value shaped like an email address (the same check that
+        drives the email warning), and a ``phone:`` key only from a phone that
+        normalized to E.164 (it starts with ``+``; an ``;ext=`` suffix is
+        dropped from the key).  ``work_phone`` and ``fax`` are left out,
+        because a switchboard or office fax is shared by many people.
+        Placeholders such as ``n/a`` or ``-`` therefore never become keys.
+
+        .. versionchanged:: 2.14.0
+           Keys are built only from email-shaped emails and E.164 phones;
+           ``work_phone`` and ``fax`` no longer contribute.
         """
+        from ._normalizers import _EMAIL_SHAPE_RE
+
         keys: list[str] = []
 
         def add(key: str) -> None:
@@ -372,12 +418,16 @@ class MappingResult:
 
         for email in self.get_all_emails():
             text = email.strip().lower()
-            if text:
+            if text and _EMAIL_SHAPE_RE.match(text):
                 add(f"email:{text}")
-        for phone in self.get_all_phones():
-            text = phone.strip()
-            if text:
-                add(f"phone:{text}")
+        for field_name in _IDENTITY_PHONE_FIELDS:
+            raw = self.normalized.get(field_name)
+            for phone in raw if isinstance(raw, list) else [raw]:
+                if not isinstance(phone, str):
+                    continue
+                text = phone.strip().split(";ext=", 1)[0]
+                if text.startswith("+") and len(text) > 1:
+                    add(f"phone:{text}")
 
         raw_ids = self.normalized.get("source_id")
         source_ids = raw_ids if isinstance(raw_ids, list) else [raw_ids]
@@ -447,6 +497,12 @@ class MappingProfile:
     unmapped_counts: dict[str, int]
     strategy_counts: dict[str, int]
     warning_counts: dict[str, int]
+    embedded_phone_count: int = 0
+    """Phones found in free text (``extract_embedded_phones``).  Counted here,
+    not in ``fields_seen``/``matched_count``, because they are not columns.
+
+    .. versionadded:: 2.14.0
+    """
 
     @property
     def match_rate(self) -> float:
@@ -471,6 +527,7 @@ class MappingProfile:
             "unmapped_counts": dict(self.unmapped_counts),
             "strategy_counts": dict(self.strategy_counts),
             "warning_counts": dict(self.warning_counts),
+            "embedded_phone_count": self.embedded_phone_count,
         }
 
     def explain(self) -> str:

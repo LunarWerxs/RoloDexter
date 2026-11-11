@@ -159,11 +159,11 @@ class TestI18nTranslateBatchFallback:
         from rolodexter import i18n
 
         call_count = {"batch": 0}
-        seen_timeout: list[float] = []
+        seen_kwargs: list[dict[str, object]] = []
 
         class RetryTranslator:
             def __init__(self, **kwargs):
-                seen_timeout.append(kwargs["timeout"])
+                seen_kwargs.append(kwargs)
 
             def translate_batch(self, phrases):
                 call_count["batch"] += 1
@@ -185,7 +185,9 @@ class TestI18nTranslateBatchFallback:
             retry_backoff=0,
         )
         assert call_count["batch"] == 2
-        assert seen_timeout == [3.5]
+        # M12: GoogleTranslator turns unknown keyword arguments into query
+        # parameters, so timeout= is not passed; _call_with_timeout enforces it.
+        assert seen_kwargs == [{"source": "en", "target": "es"}]
         assert results == ["translated_hello", "translated_world"]
 
     def test_fallback_per_phrase(self, monkeypatch: pytest.MonkeyPatch) -> None:

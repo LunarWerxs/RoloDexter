@@ -2,11 +2,11 @@
 // index.ts imports what it still uses and re-exports exactly what it used to
 // export, so ./public.ts, ./core.ts, ./cli.ts and ./i18n.ts see no change.
 import { dataframeColumnValues, dataframeColumns, flatten, isDataFrameLike, iterableColumnValues, mappedColumnValues, setDataframeColumn } from "./_dataframe.js";
-import { CANONICAL_FIELD_MEMBERS, CanonicalField, EXACT_MATCH_CONFIDENCE, FieldMatch, NormalizationError, PHONE_FIELDS, PatternLoadError, fieldMatch, isMatched, mergeValue, unknown, valueForMatching } from "./_models.js";
+import { CANONICAL_FIELD_MEMBERS, CanonicalField, EXACT_MATCH_CONFIDENCE, FieldMatch, NormalizationError, PHONE_FIELDS, PatternLoadError, fieldMatch, isMatched, mergeValue, unknown, valueForMatching, warningCategory, warningLogLine } from "./_models.js";
 import type { CanonicalFieldMember, CompileSchemaOptions, DataFrameLike, MapDataFrameOptions, MapPayloadOptions, ProfileOptions } from "./_models.js";
 import { normalizeValue, valueWarnings } from "./_normalizers.js";
 import { extractEmbeddedPhones } from "./_phone.js";
-import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError } from "./_pycompat.js";
+import { assertMappingPayload, assertPythonMethodOptions, assertPythonOptionsKeys, attributeError, emitDeprecationWarning, emitRolodexterWarning, emitRolodexterWarnings, isPlainObject, lockPythonFrozenFields, pyRepr, pyString, pythonPositionalTypeError, pythonTypeName, pyStrip, setOwnProperty, validateConfidenceThreshold, valueError } from "./_pycompat.js";
 import { PatternRegistry } from "./_registry.js";
 import { MappingProfile, MappingResult, makeMappingMatches } from "./_results.js";
 import type { MappingMatches } from "./_results.js";
@@ -35,6 +35,45 @@ export { ExactMatchStrategy, FuzzyMatchStrategy, HeuristicMatchStrategy, MatchSt
 export type { ContactMapperOptions, MatchOptions } from "./_strategies.js";
 export const DEFAULT_HEADER_CACHE_MAX_SIZE = 4096;
 
+/** Text of the deprecation warning for an ignored argument; Python warns with the same text. */
+function serviceDeprecationMessage(name: string): string {
+  return `the '${name}' argument is ignored since rolodexter 2.0 and will be removed in a future release`;
+}
+
+/**
+ * The value warnings for one cleaned cell: the shared valueWarnings, plus the
+ * phone warning for a phone value that is not text (a float with a fraction,
+ * a boolean, an object, a list that is not all text), with the same text and
+ * value repr Python's value_warnings gives. A whole number never gets here as
+ * a number: the phone cleaner turns it into digit text first.
+ */
+function fieldValueWarnings(key: string, canonical: string, value: unknown): string[] {
+  if (
+    PHONE_FIELDS.has(canonical) &&
+    value !== null &&
+    value !== undefined &&
+    // An empty cell (NaN from a numeric column) is not a phone value, as in Python.
+    !(typeof value === "number" && Number.isNaN(value)) &&
+    typeof value !== "string" &&
+    !(Array.isArray(value) && value.every((item) => typeof item === "string"))
+  ) {
+    return [
+      `${pyRepr(key)}: phone value ${pyRepr(value)} could not be normalized to E.164 (set a matching default_region?)`,
+    ];
+  }
+  return valueWarnings(key, canonical, value);
+}
+
+/** Emit the log form of each warning (header and category only) and throw it in strict mode. */
+function reportWarnings(warnings: readonly string[], headers: Iterable<string>, isStrict: boolean): void {
+  const known = [...headers];
+  const logLines = warnings.map((warning) => warningLogLine(warning, known));
+  emitRolodexterWarnings(logLines);
+  if (isStrict) {
+    throw new NormalizationError(logLines.join("; "));
+  }
+}
+
 Object.defineProperty(CanonicalField, Symbol.iterator, {
   value: function* iterCanonicalFields(): IterableIterator<CanonicalFieldMember> {
     yield* Object.values(CANONICAL_FIELD_MEMBERS);
@@ -47,7 +86,7 @@ export class MappingSchema {
   readonly default_region: string | null | undefined;
   readonly mapper: ContactMapper;
 
-  constructor(matches: Record<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null) {
+  constructor(matches: Record<string, FieldMatch> | Map<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null) {
     if (arguments.length === 0) {
       throw new TypeError("MappingSchema.__init__() missing 2 required positional arguments: 'matches' and 'mapper'");
     }
@@ -120,10 +159,14 @@ export class MappingSchema {
   /**
    * Rebuild a plan saved by to_dict and bind it to `mapper`.
    *
-   * The restored verdicts are seeded into the mapper's header cache, so later
-   * map_payload calls route columns exactly as the saved plan says rather than
-   * re-resolving them. Headers the plan records as `unknown` are skipped, so
-   * per-row value heuristics can still match them.
+   * The restored verdicts are seeded into the mapper (seed_header_cache), so
+   * later map_payload calls route columns exactly as the saved plan says rather
+   * than re-resolving them. Seeded verdicts are kept apart from the size-limited
+   * header cache, so header_cache_max_size 0, clear_cache() and eviction do not
+   * drop them. Headers the plan records as `unknown` are skipped, so per-row
+   * value heuristics can still match them. A column naming a field that is not
+   * a CanonicalField, a field of the mapper's alias table or an override target
+   * is refused with PatternLoadError.
    */
   static from_dict(
     data: Record<string, unknown>,
@@ -144,6 +187,11 @@ export class MappingSchema {
       throw new PatternLoadError("Invalid mapping schema: 'columns' must be an object");
     }
 
+    const knownFields = new Set<string>([
+      ...Object.values(CANONICAL_FIELD_MEMBERS).map((member) => member.value),
+      ...mapper.registry.canonical_fields,
+      ...mapper.overrideFields,
+    ]);
     const matches: Record<string, FieldMatch> = {};
     for (const [header, rawEntry] of Object.entries(columns as Record<string, unknown>)) {
       if (rawEntry === null || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
@@ -159,6 +207,11 @@ export class MappingSchema {
       if (typeof canonical !== "string" || !pyStrip(canonical)) {
         throw new PatternLoadError(
           `Invalid mapping schema: column ${pyRepr(header)} has no canonical field`,
+        );
+      }
+      if (!knownFields.has(canonical)) {
+        throw new PatternLoadError(
+          `Invalid mapping schema: column ${pyRepr(header)} names ${pyRepr(canonical)}, which is not a canonical field`,
         );
       }
       if (typeof strategy !== "string" || typeof confidence !== "number") {
@@ -227,6 +280,11 @@ export class ContactMapper {
   #valueStrategies: MatchStrategy[];
   #cacheablePipeline: boolean;
   #headerCache = new Map<string, FieldMatch | undefined>();
+  // Verdicts replayed from a saved plan (MappingSchema.from_dict). Kept apart
+  // from the LRU header cache and checked first, so a plan survives
+  // header_cache_max_size 0, clear_cache() and eviction.
+  #seededHeaders = new Map<string, FieldMatch>();
+  #overrideFields: ReadonlySet<string>;
 
   constructor(options: ContactMapperOptions = {}) {
     if (arguments.length > 1 || (arguments.length === 1 && options !== undefined && !isPlainObject(options))) {
@@ -240,6 +298,15 @@ export class ContactMapper {
       languages: opts.languages,
       overrides: opts.overrides,
     });
+    if (opts.default_service !== undefined && opts.default_service !== null) {
+      emitDeprecationWarning(serviceDeprecationMessage("default_service"));
+    }
+    const overrides = opts.overrides;
+    this.#overrideFields = new Set(
+      overrides && typeof overrides === "object"
+        ? Object.values(overrides).filter((target): target is string => typeof target === "string")
+        : [],
+    );
     this.#normalize = opts.normalize ?? true;
     const defaultRegion = opts.default_region;
     this.#defaultRegion = defaultRegion === undefined ? "US" : defaultRegion;
@@ -283,10 +350,18 @@ export class ContactMapper {
     return this.#registry;
   }
 
+  /** @internal Override targets a saved plan may name besides the built-in fields. */
+  get overrideFields(): ReadonlySet<string> {
+    return this.#overrideFields;
+  }
+
   identify(header: string, options: { value?: string; service?: string | null; default_region?: string | null } = {}): FieldMatch {
     assertPythonMethodOptions("ContactMapper.identify", "header", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.identify", options, IDENTIFY_OPTION_KEYS);
     const opts = options ?? {};
+    if (opts.service !== undefined && opts.service !== null) {
+      emitDeprecationWarning(serviceDeprecationMessage("service"));
+    }
     const region = opts.default_region ?? this.#defaultRegion;
     for (const strategy of this.#strategies) {
       const result = strategy.match(header, opts.value ?? null, {
@@ -361,25 +436,26 @@ export class ContactMapper {
       return;
     }
 
-    const finalValue = normalizeValues ? normalizeValue(match.canonical, value, region) : value;
-    if (
-      PHONE_FIELDS.has(match.canonical) &&
-      typeof finalValue === "string" &&
-      pyStrip(finalValue) &&
-      !finalValue.startsWith("+")
-    ) {
-      warnings.push(
-        `${pyRepr(key)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
-      );
+    if (!normalizeValues) {
+      mergeValue(normalized, match.canonical, value);
+      return;
     }
-    // Surface silent degradation beyond phones too: an "email" that is not
-    // shaped like one, or a date whose day/month order cannot be known.
-    if (!PHONE_FIELDS.has(match.canonical)) {
-      warnings.push(...valueWarnings(key, match.canonical, finalValue));
-    }
+    const finalValue = normalizeValue(match.canonical, value, region);
+    // Surface silent degradation, as Python's value_warnings does: a phone
+    // that did not reach E.164 (or is not text at all), an "email" that is
+    // not shaped like one, a date whose day/month order cannot be known.
+    warnings.push(...fieldValueWarnings(key, match.canonical, finalValue));
     mergeValue(normalized, match.canonical, finalValue);
   }
 
+  /**
+   * Map one contact record. A canonical field holds one value, or a list only
+   * when two or more columns of the payload map to it with different values;
+   * `tags` is always a list. With `depth` > 1 only plain objects are
+   * flattened (arrays, including arrays of objects, stay one value); two keys
+   * that flatten to one name keep the later value and record a warning.
+   * `service` is ignored since 2.0 and emits a DeprecationWarning.
+   */
   map_payload(payload: Record<string, unknown>, options: MapPayloadOptions = {}): MappingResult {
     assertPythonMethodOptions("ContactMapper.map_payload", "payload", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.map_payload", options, MAP_PAYLOAD_OPTION_KEYS);
@@ -388,8 +464,12 @@ export class ContactMapper {
     if (Object.prototype.hasOwnProperty.call(opts, "normalize")) {
       throw new TypeError("ContactMapper.map_payload() got an unexpected keyword argument 'normalize'");
     }
+    if (opts.service !== undefined && opts.service !== null) {
+      emitDeprecationWarning(serviceDeprecationMessage("service"));
+    }
     const depth = Math.max(1, Math.min(opts.depth ?? 1, 5));
-    const flat = depth > 1 ? flatten(payload, depth) : payload;
+    const collisions: string[] = [];
+    const flat = depth > 1 ? flatten(payload, depth, "", 1, collisions) : payload;
     const regionOption = opts.default_region;
     const region = regionOption === undefined || regionOption === null ? this.#defaultRegion : regionOption;
     const threshold = validateConfidenceThreshold(opts.confidence_threshold ?? this.#confidenceThreshold);
@@ -400,7 +480,9 @@ export class ContactMapper {
     const normalized: Record<string, unknown> = {};
     const unmapped: Record<string, unknown> = {};
     const fieldMatches: FieldMatch[] = [];
-    const warnings: string[] = [];
+    const warnings: string[] = collisions.map(
+      (key) => `${pyRepr(key)}: two payload keys flatten to this name; the later value replaced the earlier one`,
+    );
 
     for (const [key, value] of Object.entries(flat)) {
       this.#mapField(key, value, region, threshold, normalizeValues, normalized, unmapped, fieldMatches, warnings);
@@ -411,10 +493,9 @@ export class ContactMapper {
     }
 
     if (warnings.length > 0) {
-      emitRolodexterWarnings(warnings);
-      if (isStrict) {
-        throw new NormalizationError(warnings.join("; "));
-      }
+      // Log and throw header + category only; the values stay on
+      // result.warnings, which goes back to the caller alone.
+      reportWarnings(warnings, Object.keys(flat), isStrict);
     }
 
     return new MappingResult(normalized, unmapped, fieldMatches, warnings);
@@ -423,13 +504,25 @@ export class ContactMapper {
   map_batch(payloads: Iterable<Record<string, unknown>>, options: MapPayloadOptions = {}): MappingResult[] {
     assertPythonMethodOptions("ContactMapper.map_batch", "payloads", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.map_batch", options, MAP_PAYLOAD_OPTION_KEYS);
-    return [...this.map_stream(payloads, options)];
+    return [...this.#mapStream(payloads, this.#withoutService(options))];
   }
 
   map_stream(payloads: Iterable<Record<string, unknown>>, options: MapPayloadOptions = {}): Generator<MappingResult> {
     assertPythonMethodOptions("ContactMapper.map_stream", "payloads", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.map_stream", options, MAP_PAYLOAD_OPTION_KEYS);
-    return this.#mapStream(payloads, options);
+    return this.#mapStream(payloads, this.#withoutService(options));
+  }
+
+  /** Warn once about a passed `service`, then drop it so rows do not warn again. */
+  #withoutService(options: MapPayloadOptions): MapPayloadOptions {
+    const opts = options ?? {};
+    if (opts.service === undefined || opts.service === null) {
+      return opts;
+    }
+    emitDeprecationWarning(serviceDeprecationMessage("service"));
+    const rest: MapPayloadOptions = { ...opts };
+    delete rest.service;
+    return rest;
   }
 
   *#mapStream(payloads: Iterable<Record<string, unknown>>, options: MapPayloadOptions = {}): Generator<MappingResult> {
@@ -463,6 +556,8 @@ export class ContactMapper {
     let rowsSeen = 0;
     let matchedCount = 0;
     let unmatchedCount = 0;
+    // Phones found in free text are not columns: counted apart (L18).
+    let embeddedPhoneCount = 0;
     const iterator = payloads[Symbol.iterator]();
 
     while (maxRows === null || maxRows === undefined || rowsSeen < maxRows) {
@@ -480,7 +575,9 @@ export class ContactMapper {
       rowsSeen += 1;
       for (const match of result.field_matches) {
         increment(strategyCounts, match.strategy);
-        if (isMatched(match)) {
+        if (match.strategy === "embedded_phone") {
+          embeddedPhoneCount += 1;
+        } else if (isMatched(match)) {
           matchedCount += 1;
           increment(canonicalCounts, match.canonical);
         } else {
@@ -489,15 +586,7 @@ export class ContactMapper {
         }
       }
       for (const warning of result.warnings) {
-        let category = "other";
-        if (warning.includes("dropped low-confidence match")) {
-          category = "low_confidence";
-        } else if (warning.includes("could not be normalized to E.164")) {
-          category = "phone_normalization";
-        } else if (warning.includes("embedded phone")) {
-          category = "embedded_phone_limit";
-        }
-        increment(warningCounts, category);
+        increment(warningCounts, warningCategory(warning));
       }
     }
 
@@ -510,6 +599,7 @@ export class ContactMapper {
       Object.fromEntries(unmappedCounts),
       Object.fromEntries(strategyCounts),
       Object.fromEntries(warningCounts),
+      embeddedPhoneCount,
     );
   }
 
@@ -537,13 +627,10 @@ export class ContactMapper {
     }
 
     if (warnings.length > 0) {
-      emitRolodexterWarnings(warnings);
-      if (isStrict) {
-        throw new NormalizationError(warnings.join("; "));
-      }
+      reportWarnings(warnings, matches.keys(), isStrict);
     }
 
-    return new MappingSchema(Object.fromEntries(matches), this, region);
+    return new MappingSchema(matches, this, region);
   }
 
   /** Build the collision-free output-column rename plan for `map_dataframe`, warning on any collision. */
@@ -579,7 +666,7 @@ export class ContactMapper {
     return rename;
   }
 
-  /** Normalize the renamed output columns in place for `map_dataframe`, pushing any phone-normalization warnings. */
+  /** Normalize the renamed output columns in place for `map_dataframe`, pushing every value warning (phones, emails, dates). */
   #normalizeDataframeColumns(out: DataFrameLike, rename: Map<string, string>, region: string | null, warnings: string[]): void {
     for (const [oldName, newName] of rename) {
       const canonical = newName.split("__", 1)[0] ?? newName;
@@ -589,22 +676,24 @@ export class ContactMapper {
         continue;
       }
       setDataframeColumn(out, newName, mapped);
-      if (PHONE_FIELDS.has(canonical)) {
-        for (const finalValue of iterableColumnValues(mapped)) {
-          if (
-            typeof finalValue === "string" &&
-            pyStrip(finalValue) &&
-            !finalValue.startsWith("+")
-          ) {
-            warnings.push(
-              `${pyRepr(oldName)}: phone value ${pyRepr(finalValue)} could not be normalized to E.164 (set a matching default_region?)`,
-            );
-          }
-        }
+      for (const finalValue of iterableColumnValues(mapped)) {
+        warnings.push(...fieldValueWarnings(oldName, canonical, finalValue));
       }
     }
   }
 
+  /**
+   * Rename a dataframe's columns to canonical fields and clean their values.
+   *
+   * No JS dataframe library is a dependency, and none is tested against. What
+   * is supported is the DataFrameLike shape: a `columns` list (iterable or
+   * array-like) and a `rename()` that accepts the pandas-style
+   * `{ columns: { old: new } }` argument (or, failing that, a plain
+   * `{ old: new }` record) and returns the renamed frame. Column values are
+   * read with `get(column)` (or a property of that name) and written back with
+   * `set(column, values)` (or a property); values must be an array or have a
+   * `map()`. Every value warning (phones, emails, dates) is reported.
+   */
   map_dataframe(rows: DataFrameLike, options: MapDataFrameOptions = {}): unknown {
     assertPythonMethodOptions("ContactMapper.map_dataframe", "df", arguments.length, options);
     assertPythonOptionsKeys("ContactMapper.map_dataframe", options, MAP_DATAFRAME_OPTION_KEYS);
@@ -644,10 +733,7 @@ export class ContactMapper {
         this.#normalizeDataframeColumns(out, rename, region, warnings);
       }
       if (warnings.length > 0) {
-        emitRolodexterWarnings(warnings);
-        if (isStrict) {
-          throw new NormalizationError(warnings.join("; "));
-        }
+        reportWarnings(warnings, columns, isStrict);
       }
       return out;
     }
@@ -660,27 +746,23 @@ export class ContactMapper {
    *
    * Entries whose canonical field is `unknown` are skipped rather than cached
    * as a miss, so a column the plan could not resolve statically can still be
-   * matched from its value by the per-row heuristics.
+   * matched from its value by the per-row heuristics. Seeded verdicts are held
+   * apart from the size-limited header cache and checked before it, so they
+   * survive header_cache_max_size 0, clear_cache() and eviction.
    */
-  seed_header_cache(matches: Record<string, FieldMatch>): void {
-    for (const [header, match] of Object.entries(matches)) {
+  seed_header_cache(matches: Record<string, FieldMatch> | Map<string, FieldMatch>): void {
+    const entries = matches instanceof Map ? matches.entries() : Object.entries(matches);
+    for (const [header, match] of entries) {
       if (match.canonical === "unknown") {
+        this.#seededHeaders.delete(header);
         continue;
       }
+      this.#seededHeaders.set(header, match);
       this.#headerCache.delete(header);
-      this.#headerCache.set(header, match);
-    }
-    if (this.#headerCacheMaxSize !== null) {
-      while (this.#headerCache.size > this.#headerCacheMaxSize) {
-        const oldest = this.#headerCache.keys().next();
-        if (oldest.done) {
-          break;
-        }
-        this.#headerCache.delete(oldest.value);
-      }
     }
   }
 
+  /** Clear cached header verdicts. Verdicts seeded from a saved plan are kept. */
   clear_cache(): void {
     if (arguments.length > 0) {
       throw pythonPositionalTypeError("ContactMapper.clear_cache", 1, arguments.length + 1);
@@ -707,6 +789,10 @@ export class ContactMapper {
       });
     }
 
+    const seeded = this.#seededHeaders.get(header);
+    if (seeded) {
+      return seeded;
+    }
     if (this.#headerCache.has(header)) {
       const cached = this.#headerCache.get(header);
       this.#headerCache.delete(header);

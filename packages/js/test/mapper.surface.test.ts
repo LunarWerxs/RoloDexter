@@ -299,7 +299,7 @@ test("shared conformance fixtures match Python-diverged behaviors", () => {
   for (const c of cases.schemas) {
     const schema = mapper.compile_schema(c.headers, c.mapper_options ?? {});
     for (const [header, expected] of Object.entries(c.expected_matches)) {
-      const fieldMatch = schema.matches[header];
+      const fieldMatch = schema.matches.get(header)!;
       assert.equal(fieldMatch.canonical, expected.canonical, `${c.id}: ${header}`);
       assert.equal(fieldMatch.confidence, expected.confidence, `${c.id}: ${header}`);
       assert.equal(fieldMatch.strategy, expected.strategy, `${c.id}: ${header}`);

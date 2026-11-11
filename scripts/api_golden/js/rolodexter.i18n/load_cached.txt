@@ -1,2 +1,2 @@
-# rolodexter.i18n.load_cached  api-hash 79f76535
+# rolodexter.i18n.load_cached  api-hash 5a969d22
 function load_cached(lang_code: string): LanguageData | null

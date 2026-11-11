@@ -17,12 +17,14 @@ to the most recent release before reporting.
 ## Supply-chain Hardening
 
 - **Releases use PyPI [trusted publishing](https://docs.pypi.org/trusted-publishers/)
-  (OIDC)** - no long-lived API tokens are stored anywhere. Published
+  (OIDC)** - no PyPI API token exists. Published
   artifacts include [PEP 740](https://peps.python.org/pep-0740/) provenance
   attestations.
 - **NPM releases are published from GitHub Actions with
   [provenance](https://docs.npmjs.com/generating-provenance-statements)**
   (Sigstore), linking each published tarball to its source commit and build.
+  The publish step uses an npm automation token held only in the `npm`
+  GitHub environment; it is to be replaced by npm trusted publishing.
 - **CI runs a [`gitleaks`](https://github.com/gitleaks/gitleaks) secret scan**
   on every push and pull request.
 - **Dependencies are monitored by Dependabot** and pinned with an upper bound

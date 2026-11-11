@@ -164,7 +164,7 @@ test("map_dataframe honors normalize, strict, and threshold options", () => {
   });
   assert.throws(
     () => mapper.map_dataframe(new TinyFrame({ phone: ["not a phone"] }), { strict: true }),
-    /default_region\?/,
+    /'phone': phone_normalization/,
   );
 });
 

@@ -47,22 +47,13 @@ test("parse reads dial-out prefixes, tel: URIs, vanity letters and extensions", 
   assert.equal(parse("+1 555 123 4567 x 55")?.extension, "55");
 });
 
-test("parse returns null for text and non-strings, and falls back to a US local number", () => {
+test("parse returns null for text, non-strings and a US 7-digit local-only number", () => {
   assert.equal(parse("not a phone"), null);
   assert.equal(format_e164("not a phone", "GB"), null);
   assert.equal(is_valid("not a phone"), false);
   assert.equal(parse(42 as never, "US"), null);
-
-  const local = parse("555-1212", "US");
-  assert.ok(local);
-  assert.equal(local.is_possible, true);
-  assert.equal(local.is_valid, false);
-  assert.equal(format_national(local), "555-1212");
-  // The local-number fallback follows the region, as in the Python package.
-  const gb = parse("555-1212", "GB");
-  assert.ok(gb);
-  assert.equal(gb.calling_code, 44);
-  assert.equal(gb.national_number, "5551212");
+  // M8: a 7-digit number is possible only locally, so it is not emitted as E.164.
+  assert.equal(parse("555-1212", "US"), null);
 });
 
 test("is_number_match grades exact, extension-only, national and non matches", () => {
@@ -105,13 +96,13 @@ test("PhoneNumberMatcher finds numbers in text and honours max_matches", () => {
 
 test("normalizePhone and isPossiblePhone leave anything unparseable untouched", () => {
   assert.equal(normalizePhone("  +1 650 253 0000  ", null), "+16502530000");
-  assert.equal(normalizePhone("555-1212", "US"), "+15551212");
+  assert.equal(normalizePhone("555-1212", "US"), "555-1212");
   assert.equal(normalizePhone("hello", null), "hello");
   assert.equal(normalizePhone("   ", null), "   ");
-  assert.equal(normalizePhone(42, null), 42);
+  assert.equal(normalizePhone(42, null), "42"); // C3: a whole number is cleaned as its digits
 
   assert.equal(isPossiblePhone("+1 650 253 0000", undefined), true);
-  assert.equal(isPossiblePhone("555-1212", "US"), true);
+  assert.equal(isPossiblePhone("555-1212", "US"), false);
   assert.equal(isPossiblePhone("hello", null), false);
 });
 

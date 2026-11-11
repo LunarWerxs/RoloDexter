@@ -63,7 +63,6 @@ test("no shipped declaration names a stripped @internal declaration", () => {
     "loadCachedLanguage",
     "getAllCacheDirs",
     "getWritableCacheDir",
-    "generateLanguageAsync",
     "TranslateFunction",
     "InternalGenerateLanguageOptions",
     "GenerateLanguageAsyncOptions",
@@ -72,6 +71,19 @@ test("no shipped declaration names a stripped @internal declaration", () => {
     const text = readFileSync(join(distDir, entry), "utf8");
     for (const name of stripped) {
       assert.doesNotMatch(text, new RegExp(`\\b${name}\\b`), `${entry} still names ${name}`);
+    }
+  }
+});
+
+test("generateLanguageAsync is declared by the i18n entry only, as its own public function", () => {
+  // H7: the internal generator stays stripped; i18n.ts declares a public
+  // wrapper taking the public GenerateLanguageOptions.
+  for (const entry of entryPoints) {
+    const text = readFileSync(join(distDir, entry), "utf8");
+    if (entry.endsWith("/i18n.d.ts")) {
+      assert.match(text, /export declare function generateLanguageAsync\(langCode: string, options\?: GenerateLanguageOptions\): Promise<LanguageData>;/);
+    } else {
+      assert.doesNotMatch(text, /\bgenerateLanguageAsync\b/, `${entry} still names generateLanguageAsync`);
     }
   }
 });

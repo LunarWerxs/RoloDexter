@@ -102,7 +102,9 @@ def api_hash(text: str, deps: list[str], types: dict[str, Any]) -> str:
     return digest.hexdigest()[:8]
 
 
-def build_manifest(surface: dict[str, Any]) -> tuple[dict[str, dict[str, str]], set[str]]:
+def build_manifest(
+    surface: dict[str, Any],
+) -> tuple[dict[str, dict[str, str]], set[str]]:
     """Hash every export and member; also return the local types they reach."""
     types = surface["types"]
     manifest: dict[str, dict[str, str]] = {}
@@ -197,19 +199,29 @@ class _Annotation:
 def _annotation(value: Any) -> Any:
     if value is inspect.Parameter.empty:
         return value
-    return _Annotation(value if isinstance(value, str) else inspect.formatannotation(value))
+    return _Annotation(
+        value if isinstance(value, str) else inspect.formatannotation(value)
+    )
 
 
 def _stable_repr(value: Any) -> str:
     # Set order follows the per-process string hash seed; sort it away.
     if isinstance(value, (set, frozenset)):
-        return f"{type(value).__name__}({{{', '.join(sorted(map(_stable_repr, value)))}}})"
+        return (
+            f"{type(value).__name__}({{{', '.join(sorted(map(_stable_repr, value)))}}})"
+        )
     if isinstance(value, dict):
-        items = ", ".join(f"{_stable_repr(k)}: {_stable_repr(v)}" for k, v in value.items())
+        items = ", ".join(
+            f"{_stable_repr(k)}: {_stable_repr(v)}" for k, v in value.items()
+        )
         return f"{{{items}}}"
     if isinstance(value, (list, tuple)):
         body = ", ".join(_stable_repr(v) for v in value)
-        return f"[{body}]" if isinstance(value, list) else f"({body}{',' if len(value) == 1 else ''})"
+        return (
+            f"[{body}]"
+            if isinstance(value, list)
+            else f"({body}{',' if len(value) == 1 else ''})"
+        )
     return _ADDRESS.sub("", repr(value))
 
 
@@ -221,11 +233,17 @@ def _signature(func: Any) -> str:
     params = [
         p.replace(
             annotation=_annotation(p.annotation),
-            default=p.default if p.default is p.empty else _Annotation(_stable_repr(p.default)),
+            default=p.default
+            if p.default is p.empty
+            else _Annotation(_stable_repr(p.default)),
         )
         for p in sig.parameters.values()
     ]
-    return str(sig.replace(parameters=params, return_annotation=_annotation(sig.return_annotation)))
+    return str(
+        sig.replace(
+            parameters=params, return_annotation=_annotation(sig.return_annotation)
+        )
+    )
 
 
 def _returns(func: Any) -> str:
@@ -233,7 +251,9 @@ def _returns(func: Any) -> str:
         annotation = inspect.signature(func).return_annotation
     except (TypeError, ValueError):
         return ""
-    return "" if annotation is inspect.Signature.empty else repr(_annotation(annotation))
+    return (
+        "" if annotation is inspect.Signature.empty else repr(_annotation(annotation))
+    )
 
 
 def _is_public(name: str) -> bool:
@@ -254,7 +274,11 @@ def _member_line(name: str, attr: Any) -> str:
         setter = " (settable)" if attr.fset else ""
         return f"@property {name} -> {returns}{setter}"
     if isinstance(attr, dataclasses.Field):
-        default = "" if attr.default is dataclasses.MISSING else f" = {_stable_repr(attr.default)}"
+        default = (
+            ""
+            if attr.default is dataclasses.MISSING
+            else f" = {_stable_repr(attr.default)}"
+        )
         if attr.default_factory is not dataclasses.MISSING:
             default = " = <factory>"
         return f"{name}: {_annotation(attr.type)!r}{default}"
@@ -276,7 +300,10 @@ def _class_members(cls: type) -> dict[str, str]:
     if issubclass(cls, enum.Enum):
         for name in cls.__members__:
             attrs.pop(name, None)
-        members = {name: f"{name} = {member.value!r}" for name, member in cls.__members__.items()}
+        members = {
+            name: f"{name} = {member.value!r}"
+            for name, member in cls.__members__.items()
+        }
     else:
         members = {}
     for name, attr in attrs.items():
@@ -307,7 +334,9 @@ def render_python(name: str, obj: Any) -> dict[str, Any]:
         members = _class_members(obj)
     elif (inspect.isclass(obj) or callable(obj)) and not _is_own(obj):
         # Re-exported from a dependency: its internals are not ours to pin.
-        lines = [f"{name} = {getattr(obj, '__module__', '?')}.{getattr(obj, '__qualname__', '?')}"]
+        lines = [
+            f"{name} = {getattr(obj, '__module__', '?')}.{getattr(obj, '__qualname__', '?')}"
+        ]
     elif callable(obj):
         lines = [f"def {name}{_signature(obj)}"]
     else:
@@ -350,7 +379,8 @@ def js_surface() -> dict[str, Any]:
     )
     if completed.returncode != 0:
         raise SystemExit(f"api-surface.mjs failed:\n{completed.stderr}")
-    return json.loads(completed.stdout)
+    snapshot: dict[str, Any] = json.loads(completed.stdout)
+    return snapshot
 
 
 # ── Goldens on disk ───────────────────────────────────────────────────────
@@ -395,9 +425,15 @@ def snapshot(lang: str, update: bool) -> dict[str, Any]:
     live, reached = build_manifest(surface)
     files = golden_files(surface, live, reached)
     manifest_path = GOLDEN_DIR / f"{lang}.json"
-    golden = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    golden = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest_path.exists()
+        else {}
+    )
     on_disk = _read_files(GOLDEN_DIR / lang)
-    stale = sorted(rel for rel in set(on_disk) | set(files) if on_disk.get(rel) != files.get(rel))
+    stale = sorted(
+        rel for rel in set(on_disk) | set(files) if on_disk.get(rel) != files.get(rel)
+    )
     report: dict[str, Any] = {
         "changes": [
             {"verdict": verdict, "module": module, "name": name}
@@ -428,23 +464,37 @@ def _parity_notes(reports: dict[str, Any]) -> list[str]:
     if len(reports) < 2:
         return []
     return [
-        f"{key[0]} {shown[key]}: " + ", ".join(f"{lang} {verdicts.get(lang, 'unchanged')}" for lang in reports)
+        f"{key[0]} {shown[key]}: "
+        + ", ".join(f"{lang} {verdicts.get(lang, 'unchanged')}" for lang in reports)
         for key, verdicts in sorted(seen.items())
         if len(set(verdicts.values())) != 1 or len(verdicts) != len(reports)
     ]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--update-goldens", action="store_true", help="accept the current API as the golden")
-    parser.add_argument("--lang", choices=[*LANGS, "both"], default="both", help="which package to snapshot")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--update-goldens",
+        action="store_true",
+        help="accept the current API as the golden",
+    )
+    parser.add_argument(
+        "--lang",
+        choices=[*LANGS, "both"],
+        default="both",
+        help="which package to snapshot",
+    )
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     args = parser.parse_args()
 
     langs = LANGS if args.lang == "both" else (args.lang,)
     reports = {lang: snapshot(lang, args.update_goldens) for lang in langs}
     all_changes = [
-        (c["verdict"], c["module"], c["name"]) for report in reports.values() for c in report["changes"]
+        (c["verdict"], c["module"], c["name"])
+        for report in reports.values()
+        for c in report["changes"]
     ]
     summary = {
         "languages": reports,
@@ -455,7 +505,9 @@ def main() -> int:
         print(json.dumps(summary, indent=2))
     else:
         for lang, report in reports.items():
-            counts = {v: 0 for v in (BREAKING, POTENTIALLY_BREAKING, POTENTIALLY_NON_BREAKING)}
+            counts = {
+                v: 0 for v in (BREAKING, POTENTIALLY_BREAKING, POTENTIALLY_NON_BREAKING)
+            }
             for change in report["changes"]:
                 counts[change["verdict"]] += 1
             print(f"{lang}: " + ", ".join(f"{n} {v}" for v, n in counts.items()))
@@ -470,9 +522,14 @@ def main() -> int:
         print(f"suggested bump: {summary['suggested_bump']}")
     if args.update_goldens:
         return 0
-    drift = any(report["changes"] or report["stale_files"] for report in reports.values())
+    drift = any(
+        report["changes"] or report["stale_files"] for report in reports.values()
+    )
     if drift:
-        print("API changed: review the diff, then run scripts/api_snapshot.py --update-goldens", file=sys.stderr)
+        print(
+            "API changed: review the diff, then run scripts/api_snapshot.py --update-goldens",
+            file=sys.stderr,
+        )
     return 1 if drift else 0
 
 

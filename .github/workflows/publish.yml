@@ -1,22 +1,82 @@
-name: Publish to PyPI
+name: Release
 
+# One release workflow for both registries. The file name stays publish.yml
+# because PyPI's trusted publisher is registered for that file name.
 on:
   release:
     types: [published]
   workflow_dispatch:
 
 permissions:
-  id-token: write  # Required for trusted publishing
+  contents: read
 
 jobs:
-  publish:
+  verify:
+    timeout-minutes: 60
+    name: Verify (tests, parity, sweep)
+    # Manual runs are allowed only from a tag ref.
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/js/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: |
+          ruff check src/ tests/ scripts/
+          ruff format --check src/ tests/ scripts/
+
+      - name: Type check (mypy)
+        run: mypy src/ scripts/
+
+      - name: Test (pytest)
+        run: pytest
+
+      - name: Install JS dependencies
+        working-directory: packages/js
+        run: npm ci
+
+      - name: Type check (JS)
+        working-directory: packages/js
+        run: npm run typecheck
+
+      - name: Test (JS)
+        working-directory: packages/js
+        run: npm test
+
+      - name: Python/NPM parity probes
+        working-directory: packages/js
+        run: npm run check:parity
+
+      - name: Cross-language differential sweep
+        working-directory: packages/js
+        run: npm run check:sweep
+
+  pypi:
     timeout-minutes: 60
     name: Upload to PyPI
+    needs: verify
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/project/rolodexter/
-
+    permissions:
+      contents: read
+      id-token: write  # Required for trusted publishing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -35,3 +95,50 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+
+  npm:
+    timeout-minutes: 60
+    name: Publish JS package
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/rolodexter
+    permissions:
+      contents: read
+      id-token: write  # npm provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: packages/js/package-lock.json
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check release versions
+        run: python scripts/check_release_versions.py
+
+      - name: Install dependencies
+        working-directory: packages/js
+        run: npm ci
+
+      - name: Pack check
+        working-directory: packages/js
+        run: npm pack --dry-run
+
+      # TODO (owner step): npm trusted publishing needs a trusted publisher
+      # registered on npmjs.com for this repo and workflow (publish.yml). Once
+      # that is done, drop NODE_AUTH_TOKEN, delete the NPM_TOKEN secret and
+      # rotate the old token. Until then this uses the token in the `npm`
+      # environment.
+      - name: Publish to NPM
+        working-directory: packages/js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance

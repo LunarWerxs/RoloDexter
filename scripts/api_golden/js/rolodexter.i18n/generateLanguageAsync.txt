@@ -1,0 +1,2 @@
+# rolodexter.i18n.generateLanguageAsync  api-hash 5cf7e823
+function generateLanguageAsync(langCode: string, options?: GenerateLanguageOptions): Promise<LanguageData>

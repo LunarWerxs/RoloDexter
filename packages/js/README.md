@@ -161,7 +161,7 @@ mapper.identify("Column X", { value: "jane@test.com" }); // email          heuri
 | `.get_match(header)` | `FieldMatch \| null` | How one specific header resolved |
 | `.get_all_phones()` | `string[]` | Every phone-shaped value found, deduped and E.164 |
 | `.get_all_emails()` | `string[]` | Every mapped email value, flattened and deduped |
-| `.get_identity_keys()` | `string[]` | Stable email, phone, and scoped source keys for deduplication |
+| `.get_identity_keys()` | `string[]` | Dedupe keys: email-shaped emails, E.164 `phone`/`home_phone`/`whatsapp` (never `work_phone` or `fax`), scoped source ids |
 | `.explain()` | `string` | Human-readable audit of the whole mapping |
 | `.to_dict()` | `object` | JSON-friendly snapshot |
 
@@ -184,8 +184,8 @@ Warnings:
 | `map_batch(rows)` | Map an array of records |
 | `map_stream(iterable)` | Map lazily, for files that will not fit in memory |
 | `profile(iterable, { max_rows })` | Aggregate import-readiness diagnostics in constant memory |
-| `compile_schema(headers)` | Resolve a header list **once**, then reuse it across every row |
-| `map_dataframe(df)` | Map a DataFrame-like column store |
+| `compile_schema(headers)` | Resolve a header list **once**, then reuse it across every row; `schema.matches` is a map (`matches.get(header)`) |
+| `map_dataframe(df)` | Map a column store with `columns` and a pandas-style `rename` (no JS dataframe library is tested against it) |
 | `identify(header, opts?)` | Resolve a single header without mapping anything |
 | `trace_header(header, opts?)` | Every pipeline layer's verdict on one header, in order |
 | `clear_cache()` / `cache_info()` | Inspect and reset the header cache |
@@ -235,9 +235,24 @@ rolodexter fields            List all canonical fields
 | `--quarantine-output <path>` | `<input>.quarantine.jsonl` | Where quarantined rows land |
 | `--max-materialized-rows <n>` | `100000` | Row cap for JSON/CSV output, `0` disables |
 | `--max-json-input-bytes <n>` | `52428800` | Read cap for non-streaming JSON input, `0` disables |
+| `--encoding <name>` | `utf-8` | Input encoding: `utf-8`, `utf-8-sig`, `utf-16`, `latin-1`, `cp1252`; a file that does not decode stops with an error |
+| `--delimiter <char>` | sniffed | CSV delimiter; without it `.tsv` means tab and the header line is sniffed for `,` `;` tab `\|` |
+| `--keep-unmapped` | off | Carry unmapped columns through under their own names |
+| `--dedupe` | off | Drop rows that share an identity key with an earlier row |
+| `--duplicates-output <path>` | none | With `--dedupe`, write each dropped row (and the row it matched) as JSONL |
+| `--csv-safe` | off | Prefix `'` to CSV cells starting `=` `+` `-` `@`, so spreadsheets do not run them |
+| `--override <header=field>` | none | Force a header to a canonical field (repeatable) |
+| `--schema-out <path>` / `--schema-in <path>` | none | Save the resolved header plan, or replay a saved one |
 
-For safety, the quarantine destination must differ from both the input and the
-mapped output path.
+`profile` takes the same input flags (`--encoding`, `--delimiter`,
+`--max-json-input-bytes`, `--max-rows`). For safety, the quarantine and
+duplicates destinations must differ from the input, the mapped output and
+each other.
+
+JSON numbers above 2^53 (64-bit ids such as Discord or Twitter ids in
+`source_id`) are rounded by JavaScript's own JSON parser before RoloDexter
+sees them; the Python package keeps them exact. Quote such ids as strings in
+the export, or map them with the Python package.
 
 ```bash
 # Mailchimp, Salesforce, Google CSV, and an unnamed column, all in one file
@@ -325,7 +340,9 @@ rolodexter-i18n --languages es,fr,de  # generate and cache three packs
 const mapper = new ContactMapper({ languages: ["es", "fr"] });
 ```
 
-Generating packs needs the optional `@vitalets/google-translate-api` and `unidecode` dependencies. Loading cached packs does not, so `npm i --omit=optional` is still a fully working install for mapping.
+Generating packs needs `@vitalets/google-translate-api` and `unidecode`, optional peer dependencies you install yourself (`npm i @vitalets/google-translate-api unidecode`). Mapping and loading cached packs need neither. `generateLanguageAsync(lang, options)` on `rolodexter/i18n` is the promise form of `generate_language`.
+
+Packs are cached in the per-user cache folder, or in `ROLODEXTER_CACHE_DIR` when it is set (the Python package reads the same variable). A pack with fields that failed to translate is written with them under `failed_fields`; the CLI reports `N of M fields` and exits 2, and the next run retries only those fields.
 
 ## 🧰 What's in the box
 
@@ -339,7 +356,7 @@ Three entry points, each with its own types:
 
 Runtime dependencies are deliberately few: `fuzzball` for fuzzy header scoring, `libphonenumber-js` for phone parsing, `csv-stringify` for CSV output.
 
-> **The alias table is not maintained twice.** `patterns.json` lives in the Python package and is synced into this one on every build, so the JavaScript and Python packages cannot drift apart. Both are held to the same golden-corpus conformance fixtures.
+> **The alias table is not maintained twice.** `patterns.json` lives in the Python package and is synced into this one on every build, so both packages resolve the same aliases. Behaviour is held together by checks, not by shared code: the same golden-corpus conformance fixtures, a probe that runs the same calls and command lines through both packages, and a parity sweep in CI that fails on any new difference. Differences already known (mostly in phone formatting and name casing, where the two phone and name libraries disagree) are listed in `scripts/parity_sweep_baseline.json`. Fuzzy header scoring uses a different library in each language, so an unusual misspelling can resolve differently in pip and npm.
 
 ## 🐍 The Python twin
 

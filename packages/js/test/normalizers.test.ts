@@ -39,11 +39,11 @@ test("dates that would have to be guessed are returned untouched", () => {
   assert.equal(normalize_value("birthday", "not a date"), "not a date");
 });
 
-test("date normalization is a reordering, not a calendar check", () => {
-  // 31 February is not a real date, but rejecting it is the caller's job:
-  // this normalizer only decides which component is the day. Pinned so a
-  // future "helpful" validation cannot land here unnoticed.
-  assert.equal(normalize_value("birthday", "31/02/2024"), "2024-02-31");
+test("L13: a day the month does not have is not a date and is left unchanged", () => {
+  assert.equal(normalize_value("birthday", "31/02/2024"), "31/02/2024");
+  assert.equal(normalize_value("birthday", "2024-02-31"), "2024-02-31");
+  assert.equal(normalize_value("birthday", "2023-02-29"), "2023-02-29");
+  assert.equal(normalize_value("birthday", "2024-2-29"), "2024-02-29");
 });
 
 test("countries collapse to ISO alpha-2", () => {
@@ -76,7 +76,8 @@ test("states collapse to US/Canadian codes", () => {
 test("boolean fields coerce the usual opt-in/opt-out vocabulary", () => {
   assert.equal(normalize_value("email_opt_out", "yes"), true);
   assert.equal(normalize_value("email_opt_out", "NO "), false);
-  assert.equal(normalize_value("email_opt_out", "opted_out"), false);
+  // H1: "opted_out" on an opt-out field means yes, opted out.
+  assert.equal(normalize_value("email_opt_out", "opted_out"), true);
   assert.equal(normalize_value("subscribed", "1"), true);
   assert.equal(normalize_value("verified", "off"), false);
   // Anything else keeps its text rather than becoming a misleading false.

@@ -28,21 +28,97 @@ def _cap_part(part: str) -> str:
     return low[:1].upper() + low[1:]
 
 
-def _smart_titlecase(text: str) -> str:
-    """Title-case *text* (whitespace already collapsed) without mangling.
+# US states, DC and territories, then Canadian provinces and territories.
+# Owned here, not in ``_geo``, because the place casing below needs it and
+# ``_geo`` imports this module; ``StateNormalizer._CODES`` is this set.
+_REGION_CODES: frozenset[str] = frozenset(
+    (
+        *("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI"),
+        *("ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI"),
+        *("MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC"),
+        *("ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT"),
+        *("VT", "VA", "WA", "WV", "WI", "WY", "DC", "PR", "VI", "GU", "AS"),
+        *("MP", "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE"),
+        *("QC", "SK", "YT"),
+    )
+)
 
-    Preserves tokens that already carry internal mixed case (``McDonald``,
-    ``iPhone``), handles ordinals and Mc-names, and capitalizes apostrophe
-    segments only when long enough (``O'Brien`` but not ``Macy'S``).
+# Words written in capitals wherever they stand in an all-caps place value:
+# compass points, post-office and military mail words, and country
+# abbreviations.  Region codes are kept upper too, but only where a region
+# code stands (see _region_position), so "LA JOLLA" still reads "La Jolla".
+_ALWAYS_UPPER: frozenset[str] = frozenset(
+    {
+        *("N", "S", "E", "W", "NE", "NW", "SE", "SW"),
+        *("PO", "APO", "FPO", "DC", "USA", "US", "UK"),
+    }
+)
+
+_DIGIT_RE = re.compile(r"[0-9]")
+_NON_ALNUM_RE = re.compile(r"[^A-Za-z0-9]")
+
+
+def _is_all_caps(text: str) -> bool:
+    """``str.isupper()``: has a cased letter and no lowercase one."""
+    return text.isupper()
+
+
+def _region_position(words: list[str], index: int) -> bool:
+    """True where a region code stands: after a comma or before a postcode.
+
+    ``SPRINGFIELD, IL`` and ``IL 62704`` hold a region code; ``1 OAK CT``
+    (a court) and ``LA JOLLA`` do not.
     """
+    if index > 0 and words[index - 1].endswith(","):
+        return True
+    return index + 1 < len(words) and bool(_DIGIT_RE.search(words[index + 1]))
+
+
+def _keep_upper_in_caps(words: list[str], index: int) -> bool:
+    """True when an all-caps place value should keep *words[index]* as written."""
+    word = words[index]
+    key = _NON_ALNUM_RE.sub("", word).upper()
+    if _ORDINAL_RE.match(key.lower()):  # 5TH → 5th, through the usual rule
+        return False
+    if _DIGIT_RE.search(word):  # 4B, 62704, #12A
+        return True
+    if key in _ALWAYS_UPPER:
+        return True
+    return key in _REGION_CODES and _region_position(words, index)
+
+
+def _smart_titlecase(text: str) -> str:
+    """Title-case a place value (whitespace already collapsed) without mangling.
+
+    A value that mixes case was typed by someone who meant it, so only its
+    all-lower words are re-cased: words written in capitals (``IL``, ``NW``,
+    ``PO``, ``USA``) and words holding a digit (``4B``) stay as written.  A
+    value written entirely in capitals is re-cased word by word, except
+    compass points, ``PO``/``APO``/``FPO``, ``USA``/``US``/``UK``/``DC``,
+    words holding a digit, and a US state or Canadian province code where a
+    region code stands.  Every value keeps words that carry a deliberate
+    inner capital (``McDonald``, ``iPhone``), lower-cases ordinal suffixes,
+    handles Mc-names and capitalizes apostrophe segments only when long
+    enough (``O'Brien`` but not ``Macy'S``).
+
+    """
+    shouting = _is_all_caps(text)
+    words = text.split()
     out: list[str] = []
-    for word in text.split():
+    for index, word in enumerate(words):
         # Preserve tokens that already mix upper and lower case.
         if (
             not word.isupper()
             and not word.islower()
             and any(c.isupper() for c in word[1:])
         ):
+            out.append(word)
+            continue
+        if shouting:
+            if _keep_upper_in_caps(words, index):
+                out.append(word)
+                continue
+        elif _is_all_caps(word) or _DIGIT_RE.search(word):
             out.append(word)
             continue
         if "'" in word:

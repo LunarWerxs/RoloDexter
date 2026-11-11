@@ -153,6 +153,21 @@ def _wrap(pn_obj: _pn.PhoneNumber, raw: str) -> PhoneNumber:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _parse_full(text: str, default_region: str | None) -> _pn.PhoneNumber | None:
+    """Parse *text*; ``None`` unless possible as a FULL national number.
+
+    Numbers possible only as a local number (e.g. a US 7-digit number) fail.
+    """
+    try:
+        pn_obj = _pn.parse(text, default_region)
+    except _pn.NumberParseException:
+        return None
+    reason = _pn.is_possible_number_with_reason(pn_obj)
+    if reason != _pn.ValidationResult.IS_POSSIBLE:
+        return None
+    return pn_obj
+
+
 def parse(raw: str, default_region: str | None = None) -> PhoneNumber | None:
     """Parse a phone string into a :class:`PhoneNumber`.
 
@@ -188,22 +203,23 @@ def parse(raw: str, default_region: str | None = None) -> PhoneNumber | None:
         ext_suffix = f" ext {ext_m.group(1)}" if ext_m else ""
         text = _TEL_PARAMS_RE.sub("", text) + ext_suffix
 
-    # ── Pre-process: 00 / 011 dial-out → + prefix ──────────────
-    # phonenumbers cannot resolve these without default_region, so
-    # we normalise them into a + prefix first.
+    # ── Region first ────────────────────────────────────────────
+    # With a default region, phonenumbers strips that region's own
+    # international prefix (US 011, AU 0011), so parse with it first.
+    if default_region:
+        pn_obj = _parse_full(text, default_region)
+        if pn_obj is not None:
+            return _wrap(pn_obj, raw)
+
+    # ── 00 / 011 dial-out → + prefix ────────────────────────────
+    # Only without a region, or when the regional parse failed.
     m = _DIALOUT_RE.match(text)
     if m and len(text) > m.end() + 5:
         text = "+" + text[m.end() :]
 
-    # ── Primary: delegate to phonenumbers ───────────────────────
-    try:
-        pn_obj = _pn.parse(text, default_region)
-    except _pn.NumberParseException:
+    pn_obj = _parse_full(text, default_region)
+    if pn_obj is None:
         return None
-
-    if not _pn.is_possible_number(pn_obj):
-        return None
-
     return _wrap(pn_obj, raw)
 
 
@@ -221,6 +237,9 @@ def format_e164(raw: str, default_region: str | None = None) -> str | None:
     phone = parse(raw, default_region)
     if phone is None:
         return None
+    # A number with an extension is E.164 plus ";ext=<digits>" (RFC 3966 style).
+    if phone.extension:
+        return f"{phone.e164};ext={phone.extension}"
     return phone.e164
 
 

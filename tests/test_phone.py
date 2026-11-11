@@ -43,7 +43,7 @@ class TestPhoneNormalizer:
         assert PhoneNormalizer.normalize(None) is None  # type: ignore[arg-type]
 
     def test_non_string(self) -> None:
-        assert PhoneNormalizer.normalize(12345) == 12345  # type: ignore[arg-type]
+        assert PhoneNormalizer.normalize(12345) == "12345"  # type: ignore[arg-type]
 
 
 class TestPhoneNormalizerE164:

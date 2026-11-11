@@ -109,7 +109,6 @@ function assertPhoneNumber(value: unknown): asserts value is PhoneNumber {
 }
 
 const phoneNumberObjects = new WeakMap<object, LibPhoneNumber>();
-const possiblePhoneNumbers = new WeakSet<object>();
 
 export class PhoneNumber {
   readonly calling_code: number;
@@ -169,7 +168,7 @@ export class PhoneNumber {
   }
 
   get is_possible(): boolean {
-    return phoneNumberObjects.get(this)?.isPossible() ?? possiblePhoneNumbers.has(this);
+    return phoneNumberObjects.get(this)?.isPossible() ?? false;
   }
 
   get country_codes(): string[] {
@@ -280,27 +279,25 @@ export function parse(raw: string, default_region: string | null = null): PhoneN
     return null;
   }
   const parsed = parsePhoneObject(raw, default_region);
-  return parsed ? wrapPhoneNumber(parsed, raw) : parseNanpLocalFallback(raw, default_region);
+  return parsed ? wrapPhoneNumber(parsed, raw) : null;
 }
 
 function parsePhoneForMatch(raw: string, default_region: string | null = null): PhoneNumber | null {
   if (typeof raw !== "string") {
     return null;
   }
-  const text = preprocessPhoneRaw(raw);
-  if (!text) {
-    return null;
-  }
-  try {
-    const parsed = parsePhoneNumberFromString(text, asCountryCode(default_region));
-    return parsed ? wrapPhoneNumber(parsed, raw) : parseNanpLocalFallback(raw, default_region);
-  } catch {
-    return parseNanpLocalFallback(raw, default_region);
-  }
+  const parsed = parseLibPhone(raw, default_region, false);
+  return parsed ? wrapPhoneNumber(parsed, raw) : null;
 }
 
 function formatE164(raw: string, default_region: string | null = null): string | null {
-  return parse(raw, default_region)?.e164 ?? null;
+  const phone = parse(raw, default_region);
+  return phone ? e164WithExtension(phone) : null;
+}
+
+// E.164 plus ";ext=<digits>" (RFC 3966 style) when the number has an extension.
+function e164WithExtension(phone: PhoneNumber): string {
+  return phone.extension ? `${phone.e164};ext=${phone.extension}` : phone.e164;
 }
 
 export function format_e164(raw: string, default_region: string | null = null): string | null {
@@ -352,9 +349,6 @@ function formatNational(phone: PhoneNumber): string {
   const parsed = phoneNumberObjects.get(phone);
   if (parsed) {
     return parsed.formatNational();
-  }
-  if (possiblePhoneNumbers.has(phone) && phone.calling_code === 1 && /^\d{7}$/.test(phone.national_number)) {
-    return `${phone.national_number.slice(0, 3)}-${phone.national_number.slice(3)}`;
   }
   return phone.national_number;
 }
@@ -439,7 +433,7 @@ function asCountryCode(region: string | null | undefined): CountryCode | undefin
   return region ? (region.toUpperCase() as CountryCode) : undefined;
 }
 
-function preprocessPhoneRaw(raw: string): string {
+function preprocessPhoneRaw(raw: string, rewriteDialout = true): string {
   let text = pyStrip(raw);
   if (TEL_URI_RE.test(text)) {
     text = text.replace(TEL_URI_RE, "");
@@ -450,7 +444,7 @@ function preprocessPhoneRaw(raw: string): string {
   text = text.replace(EXTENSION_RE, " ext $1");
 
   const dialout = DIALOUT_RE.exec(text);
-  if (dialout && text.length > dialout[0].length + 5) {
+  if (rewriteDialout && dialout && text.length > dialout[0].length + 5) {
     text = `+${text.slice(dialout[0].length)}`;
   }
   const extensionMatch = /\s+ext\s+\d+$/i.exec(text);
@@ -463,19 +457,36 @@ function preprocessPhoneRaw(raw: string): string {
 }
 
 function parsePhoneObject(raw: string, defaultRegion: string | null | undefined): LibPhoneNumber | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-  const text = preprocessPhoneRaw(raw);
+  return parseLibPhone(raw, defaultRegion, true);
+}
+
+function tryParseLib(text: string, region: CountryCode | undefined, requirePossible: boolean): LibPhoneNumber | undefined {
   if (!text) {
     return undefined;
   }
   try {
-    const parsed = parsePhoneNumberFromString(text, asCountryCode(defaultRegion));
-    return parsed?.isPossible() ? parsed : undefined;
+    const parsed = parsePhoneNumberFromString(text, region);
+    return parsed && (!requirePossible || parsed.isPossible()) ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+// With a default region, parse with that region first (the library strips the
+// region's own international prefix: US 011, AU 0011). The leading 011/00 -> +
+// rewrite applies only without a region, or when the regional parse fails.
+function parseLibPhone(raw: string, defaultRegion: string | null | undefined, requirePossible: boolean): LibPhoneNumber | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const region = asCountryCode(defaultRegion);
+  if (region) {
+    const regional = tryParseLib(preprocessPhoneRaw(raw, false), region, true);
+    if (regional) {
+      return regional;
+    }
+  }
+  return tryParseLib(preprocessPhoneRaw(raw), region, requirePossible);
 }
 
 function wrapPhoneNumber(parsed: LibPhoneNumber, raw: string): PhoneNumber {
@@ -488,23 +499,10 @@ function wrapPhoneNumber(parsed: LibPhoneNumber, raw: string): PhoneNumber {
   );
 }
 
-function parseNanpLocalFallback(raw: string, defaultRegion: string | null | undefined): PhoneNumber | null {
-  if ((defaultRegion ?? "").toUpperCase() !== "US") {
-    return null;
-  }
-  if (typeof raw !== "string") {
-    return null;
-  }
-  const digits = preprocessPhoneRaw(raw).replace(/\D/g, "");
-  if (digits.length !== 7) {
-    return null;
-  }
-  const phone = new PhoneNumber(1, digits, raw, null);
-  possiblePhoneNumbers.add(phone);
-  return phone;
-}
-
 function normalizePhone(value: unknown, defaultRegion: string | null | undefined): unknown {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    value = String(value);
+  }
   if (typeof value !== "string") {
     return value;
   }
@@ -514,7 +512,7 @@ function normalizePhone(value: unknown, defaultRegion: string | null | undefined
   }
   const parsed = parse(raw, defaultRegion ?? null);
   if (parsed) {
-    return parsed.e164;
+    return e164WithExtension(parsed);
   }
   return value;
 }
@@ -577,7 +575,7 @@ function extractEmbeddedPhones(
     const foundNumbers = findPhoneNumbersInText(scanText, asCountryCode(defaultRegion));
 
     for (const found of foundNumbers.slice(0, fieldLimit)) {
-      mergeValue(normalized, "phone", found.number.number);
+      mergeValue(normalized, "phone", found.number.ext ? `${found.number.number};ext=${found.number.ext}` : found.number.number);
       fieldMatches.push(fieldMatch(key, "phone", HEURISTIC_CONFIDENCE, "embedded_phone"));
       foundTotal += 1;
     }

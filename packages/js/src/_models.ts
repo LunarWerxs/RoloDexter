@@ -8,7 +8,7 @@ export const NORMALIZED_MATCH_CONFIDENCE = 0.95;
 export const FUZZY_MATCH_THRESHOLD = 80;
 export const FUZZY_HIGH_CONFIDENCE = 0.85;
 export const FUZZY_LOW_CONFIDENCE = 0.7;
-export const FUZZY_LENGTH_RATIO = 0.5;
+export const FUZZY_LENGTH_RATIO = 0.75;
 export const HEURISTIC_CONFIDENCE = 0.6;
 
 export class RolodexterError extends Error {
@@ -95,6 +95,8 @@ export interface LanguageData {
   generated_at?: string;
   source_version?: string;
   fields?: Record<string, string[]>;
+  /** Fields whose translation failed; the next generation retries only these. */
+  failed_fields?: string[];
 }
 
 /** @internal */
@@ -138,6 +140,7 @@ export interface GenerateLanguageAsyncOptions extends Omit<InternalGenerateLangu
 
 export interface MapPayloadOptions {
   depth?: number;
+  /** @deprecated Ignored since 2.0; passing it emits a DeprecationWarning. */
   service?: string | null;
   default_region?: string | null;
   extract_embedded_phones?: boolean;
@@ -402,7 +405,11 @@ const VENDOR_PREFIXES = [
   "smartlead_",
 ];
 
+// Same set as the form_prefixes Python keeps through _ADDRESS_CONTEXT_TERMS.
+// "contact_" ("Contact Province") reached its field by fuzzy containment until
+// FUZZY_LENGTH_RATIO went to 0.75; stripping it reaches the field directly.
 const ADDRESS_PREFIXES = [
+  "contact_",
   "business_",
   "mailing_",
   "home_",
@@ -440,15 +447,61 @@ function valueForMatching(value: unknown): string | undefined {
     return String(value);
   }
   if (typeof value === "number") {
-    return Number.isInteger(value) ? `${value}.0` : String(value);
+    // A whole number is written as its digits, with no ".0", exactly as
+    // Python writes an int or a whole-number float, so a phone that arrived as
+    // a number still has the shape of a phone. BigInt keeps 1e21 as digits.
+    return Number.isInteger(value) ? BigInt(value).toString() : String(value);
   }
   return undefined;
+}
+
+/**
+ * The category of a mapper warning, read from its text. Mirrors the
+ * categories Python's MappingWarning carries.
+ */
+function warningCategory(warning: string): string {
+  if (warning.includes("dropped low-confidence match")) {
+    return "low_confidence";
+  }
+  if (warning.includes("could not be normalized to E.164")) {
+    return "phone_normalization";
+  }
+  if (warning.includes("embedded phone")) {
+    return "embedded_phone_limit";
+  }
+  if (warning.includes("does not look like an email address")) {
+    return "email_validation";
+  }
+  if (warning.includes("is ambiguous (day/month order")) {
+    return "date_ambiguous";
+  }
+  return "other";
+}
+
+/**
+ * The text logged (rolodexterWarning event) or thrown (NormalizationError)
+ * for a warning: the column header and the category, never the cell value.
+ * result.warnings keep the full text, since that goes back to the caller only.
+ */
+function warningLogLine(warning: string, headers: Iterable<string>): string {
+  const category = warningCategory(warning);
+  for (const header of headers) {
+    if (warning.startsWith(`${pyRepr(header)}: `)) {
+      return `${pyRepr(header)}: ${category}`;
+    }
+  }
+  return category;
 }
 
 function normalizeAlias(alias: string): string {
   return pyStrip(alias.toLowerCase());
 }
 
+/**
+ * Merge `value` into `target[key]`, promoting to a list on collision. A field
+ * is therefore a list only when two or more columns of one payload map to it
+ * with different values; `tags` and the other list fields are always lists.
+ */
 function mergeValue(target: Record<string, unknown>, key: string, value: unknown): void {
   // Own-property semantics throughout: `"__proto__" in target` is true for
   // every plain object, so a plain `in` test would take the merge branch and
@@ -504,5 +557,5 @@ function mergeValue(target: Record<string, unknown>, key: string, value: unknown
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { ADDRESS_FIELDS, ADDRESS_PREFIXES, BOOLEAN_FIELDS, CANONICAL_FIELD_MEMBERS, COMPANY_PREFIXES, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, PHONE_FIELDS, SOCIAL_FIELDS, VENDOR_PREFIXES, canonicalField, canonicalFieldValue, fieldMatch, isMatched, mergeValue, normalizeAlias, unknown, valueForMatching };
+export { ADDRESS_FIELDS, ADDRESS_PREFIXES, BOOLEAN_FIELDS, CANONICAL_FIELD_MEMBERS, COMPANY_PREFIXES, DATE_FIELDS, LIST_FIELDS, NAME_FIELDS, PHONE_FIELDS, SOCIAL_FIELDS, VENDOR_PREFIXES, canonicalField, canonicalFieldValue, fieldMatch, isMatched, mergeValue, normalizeAlias, unknown, valueForMatching, warningCategory, warningLogLine };
 export type { CanonicalFieldMember, PatternRegistryOptions };

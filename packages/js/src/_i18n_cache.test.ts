@@ -66,8 +66,11 @@ test(
   () => {
     const variable = process.platform === "win32" ? "LOCALAPPDATA" : "XDG_CACHE_HOME";
     const saved = process.env[variable];
+    // ROLODEXTER_CACHE_DIR would replace the platform folder (contract C5).
+    const savedOverride = process.env.ROLODEXTER_CACHE_DIR;
     withTempDir("rolodexter-js-i18n-home-", (dir) => {
       process.env[variable] = dir;
+      delete process.env.ROLODEXTER_CACHE_DIR;
       try {
         const expected = join(dir, "rolodexter", "i18n");
         assert.equal(userI18nCacheDir(), expected);
@@ -85,6 +88,9 @@ test(
           delete process.env[variable];
         } else {
           process.env[variable] = saved;
+        }
+        if (savedOverride !== undefined) {
+          process.env.ROLODEXTER_CACHE_DIR = savedOverride;
         }
       }
     });

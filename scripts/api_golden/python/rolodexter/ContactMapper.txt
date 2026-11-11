@@ -1,4 +1,4 @@
-# rolodexter.ContactMapper  api-hash 939ea53d
+# rolodexter.ContactMapper  api-hash c98af0f5
 class ContactMapper(rolodexter._mapper.ContactMapper)
   def __init__(self, *, patterns: dict[str, Any] | None = None, patterns_path: str | None = None, default_service: str | None = None, normalize: bool = True, strategies: Sequence[MatchStrategy] | None = None, languages: str | Sequence[str] | None = None, overrides: dict[str, str] | None = None, default_region: str | None = 'US', strict: bool = False, confidence_threshold: float = 0.0, header_cache_max_size: int | None = 4096) -> None
   def cache_info(self) -> dict[str, Any]

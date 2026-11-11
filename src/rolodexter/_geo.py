@@ -6,9 +6,10 @@ Extracted verbatim from ``core.py``, which re-imports every name here so
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
-from ._text import _smart_titlecase
+from ._text import _REGION_CODES, _smart_titlecase
 
 
 class CountryNormalizer:
@@ -23,6 +24,35 @@ class CountryNormalizer:
     """
 
     # alpha-3 → alpha-2 for the same set of countries covered by _NAMES.
+    # Every officially assigned ISO 3166-1 alpha-2 code (249).  A two-letter
+    # value is read as a country code only when it is one of these, so "UK"
+    # (a name, below) and "ZZ" are not taken for codes.  The JavaScript
+    # package carries the same list in _geo.ts.
+    _ALPHA2: ClassVar[frozenset[str]] = frozenset(
+        (
+            *("AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT"),
+            *("AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI"),
+            *("BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY"),
+            *("BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN"),
+            *("CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM"),
+            *("DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK"),
+            *("FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL"),
+            *("GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM"),
+            *("HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR"),
+            *("IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN"),
+            *("KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS"),
+            *("LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK"),
+            *("ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW"),
+            *("MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP"),
+            *("NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM"),
+            *("PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW"),
+            *("SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM"),
+            *("SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF"),
+            *("TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW"),
+            *("TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI"),
+            *("VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW"),
+        )
+    )
     _ALPHA3: ClassVar[dict[str, str]] = {
         "arg": "AR",
         "aus": "AU",
@@ -173,11 +203,12 @@ class CountryNormalizer:
         if not text:
             return value
         lowered = text.lower()
-        named = cls._NAMES.get(lowered)
+        stripped = lowered.replace(".", "")
+        # "U.K." reads as "UK" does: the dotless form is looked up too.
+        named = cls._NAMES.get(lowered) or cls._NAMES.get(stripped)
         if named is not None:
             return named
-        stripped = lowered.replace(".", "")
-        if len(stripped) == 2 and stripped.isalpha():
+        if stripped.upper() in cls._ALPHA2:
             return stripped.upper()
         alpha3 = cls._ALPHA3.get(stripped)
         if alpha3 is not None:
@@ -196,87 +227,7 @@ class StateNormalizer:
     """
 
     # US states + DC + territories, then Canadian provinces/territories.
-    _CODES: ClassVar[frozenset[str]] = frozenset(
-        (
-            *[
-                "AL",
-                "AK",
-                "AZ",
-                "AR",
-                "CA",
-                "CO",
-                "CT",
-                "DE",
-                "FL",
-                "GA",
-                "HI",
-                "ID",
-                "IL",
-                "IN",
-                "IA",
-                "KS",
-                "KY",
-                "LA",
-                "ME",
-                "MD",
-            ],
-            *[
-                "MA",
-                "MI",
-                "MN",
-                "MS",
-                "MO",
-                "MT",
-                "NE",
-                "NV",
-                "NH",
-                "NJ",
-                "NM",
-                "NY",
-                "NC",
-                "ND",
-                "OH",
-                "OK",
-                "OR",
-                "PA",
-                "RI",
-            ],
-            *[
-                "SC",
-                "SD",
-                "TN",
-                "TX",
-                "UT",
-                "VT",
-                "VA",
-                "WA",
-                "WV",
-                "WI",
-                "WY",
-                "DC",
-                "PR",
-                "VI",
-                "GU",
-                "AS",
-                "MP",
-            ],
-            *[
-                "AB",
-                "BC",
-                "MB",
-                "NB",
-                "NL",
-                "NS",
-                "NT",
-                "NU",
-                "ON",
-                "PE",
-                "QC",
-                "SK",
-                "YT",
-            ],
-        )
-    )
+    _CODES: ClassVar[frozenset[str]] = _REGION_CODES
     _NAMES: ClassVar[dict[str, str]] = {
         "alabama": "AL",
         "alaska": "AK",
@@ -359,4 +310,8 @@ class StateNormalizer:
             return named
         if text.upper() in cls._CODES:
             return text.upper()
+        # A region code from elsewhere written in capitals ("NSW", "QLD",
+        # "NRW", "SP") is already right; title-casing it would damage it.
+        if re.fullmatch(r"[A-Z]{2,3}", text):
+            return text
         return _smart_titlecase(text)

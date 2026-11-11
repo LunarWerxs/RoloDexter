@@ -37,8 +37,8 @@ const PAGE = ['index.html', 'docs/index.html', 'site/index.html']
   .find((p) => existsSync(p));
 
 if (!PAGE) {
-  console.error('copy-budget: no index.html found; nothing to check.');
-  process.exit(0);
+  console.error('copy-budget FAILED: no index.html found (looked for index.html, docs/index.html, site/index.html); the page this gate checks is missing.');
+  process.exit(1);
 }
 
 const html = readFileSync(PAGE, 'utf8');

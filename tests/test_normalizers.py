@@ -146,7 +146,8 @@ class TestNormalizeValue:
         assert normalize_value("notes", "  hello  ") == "hello"
 
     def test_non_string_passthrough(self) -> None:
-        assert normalize_value("phone", 12345) == 12345
+        # M8: a whole number is cleaned as its digit text (C3).
+        assert normalize_value("phone", 12345) == "12345"
         assert normalize_value("email", None) is None
         assert normalize_value("tags", [" vip ", "", "  ", "beta"]) == [
             "vip",
@@ -273,10 +274,13 @@ class TestPostalCodeNormalizerEdge:
 
         assert PostalCodeNormalizer.normalize("") == ""
 
-    def test_non_string_passthrough(self) -> None:
+    def test_whole_number_becomes_text(self) -> None:
         from rolodexter.core import PostalCodeNormalizer
 
-        assert PostalCodeNormalizer.normalize(123) == 123  # type: ignore[arg-type]
+        # M8: a postcode read from JSON or a column of digits (C3).
+        assert PostalCodeNormalizer.normalize(94107) == "94107"  # type: ignore[arg-type]
+        assert PostalCodeNormalizer.normalize(94107.0) == "94107"  # type: ignore[arg-type]
+        assert PostalCodeNormalizer.normalize(1.5) == 1.5  # type: ignore[arg-type]
 
 
 class TestBooleanNormalizerEdge:

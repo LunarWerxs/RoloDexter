@@ -29,7 +29,7 @@ test("standalone normalize_value covers public normalizers", () => {
   assert.equal(normalize_value("postal_code", "k1a0b1"), "K1A 0B1");
   assert.equal(normalize_value("phone", "(202) 555-0143"), "(202) 555-0143");
   assert.equal(normalize_value("phone", "(202) 555-0143", { default_region: "US" }), "+12025550143");
-  assert.equal(normalize_value("phone", "555-1212", { default_region: "US" }), "+15551212");
+  assert.equal(normalize_value("phone", "555-1212", { default_region: "US" }), "555-1212"); // floor-ok: audit M8/C2, a local-only number is kept as written instead of a fake +15551212
   assert.throws(
     () => (normalize_value as unknown as () => unknown)(),
     { name: "TypeError", message: "normalize_value() missing 2 required positional arguments: 'canonical_field' and 'value'" },
@@ -131,7 +131,7 @@ test("NameNormalizer mirrors Python title, suffix, particle, and hyphen handling
   assert.equal(NameNormalizer.normalize("john doe sr"), "John Doe Sr");
   assert.equal(NameNormalizer.normalize("dr jane doe"), "Dr Jane Doe");
   assert.equal(NameNormalizer.normalize("mr john q public phd"), "Mr John Q Public Ph.D.");
-  assert.equal(NameNormalizer.normalize("john doe ph.d."), "John Doe Ph.d.");
+  assert.equal(NameNormalizer.normalize("john doe ph.d."), "John Doe Ph.D.");
   assert.equal(NameNormalizer.normalize("Dr Jane A. Doe PhD"), "Dr Jane A. Doe Ph.D.");
   assert.equal(NameNormalizer.normalize("Ms Ana Maria del Carmen"), "Ms Ana Maria del Carmen");
   assert.equal(NameNormalizer.normalize('john "jack" smith'), "John Smith (jack)");
@@ -144,14 +144,14 @@ test("NameNormalizer mirrors Python title, suffix, particle, and hyphen handling
   assert.equal(NameNormalizer.normalize("Jane Smith V"), "Jane Smith V");
   assert.equal(NameNormalizer.normalize("JOHN MACDONALD"), "John MacDonald");
   assert.equal(NameNormalizer.normalize("smith, john phd"), "John Smith Ph.D.");
-  assert.equal(NameNormalizer.normalize("smith, john ph.d."), "John Smith Ph.d.");
-  assert.equal(NameNormalizer.normalize("jane doe m.d."), "Jane Doe M.d.");
+  assert.equal(NameNormalizer.normalize("smith, john ph.d."), "John Smith Ph.D.");
+  assert.equal(NameNormalizer.normalize("jane doe m.d."), "Jane Doe M.D.");
   assert.equal(NameNormalizer.normalize("the hon jane doe"), "the Hon Jane Doe");
   assert.equal(NameNormalizer.normalize("the honorable jane doe"), "the Honorable Jane Doe");
   assert.equal(NameNormalizer.normalize("King Jr., Martin Luther"), "Martin Luther King Jr.");
   assert.equal(NameNormalizer.normalize("Leonardo da Vinci"), "Leonardo da Vinci");
-  assert.equal(NameNormalizer.normalize("Jane Q. Doe, CPA"), "Jane Q. Doe Cpa");
-  assert.equal(NameNormalizer.normalize("Doe, Jane Q., CPA"), "Jane Q. Doe Cpa");
+  assert.equal(NameNormalizer.normalize("Jane Q. Doe, CPA"), "Jane Q. Doe CPA");
+  assert.equal(NameNormalizer.normalize("Doe, Jane Q., CPA"), "Jane Q. Doe CPA");
   assert.equal(NameNormalizer.normalize("His Excellency John Doe"), "His Excellency John Doe");
   assert.equal(NameNormalizer.normalize("Dame Judi Dench"), "Dame Judi Dench");
   assert.equal(NameNormalizer.normalize("Mx Alex Doe"), "Mx Alex Doe");
@@ -326,8 +326,7 @@ test("Python-shaped mapping result surface is available", () => {
 
   const schema = new ContactMapper().compile_schema(["fname"]);
   assert.deepEqual(schema.column_map(), { fname: "first_name" });
-  assert.deepEqual(Object.keys(schema.matches), ["fname"]);
-  assert.equal(schema.matches.fname.canonical, "first_name");
+  assert.deepEqual([...schema.matches.keys()], ["fname"]);
   assert.equal(schema.matches.get("fname")?.canonical, "first_name");
   assert.equal(schema.matches.get("missing"), null);
   const gbSchema = new ContactMapper().compile_schema(["Mobile Phone"], { default_region: "GB" });

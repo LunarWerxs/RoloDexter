@@ -10,6 +10,7 @@ cycle.
 from __future__ import annotations
 
 import threading
+import warnings as _warnings
 from collections import Counter, OrderedDict
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any, cast
@@ -25,6 +26,7 @@ from ._models import (
     _validate_confidence_threshold,
     _value_for_matching,
     _warning_category,
+    _warning_log_line,
     logger,
 )
 from ._normalizers import _LIST_FIELDS, _PHONE_FIELDS, normalize_value, value_warnings
@@ -48,8 +50,23 @@ DEFAULT_HEADER_CACHE_MAX_SIZE: int = 4096
 _CACHE_MISS: Any = object()
 
 
+def _service_deprecation_message(name: str) -> str:
+    """Text of the deprecation warning for the ignored *name* argument.
+
+    The JS port emits the same text through ``process.emitWarning``.
+    """
+    return (
+        f"the {name!r} argument is ignored since rolodexter 2.0 and will be "
+        "removed in a future release"
+    )
+
+
 def _merge(target: dict[str, Any], key: str, value: Any) -> None:
     """Merge *value* into *target[key]*, promoting to list on collision.
+
+    A field is therefore a list only when two or more columns of the same
+    payload map to it with different values; otherwise it keeps the single
+    cleaned value.  ``tags`` (and the other list fields) are always lists.
 
     Duplicate values are dropped so the same normalized phone/email
     from multiple aliases (e.g. ``phone`` + ``mobile`` carrying the
@@ -138,8 +155,21 @@ class ContactMapper:
         if header_cache_max_size is not None and header_cache_max_size < 0:
             raise ValueError("header_cache_max_size must be non-negative or None")
         self._header_cache_max_size = header_cache_max_size
+        if default_service is not None:
+            _warnings.warn(
+                _service_deprecation_message("default_service"),
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._default_service = (
             default_service  # accepted for backward compat; not used since v2.0
+        )
+        # Fields a saved plan may name besides the built-in ones: the targets
+        # of caller overrides (see MappingSchema.from_dict).
+        self._override_fields: frozenset[str] = frozenset(
+            target
+            for target in (overrides if isinstance(overrides, dict) else {}).values()
+            if isinstance(target, str)
         )
 
         if strategies is not None:
@@ -174,6 +204,10 @@ class ContactMapper:
         # header -> cached header-only verdict (None = all header-only missed)
         self._header_cache: OrderedDict[str, FieldMatch | None] = OrderedDict()
         self._header_cache_lock = threading.Lock()
+        # header -> verdict replayed from a saved plan (MappingSchema.from_dict).
+        # Kept apart from the LRU cache and checked first, so a plan survives
+        # header_cache_max_size=0, clear_cache() and eviction.
+        self._seeded_headers: dict[str, FieldMatch] = {}
 
     @staticmethod
     def _unknown(header: str) -> FieldMatch:
@@ -195,9 +229,16 @@ class ContactMapper:
         """Resolve a single header to its canonical field.
 
         The *service* parameter is accepted for backward compatibility
-        but is ignored since v2.0.  *default_region* overrides the mapper's
+        but is ignored since v2.0; passing it emits a
+        :class:`DeprecationWarning`.  *default_region* overrides the mapper's
         region for value-shape phone detection on this call only.
         """
+        if service is not None:
+            _warnings.warn(
+                _service_deprecation_message("service"),
+                DeprecationWarning,
+                stacklevel=2,
+            )
         region = default_region if default_region is not None else self._default_region
         for strategy in self._strategies:
             result = strategy.match(header, value=value, default_region=region)
@@ -271,6 +312,9 @@ class ContactMapper:
         # matching serialized exactly that case.  Two threads racing the same
         # cold header may each compute the verdict; that is harmless, because
         # header-only strategies are deterministic per header.
+        seeded = self._seeded_headers.get(header)
+        if seeded is not None:
+            return seeded
         with self._header_cache_lock:
             cached = self._header_cache.get(header, _CACHE_MISS)
             if cached is not _CACHE_MISS:
@@ -317,23 +361,29 @@ class ContactMapper:
         cached as a miss, so a column the plan could not resolve statically can
         still be matched from its value by the per-row heuristics.
 
+        Seeded verdicts are held apart from the size-limited header cache and
+        are checked before it, so they survive ``header_cache_max_size=0``,
+        :meth:`clear_cache` and eviction.  Seeding the same header again
+        replaces its verdict.
+
         .. versionadded:: 2.11.0
+        .. versionchanged:: 2.14.0
+           Seeded verdicts no longer live in the evictable header cache.
         """
         with self._header_cache_lock:
             for header, match in matches.items():
                 if match.canonical == CanonicalField.UNKNOWN.value:
+                    self._seeded_headers.pop(header, None)
                     continue
-                self._header_cache[header] = match
-                self._header_cache.move_to_end(header)
-            if self._header_cache_max_size is not None:
-                while len(self._header_cache) > self._header_cache_max_size:
-                    self._header_cache.popitem(last=False)
+                self._seeded_headers[header] = match
+                self._header_cache.pop(header, None)
 
     def clear_cache(self) -> None:
         """Clear cached header-resolution verdicts.
 
         Long-lived mapper instances can call this after processing a tenant or
         import job to release header cache memory without rebuilding the mapper.
+        Verdicts seeded from a saved plan (:meth:`seed_header_cache`) are kept.
         """
         with self._header_cache_lock:
             self._header_cache.clear()
@@ -366,11 +416,16 @@ class ContactMapper:
         payload : dict
             Raw contact data to normalize.
         service : str, optional
-            Accepted for backward compatibility; ignored since v2.0.
+            Accepted for backward compatibility; ignored since v2.0.  Passing
+            it emits a :class:`DeprecationWarning`.
         depth : int, default 1
             Recursion depth for nested payloads.  ``1`` (default) processes
             only the top-level keys.  ``2`` also recurses one level into
-            nested dicts.  Maximum supported value is ``5``.
+            nested dicts.  Maximum supported value is ``5``.  Only dicts are
+            flattened: a list (including a list of dicts, the shape many
+            contact APIs return) is kept as one value.  When two keys flatten
+            to the same name (``{"a.b": 1, "a": {"b": 2}}``) the later value
+            wins and a warning is recorded.
         extract_embedded_phones : bool, default False
             When ``True``, scan all non-phone string values for embedded
             phone numbers (e.g. ``"reach me at +1-555-123-4567"``) using
@@ -402,9 +457,28 @@ class ContactMapper:
         Returns
         -------
         MappingResult
+            A canonical field holds one value, or a list only when two or
+            more columns of the payload map to it with different values;
+            ``tags`` is always a list.
+
+        A key that is not text never stops the mapping: a ``None`` key (what
+        :class:`csv.DictReader` uses for the extra cells of an over-long row)
+        is never matched and its value goes to ``unmapped`` under ``None``;
+        any other non-text key is matched on ``str(key)``.
         """
+        if service is not None:
+            _warnings.warn(
+                _service_deprecation_message("service"),
+                DeprecationWarning,
+                stacklevel=2,
+            )
         depth = max(1, min(depth, 5))
-        flat = self._flatten(payload, depth) if depth > 1 else payload
+        collisions: list[str] = []
+        flat = (
+            self._flatten(payload, depth, _collisions=collisions)
+            if depth > 1
+            else payload
+        )
         region = default_region if default_region is not None else self._default_region
         threshold = (
             confidence_threshold
@@ -418,9 +492,20 @@ class ContactMapper:
         normalized: dict[str, Any] = {}
         unmapped: dict[str, Any] = {}
         matches: list[FieldMatch] = []
-        warnings: list[str] = []
+        warnings: list[str] = [
+            MappingWarning(
+                f"{key!r}: two payload keys flatten to this name; the later "
+                "value replaced the earlier one",
+                WarningCategory.OTHER,
+            )
+            for key in collisions
+        ]
 
-        for key, value in flat.items():
+        for raw_key, value in flat.items():
+            if raw_key is None:
+                unmapped[cast("str", None)] = value
+                continue
+            key = raw_key if isinstance(raw_key, str) else str(raw_key)
             match = self._resolve(key, value, region)
 
             # Drop matches below the confidence floor (recorded, not silent).
@@ -458,10 +543,14 @@ class ContactMapper:
             )
 
         if warnings:
-            for w in warnings:
-                logger.warning("%s", w)
+            # Log and raise header + category only; the values stay on
+            # MappingResult.warnings, which goes back to the caller alone.
+            headers = [str(k) for k in flat if k is not None]
+            log_lines = [_warning_log_line(w, headers) for w in warnings]
+            for line in log_lines:
+                logger.warning("%s", line)
             if is_strict:
-                raise NormalizationError("; ".join(warnings))
+                raise NormalizationError("; ".join(log_lines))
 
         return MappingResult(
             normalized=normalized,
@@ -553,7 +642,13 @@ class ContactMapper:
                 if found_for_field >= field_limit:
                     overflow_for_field = True
                     break
-                e164 = pm.number.e164
+                number = pm.number
+                # Same shape as format_e164: an extension rides along as ";ext=".
+                e164 = (
+                    f"{number.e164};ext={number.extension}"
+                    if number.extension
+                    else number.e164
+                )
                 _merge(normalized, "phone", e164)
                 matches.append(
                     FieldMatch(
@@ -584,23 +679,41 @@ class ContactMapper:
         depth: int,
         _prefix: str = "",
         _current: int = 1,
+        *,
+        _collisions: list[str] | None = None,
     ) -> dict[str, Any]:
         """Recursively flatten nested dicts up to *depth* levels.
 
         Nested keys are joined with ``.`` (dot).  Non-dict values and
-        dicts beyond the depth limit are preserved as-is.  The dot
-        separator is consumed by :class:`NormalizedMatchStrategy`'s
-        dot-path resolution.
+        dicts beyond the depth limit are preserved as-is; lists, including
+        lists of dicts, are never flattened.  The dot separator is consumed
+        by :class:`NormalizedMatchStrategy`'s dot-path resolution.
+
+        Two keys that flatten to one name (``{"a.b": 1, "a": {"b": 2}}``)
+        keep the later value; each such name is appended to *_collisions*
+        so :meth:`map_payload` can warn instead of losing data silently.
         """
         result: dict[str, Any] = {}
+
+        def put(name: Any, item: Any) -> None:
+            if name in result and _collisions is not None:
+                _collisions.append(str(name))
+            result[name] = item
+
         for key, value in payload.items():
             full_key = f"{_prefix}{key}" if _prefix else key
             if isinstance(value, dict) and _current < depth:
-                result.update(
-                    ContactMapper._flatten(value, depth, f"{full_key}.", _current + 1)
+                nested = ContactMapper._flatten(
+                    value,
+                    depth,
+                    f"{full_key}.",
+                    _current + 1,
+                    _collisions=_collisions,
                 )
+                for nested_key, nested_value in nested.items():
+                    put(nested_key, nested_value)
             else:
-                result[full_key] = value
+                put(full_key, value)
         return result
 
     def map_batch(  # pylint: disable=unused-argument
@@ -622,8 +735,15 @@ class ContactMapper:
         only once across the whole batch rather than once per row.
 
         For very large inputs prefer :meth:`map_stream`, which yields results
-        lazily and keeps memory constant.
+        lazily and keeps memory constant.  *service* is ignored since v2.0;
+        passing it emits a :class:`DeprecationWarning`.
         """
+        if service is not None:
+            _warnings.warn(
+                _service_deprecation_message("service"),
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return list(
             self.map_stream(
                 payloads,
@@ -701,8 +821,16 @@ class ContactMapper:
         Left at ``None`` the mapper's own setting applies, so counts stay
         complete by default.
 
+        Phones found in free text by *extract_embedded_phones* are not
+        columns, so they are counted in
+        :attr:`MappingProfile.embedded_phone_count` and left out of
+        ``fields_seen``, ``matched_count`` and ``canonical_counts``.
+        ``strategy_counts["embedded_phone"]`` still counts them.
+
         .. versionchanged:: 2.11.0
            Added *normalize*.
+        .. versionchanged:: 2.14.0
+           Embedded phones are counted apart from columns.
         """
         if max_rows is not None:
             if not isinstance(max_rows, int) or isinstance(max_rows, bool):
@@ -717,6 +845,7 @@ class ContactMapper:
         rows_seen = 0
         matched_count = 0
         unmatched_count = 0
+        embedded_phone_count = 0
         iterator = iter(payloads)
 
         while max_rows is None or rows_seen < max_rows:
@@ -736,7 +865,9 @@ class ContactMapper:
             rows_seen += 1
             for match in result.field_matches:
                 strategy_counts[match.strategy] += 1
-                if match.is_matched:
+                if match.strategy == "embedded_phone":
+                    embedded_phone_count += 1
+                elif match.is_matched:
                     matched_count += 1
                     canonical_counts[match.canonical] += 1
                 else:
@@ -754,4 +885,5 @@ class ContactMapper:
             unmapped_counts=dict(unmapped_counts),
             strategy_counts=dict(strategy_counts),
             warning_counts=dict(warning_counts),
+            embedded_phone_count=embedded_phone_count,
         )

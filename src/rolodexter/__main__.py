@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import io
 import json
 import os
 import sys
@@ -57,6 +58,29 @@ MAX_SUMMARY_COLUMNS = 20
 # from 1 (the run itself failed) so a caller can tell "nothing was produced"
 # from "output written, but some rows did not make it".
 EXIT_PARTIAL = 2
+# Accepted --encoding names (case-insensitive) -> the name used in messages.
+# UTF-8 always tolerates a leading byte-order mark, as Excel writes one.
+ENCODING_NAMES = {
+    "utf-8": "utf-8",
+    "utf-8-sig": "utf-8",
+    "utf-16": "utf-16",
+    "latin-1": "latin-1",
+    "iso-8859-1": "latin-1",
+    "cp1252": "cp1252",
+    "windows-1252": "cp1252",
+}
+_PYTHON_CODECS = {
+    "utf-8": "utf-8-sig",
+    "utf-16": "utf-16",
+    "latin-1": "latin-1",
+    "cp1252": "cp1252",
+}
+DEFAULT_ENCODING = "utf-8"
+# The delimiter is sniffed from the header line inside this many characters.
+SNIFF_CHARS = 65_536
+SNIFF_DELIMITERS = (",", ";", "\t", "|")
+# Leading characters a spreadsheet may run as a formula (--csv-safe).
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 # ── I/O helpers ────────────────────────────────────────────────────────
 
@@ -95,6 +119,86 @@ class _MapStats:
             elif match.confidence < REVIEW_CONFIDENCE:
                 key = f"{match.original} -> {match.canonical}"
                 self.low_confidence[key] = self.low_confidence.get(key, 0) + 1
+
+
+@dataclass(slots=True)
+class _ReadStats:
+    """What the CSV reader had to discard, reported in the stderr summary."""
+
+    extra_cells: int = 0
+    extra_cell_rows: int = 0
+
+
+def _report_extra_cells(path: str, read_stats: _ReadStats) -> None:
+    if read_stats.extra_cells:
+        print(
+            f"warning: {read_stats.extra_cells} extra cell(s) in "
+            f"{read_stats.extra_cell_rows} row(s) of {path} had no header "
+            "column and were dropped",
+            file=sys.stderr,
+        )
+
+
+def _encoding_arg(raw: str) -> str:
+    """argparse type for --encoding: one of ENCODING_NAMES, case-insensitive."""
+    name = ENCODING_NAMES.get(raw.lower())
+    if name is None:
+        raise argparse.ArgumentTypeError(
+            f"unsupported encoding {raw!r} (choose from {', '.join(ENCODING_NAMES)})"
+        )
+    return name
+
+
+def _delimiter_arg(raw: str) -> str:
+    """argparse type for --delimiter: one character, or the word 'tab'."""
+    if raw.lower() == "tab":
+        return "\t"
+    if len(raw) != 1 or raw in '"\r\n':
+        raise argparse.ArgumentTypeError(
+            f"expected one character or 'tab', got {raw!r}"
+        )
+    return raw
+
+
+def _decode_error_message(path: str, encoding: str) -> str:
+    return (
+        f"cannot decode {path} as {encoding} text; pass --encoding with the "
+        "file's real encoding (e.g. --encoding cp1252)"
+    )
+
+
+def _sniff_delimiter(text: str) -> str:
+    """Pick the delimiter of a CSV header line.
+
+    Counts ``,``, ``;``, tab and ``|`` outside double quotes up to the first
+    line break; the most frequent wins.  None found, or a tie, means comma.
+    The JS CLI runs the identical algorithm.
+    """
+    counts = dict.fromkeys(SNIFF_DELIMITERS, 0)
+    in_quotes = False
+    for char in text:
+        if char == '"':
+            in_quotes = not in_quotes
+        elif in_quotes:
+            continue
+        elif char in "\r\n":
+            break
+        elif char in counts:
+            counts[char] += 1
+    best = max(counts.values())
+    winners = [delim for delim, count in counts.items() if count == best]
+    if best == 0 or len(winners) > 1:
+        return ","
+    return winners[0]
+
+
+def _csv_delimiter(path: str, explicit: str | None, encoding: str) -> str:
+    if explicit:
+        return explicit
+    if path.lower().endswith(".tsv"):
+        return "\t"
+    with open(path, newline="", encoding=_PYTHON_CODECS[encoding]) as fh:
+        return _sniff_delimiter(fh.read(SNIFF_CHARS))
 
 
 def _summarize_columns(label: str, counts: dict[str, int], hint: str) -> None:
@@ -171,11 +275,17 @@ def _looks_like_data_not_headers(headers: list[str], mapper: ContactMapper) -> b
 
 
 def _read_csv_rows(
-    path: str, *, mapper: ContactMapper | None = None
+    path: str,
+    *,
+    mapper: ContactMapper | None = None,
+    encoding: str = DEFAULT_ENCODING,
+    delimiter: str | None = None,
+    read_stats: _ReadStats | None = None,
 ) -> Iterator[_InputRow | _RowFailure]:
     """Yield rows from a CSV, preserving duplicate columns and flagging no-header files."""
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.reader(fh)
+    delim = _csv_delimiter(path, delimiter, encoding)
+    with open(path, newline="", encoding=_PYTHON_CODECS[encoding]) as fh:
+        reader = csv.reader(fh, delimiter=delim)
         try:
             raw_headers = next(reader)
         except StopIteration:
@@ -196,13 +306,15 @@ def _read_csv_rows(
                 file=sys.stderr,
             )
         for row_number, values in enumerate(reader, start=2):
-            row: dict[str, Any] = {}
-            for index, value in enumerate(values):
-                if index < len(headers):
-                    row[headers[index]] = value
-                # Surplus cells have no header to map; csv.DictReader used to
-                # bucket them under a None key. Dropping them is unchanged
-                # behavior, but now it is explicit.
+            if not values:
+                # A blank line is not an empty contact; the JS CLI skips it too.
+                continue
+            row: dict[str, Any] = dict(zip(headers, values, strict=False))
+            # Surplus cells have no header to map. They are dropped, but
+            # counted so the summary can say how many were lost.
+            if len(values) > len(headers) and read_stats is not None:
+                read_stats.extra_cells += len(values) - len(headers)
+                read_stats.extra_cell_rows += 1
             for name in headers[len(values) :]:
                 row[name] = ""
             yield _InputRow(reader.line_num or row_number, row)
@@ -214,12 +326,50 @@ def _read_row_items(
     *,
     max_json_bytes: int | None = DEFAULT_MAX_JSON_INPUT_BYTES,
     mapper: ContactMapper | None = None,
+    encoding: str = DEFAULT_ENCODING,
+    delimiter: str | None = None,
+    read_stats: _ReadStats | None = None,
 ) -> Iterator[_InputRow | _RowFailure]:
-    """Yield rows or row-level failures from *path* in the given *fmt*."""
+    """Yield rows or row-level failures from *path* in the given *fmt*.
+
+    Undecodable input stops the run with one message naming --encoding, never
+    a row of replacement characters.
+    """
+    try:
+        yield from _read_decoded_items(
+            path,
+            fmt,
+            max_json_bytes=max_json_bytes,
+            mapper=mapper,
+            encoding=encoding,
+            delimiter=delimiter,
+            read_stats=read_stats,
+        )
+    except UnicodeDecodeError as exc:
+        raise ValueError(_decode_error_message(path, encoding)) from exc
+
+
+def _read_decoded_items(
+    path: str,
+    fmt: str,
+    *,
+    max_json_bytes: int | None,
+    mapper: ContactMapper | None,
+    encoding: str,
+    delimiter: str | None,
+    read_stats: _ReadStats | None,
+) -> Iterator[_InputRow | _RowFailure]:
+    codec = _PYTHON_CODECS[encoding]
     if fmt == "csv":
-        yield from _read_csv_rows(path, mapper=mapper)
+        yield from _read_csv_rows(
+            path,
+            mapper=mapper,
+            encoding=encoding,
+            delimiter=delimiter,
+            read_stats=read_stats,
+        )
     elif fmt == "jsonl":
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding=codec) as fh:
             for line_number, line in enumerate(fh, start=1):
                 raw = line.strip()
                 if not raw:
@@ -246,7 +396,7 @@ def _read_row_items(
                     f"{max_json_bytes} byte materialization limit; use JSONL "
                     "for streaming input or raise --max-json-input-bytes"
                 )
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding=codec) as fh:
             data = json.load(fh)
         if isinstance(data, dict):
             yield _InputRow(1, data)
@@ -263,10 +413,25 @@ def _read_row_items(
 
 
 def _read_rows(
-    path: str, fmt: str, *, mapper: ContactMapper | None = None
+    path: str,
+    fmt: str,
+    *,
+    mapper: ContactMapper | None = None,
+    max_json_bytes: int | None = DEFAULT_MAX_JSON_INPUT_BYTES,
+    encoding: str = DEFAULT_ENCODING,
+    delimiter: str | None = None,
+    read_stats: _ReadStats | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield raw contact dicts from *path* in the given *fmt*."""
-    for item in _read_row_items(path, fmt, mapper=mapper):
+    for item in _read_row_items(
+        path,
+        fmt,
+        max_json_bytes=max_json_bytes,
+        mapper=mapper,
+        encoding=encoding,
+        delimiter=delimiter,
+        read_stats=read_stats,
+    ):
         if isinstance(item, _RowFailure):
             raise ValueError(f"row {item.row_number}: {item.error}")
         yield item.data
@@ -327,12 +492,20 @@ def _collect_normalized_rows(
     return rows
 
 
+def _csv_safe_cell(value: Any) -> Any:
+    """Prefix text a spreadsheet would run as a formula with a single quote."""
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
+
 def _write_csv(
     results: Iterable[MappingResult],
     out: IO[str],
     *,
     max_rows: int | None,
     keep_unmapped: bool = False,
+    csv_safe: bool = False,
 ) -> int:
     rows = _collect_normalized_rows(
         results,
@@ -347,10 +520,11 @@ def _write_csv(
             if key not in seen:
                 seen.add(key)
                 fieldnames.append(key)
-    writer = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
-    writer.writeheader()
+    cell = _csv_safe_cell if csv_safe else (lambda value: value)
+    writer = csv.writer(out)
+    writer.writerow([cell(name) for name in fieldnames])
     for row in rows:
-        writer.writerow({k: _scalarize(v) for k, v in row.items()})
+        writer.writerow([cell(_scalarize(row.get(name, ""))) for name in fieldnames])
     return len(rows)
 
 
@@ -410,8 +584,8 @@ def _same_path(left: str, right: str) -> bool:
     )
 
 
-class _QuarantineWriter:
-    """Opens the quarantine file on the FIRST failure, not before.
+class _LazyJsonlWriter:
+    """Opens its side file (quarantine or duplicates) on the FIRST record.
 
     The stream used to be opened up front, so a run with zero failures still
     created - and, via the atomic replace, truncated - whatever was at that
@@ -425,28 +599,15 @@ class _QuarantineWriter:
         self._out: IO[str] | None = None
         self.used = False
 
-    def write(self, failure: _RowFailure) -> None:
+    def write(self, record: dict[str, Any]) -> None:
         if self._out is None:
             self._out = self._stack.enter_context(_atomic_output(self.path))
             self.used = True
-        _write_quarantine_record(failure, self._out)
+        self._out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _write_quarantine_record(
-    failure: _RowFailure,
-    out: IO[str],
-) -> None:
-    out.write(
-        json.dumps(
-            {
-                "row": failure.row_number,
-                "error": failure.error,
-                "raw": failure.raw,
-            },
-            ensure_ascii=False,
-        )
-        + "\n"
-    )
+def _quarantine_record(failure: _RowFailure) -> dict[str, Any]:
+    return {"row": failure.row_number, "error": failure.error, "raw": failure.raw}
 
 
 def _handle_row_failure(
@@ -454,7 +615,7 @@ def _handle_row_failure(
     *,
     on_error: str,
     stats: _MapStats,
-    quarantine_out: _QuarantineWriter | None,
+    quarantine_out: _LazyJsonlWriter | None,
 ) -> None:
     if on_error == "fail":
         raise ValueError(f"row {failure.row_number}: {failure.error}")
@@ -469,7 +630,7 @@ def _handle_row_failure(
 
     if quarantine_out is None:
         raise ValueError("--on-error quarantine requires a quarantine output")
-    quarantine_out.write(failure)
+    quarantine_out.write(_quarantine_record(failure))
     print(
         f"warning: quarantined row {failure.row_number}: {failure.error}",
         file=sys.stderr,
@@ -483,10 +644,12 @@ def _map_row_items(
     extract_embedded_phones: bool,
     on_error: str,
     stats: _MapStats,
-    quarantine_out: _QuarantineWriter | None = None,
+    quarantine_out: _LazyJsonlWriter | None = None,
     dedupe: bool = False,
+    duplicates_out: _LazyJsonlWriter | None = None,
 ) -> Iterator[MappingResult]:
-    seen_keys: set[str] = set()
+    # identity key -> row number of the first row that carried it
+    seen_keys: dict[str, int] = {}
     for item in items:
         if isinstance(item, _RowFailure):
             _handle_row_failure(
@@ -505,10 +668,23 @@ def _map_row_items(
             stats.note_result(result)
             if dedupe:
                 keys = result.get_identity_keys()
-                if keys and any(key in seen_keys for key in keys):
+                key = next((k for k in keys if k in seen_keys), None)
+                if key is not None:
                     stats.duplicates += 1
+                    if duplicates_out is not None:
+                        first_row = seen_keys[key]
+                        duplicates_out.write(
+                            {
+                                "row": item.row_number,
+                                "error": f"duplicate of row {first_row}",
+                                "raw": item.data,
+                                "key": key,
+                                "first_row": first_row,
+                            }
+                        )
                     continue
-                seen_keys.update(keys)
+                for identity in keys:
+                    seen_keys.setdefault(identity, item.row_number)
             yield result
         except RolodexterError as exc:
             _handle_row_failure(
@@ -542,6 +718,27 @@ def _atomic_output(path: str) -> Iterator[IO[str]]:
         if temp_name is not None:
             with contextlib.suppress(OSError):
                 os.unlink(temp_name)
+
+
+@contextlib.contextmanager
+def _csv_stdout() -> Iterator[IO[str]]:
+    """Stdout for CSV, with no newline translation.
+
+    The csv module ends records with ``\\r\\n`` itself; text-mode stdout on
+    Windows then turned each ``\\n`` into another ``\\r\\n``, so a redirected
+    file got ``\\r\\r\\n`` and a blank line after every record.
+    """
+    sys.stdout.flush()
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # an in-memory text stream translates nothing
+        yield sys.stdout
+        return
+    wrapper = io.TextIOWrapper(buffer, encoding="utf-8", newline="")
+    try:
+        yield wrapper
+    finally:
+        wrapper.flush()
+        wrapper.detach()
 
 
 # ── Commands ───────────────────────────────────────────────────────────
@@ -599,6 +796,8 @@ def _write_schema(mapper: ContactMapper, path: str, headers: Iterable[str]) -> N
 def _cmd_map(args: argparse.Namespace) -> int:  # pylint: disable=too-many-branches
     if args.quarantine_output and args.on_error != "quarantine":
         raise ValueError("--quarantine-output requires --on-error quarantine")
+    if args.duplicates_output and not args.dedupe:
+        raise ValueError("--duplicates-output requires --dedupe")
     if args.output and _same_path(args.output, args.input):
         # Guarded because the transform is lossy in both directions: original
         # formatting is rewritten, and any column the mapper cannot place is
@@ -635,20 +834,44 @@ def _cmd_map(args: argparse.Namespace) -> int:  # pylint: disable=too-many-branc
             raise ValueError(
                 "quarantine output must differ from the mapped output path"
             )
+    duplicates_path: str | None = args.duplicates_output or None
+    if duplicates_path is not None:
+        if _same_path(duplicates_path, args.input):
+            raise ValueError("duplicates output must differ from the input path")
+        if args.output and _same_path(duplicates_path, args.output):
+            raise ValueError(
+                "duplicates output must differ from the mapped output path"
+            )
+        if quarantine_path is not None and _same_path(duplicates_path, quarantine_path):
+            raise ValueError(
+                "duplicates output must differ from the quarantine output path"
+            )
 
+    read_stats = _ReadStats()
     with contextlib.ExitStack() as stack:
-        out: IO[str] = (
-            stack.enter_context(_atomic_output(args.output))
-            if args.output
-            else sys.stdout
-        )
-        quarantine_out: _QuarantineWriter | None = None
+        out: IO[str]
+        if args.output:
+            out = stack.enter_context(_atomic_output(args.output))
+        elif out_fmt == "csv":
+            out = stack.enter_context(_csv_stdout())
+        else:
+            out = sys.stdout
+        quarantine_out: _LazyJsonlWriter | None = None
         if quarantine_path is not None:
-            quarantine_out = _QuarantineWriter(quarantine_path, stack)
+            quarantine_out = _LazyJsonlWriter(quarantine_path, stack)
+        duplicates_out: _LazyJsonlWriter | None = None
+        if duplicates_path is not None:
+            duplicates_out = _LazyJsonlWriter(duplicates_path, stack)
 
         results = _map_row_items(
             _read_row_items(
-                args.input, in_fmt, max_json_bytes=max_json_bytes, mapper=mapper
+                args.input,
+                in_fmt,
+                max_json_bytes=max_json_bytes,
+                mapper=mapper,
+                encoding=args.encoding,
+                delimiter=args.delimiter,
+                read_stats=read_stats,
             ),
             mapper,
             extract_embedded_phones=args.embedded_phones,
@@ -656,6 +879,7 @@ def _cmd_map(args: argparse.Namespace) -> int:  # pylint: disable=too-many-branc
             stats=stats,
             quarantine_out=quarantine_out,
             dedupe=args.dedupe,
+            duplicates_out=duplicates_out,
         )
 
         if out_fmt == "csv":
@@ -664,6 +888,7 @@ def _cmd_map(args: argparse.Namespace) -> int:  # pylint: disable=too-many-branc
                 out,
                 max_rows=max_materialized_rows,
                 keep_unmapped=args.keep_unmapped,
+                csv_safe=args.csv_safe,
             )
         elif out_fmt == "jsonl":
             count = _write_jsonl(results, out, keep_unmapped=args.keep_unmapped)
@@ -690,11 +915,14 @@ def _cmd_map(args: argparse.Namespace) -> int:  # pylint: disable=too-many-branc
         "review these, then pin them with --override HEADER=field or raise "
         "--min-confidence",
     )
+    _report_extra_cells(args.input, read_stats)
 
     where = args.output or "stdout"
     message = f"Mapped {count} row(s) -> {where} ({out_fmt})"
     if stats.duplicates:
         message += f"; dropped {stats.duplicates} duplicate row(s)"
+        if duplicates_path is not None:
+            message += f" -> {duplicates_path}"
     if stats.failed:
         if args.on_error == "quarantine":
             message += f"; quarantined {stats.failed} row(s) -> {quarantine_path}"
@@ -710,20 +938,28 @@ def _cmd_profile(args: argparse.Namespace) -> int:
     """Report import readiness without writing any mapped output."""
     mapper = _build_mapper(args)
     in_fmt = _detect_format(args.input, args.in_format)
-    max_json_bytes = _optional_limit(args.max_json_input_bytes)
-    rows = _read_rows(args.input, in_fmt, mapper=mapper)
+    read_stats = _ReadStats()
+    rows = _read_rows(
+        args.input,
+        in_fmt,
+        mapper=mapper,
+        max_json_bytes=_optional_limit(args.max_json_input_bytes),
+        encoding=args.encoding,
+        delimiter=args.delimiter,
+        read_stats=read_stats,
+    )
     profile = mapper.profile(
         rows,
         max_rows=_optional_limit(args.max_rows),
         extract_embedded_phones=args.embedded_phones,
         normalize=not args.no_normalize,
     )
-    del max_json_bytes
     if args.json:
         json.dump(profile.to_dict(), sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
     else:
         print(profile.explain())
+    _report_extra_cells(args.input, read_stats)
     return 0
 
 
@@ -747,6 +983,28 @@ def _cmd_fields(args: argparse.Namespace) -> int:
 
 
 # ── Entry point ────────────────────────────────────────────────────────
+
+
+def _add_text_input_arguments(parser: argparse.ArgumentParser) -> None:
+    """--encoding and --delimiter, shared by map and profile."""
+    parser.add_argument(
+        "--encoding",
+        type=_encoding_arg,
+        default=DEFAULT_ENCODING,
+        help=(
+            "Input text encoding: utf-8 (default; a byte-order mark is "
+            "skipped), utf-8-sig, utf-16, latin-1, iso-8859-1, cp1252 or "
+            "windows-1252"
+        ),
+    )
+    parser.add_argument(
+        "--delimiter",
+        type=_delimiter_arg,
+        help=(
+            "CSV input delimiter: one character, or 'tab' (default: tab for "
+            ".tsv, else detected from the header line)"
+        ),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -876,6 +1134,24 @@ def _build_parser() -> argparse.ArgumentParser:
             "identically to that run"
         ),
     )
+    p_map.add_argument(
+        "--duplicates-output",
+        dest="duplicates_output",
+        metavar="PATH",
+        help=(
+            "JSONL file for the rows --dedupe drops (created on the first duplicate)"
+        ),
+    )
+    _add_text_input_arguments(p_map)
+    p_map.add_argument(
+        "--csv-safe",
+        action="store_true",
+        dest="csv_safe",
+        help=(
+            "Prefix CSV output cells that start with =, +, -, @, tab or CR "
+            "with a single quote so spreadsheets do not run them as formulas"
+        ),
+    )
     p_map.set_defaults(func=_cmd_map)
 
     p_ex = sub.add_parser("explain", help="Show how a single header resolves")
@@ -955,6 +1231,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_JSON_INPUT_BYTES,
         help="Maximum bytes to read with non-streaming JSON input; 0 disables",
     )
+    _add_text_input_arguments(p_profile)
     p_profile.set_defaults(func=_cmd_profile)
 
     p_fields = sub.add_parser("fields", help="List all canonical fields")
@@ -979,6 +1256,10 @@ def main(argv: list[str] | None = None) -> int:
         return cast_int(args.func(args))
     except (RolodexterError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # A bug, not bad input: one clear line instead of a traceback.
+        print(f"error: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

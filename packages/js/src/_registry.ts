@@ -3,10 +3,10 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { SUPPORTED_LANGUAGES, discoverCachedLanguages, loadCachedLanguage } from "./_i18n_cache.js";
+import { SUPPORTED_LANGUAGES, discoverCachedLanguages, loadCachedLanguage, normalizeLanguageCode } from "./_i18n_cache.js";
 import { PatternLoadError, normalizeAlias } from "./_models.js";
 import type { PatternData, PatternRegistryOptions } from "./_models.js";
-import { assertPythonOptionsKeys, isPlainObject, pyRepr, pythonLiteral, pythonTypeName } from "./_pycompat.js";
+import { assertPythonOptionsKeys, emitRolodexterWarning, isPlainObject, pyRepr, pythonLiteral, pythonTypeName } from "./_pycompat.js";
 import { moduleUrl } from "./_runtime.js";
 
 function isPatternRegistryOptions(value: unknown): value is PatternRegistryOptions {
@@ -239,17 +239,40 @@ export class PatternRegistry {
       langCodes = [...iterable];
     }
 
+    const missing: string[] = [];
+    const unknown: string[] = [];
     for (const langCode of langCodes) {
-      const langData = loadCachedLanguage(langCode);
-      if (!langData) {
+      const code = normalizeLanguageCode(langCode);
+      if (code === undefined) {
+        unknown.push(String(langCode));
         continue;
       }
-      this.#loadedLanguageCodes.push(langCode);
+      const langData = loadCachedLanguage(code);
+      if (!langData) {
+        missing.push(code);
+        continue;
+      }
+      this.#loadedLanguageCodes.push(code);
       for (const [canonical, aliases] of Object.entries(langData.fields ?? {})) {
         for (const alias of aliases) {
           this.#addAlias(alias, canonical);
         }
       }
+    }
+    // Same text as _patterns.py logs (L23): a language that silently fails to
+    // load leaves localized headers unmatched with no explanation.
+    if (missing.length > 0) {
+      emitRolodexterWarning(
+        `No cached i18n aliases for ${missing.join(", ")} — these languages were NOT `
+          + "loaded. Generate them first (offline) with: "
+          + `python -m rolodexter.i18n --languages ${missing.join(",")}`,
+      );
+    }
+    if (unknown.length > 0) {
+      emitRolodexterWarning(
+        `Unsupported i18n language code(s) ${unknown.map(pyRepr).join(", ")} — ignored. `
+          + `Supported codes: ${Object.keys(SUPPORTED_LANGUAGES).sort().join(", ")}`,
+      );
     }
   }
 

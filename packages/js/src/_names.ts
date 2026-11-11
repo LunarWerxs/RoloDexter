@@ -26,7 +26,87 @@ function hasDeliberateCapital(word: string): boolean {
   return word !== word.toUpperCase() && word !== word.toLowerCase() && /\p{Lu}/u.test(word.slice(1));
 }
 
+// US states, DC and territories, then Canadian provinces and territories.
+// Owned here, not in _geo.ts, because the place casing below needs it;
+// _geo.ts imports it as its state-code table. Same set as _REGION_CODES in
+// src/rolodexter/_text.py.
+const REGION_CODES: ReadonlySet<string> = new Set([
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI",
+  "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
+  "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC",
+  "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
+  "VT", "VA", "WA", "WV", "WI", "WY", "DC", "PR", "VI", "GU", "AS",
+  "MP", "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE",
+  "QC", "SK", "YT",
+]);
+
+// Words written in capitals wherever they stand in an all-caps place value:
+// compass points, post-office and military mail words, and country
+// abbreviations. Region codes are kept upper too, but only where a region
+// code stands (see regionPosition), so "LA JOLLA" still reads "La Jolla".
+const ALWAYS_UPPER: ReadonlySet<string> = new Set([
+  "N", "S", "E", "W", "NE", "NW", "SE", "SW",
+  "PO", "APO", "FPO", "DC", "USA", "US", "UK",
+]);
+
+/** Python's `str.isupper()`: has a cased letter and no lowercase one. */
+function isAllCaps(text: string): boolean {
+  return text === text.toUpperCase() && text !== text.toLowerCase();
+}
+
+/** True where a region code stands: after a comma or before a postcode. */
+function regionPosition(words: string[], index: number): boolean {
+  if (index > 0 && (words[index - 1] ?? "").endsWith(",")) {
+    return true;
+  }
+  return index + 1 < words.length && /[0-9]/.test(words[index + 1] ?? "");
+}
+
+/** True when an all-caps place value should keep words[index] as written. */
+function keepUpperInCaps(words: string[], index: number): boolean {
+  const word = words[index] ?? "";
+  const key = word.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (/^\d+(st|nd|rd|th)$/.test(key.toLowerCase())) {
+    return false;
+  }
+  if (/[0-9]/.test(word)) {
+    return true;
+  }
+  if (ALWAYS_UPPER.has(key)) {
+    return true;
+  }
+  return REGION_CODES.has(key) && regionPosition(words, index);
+}
+
+/**
+ * Title-case a place value (address, city, state) without mangling it.
+ * Mirrors _smart_titlecase in src/rolodexter/_text.py: a value that mixes
+ * case keeps its all-caps words and words holding a digit as written ("IL",
+ * "NW", "PO", "USA", "4B"); an all-caps value is re-cased word by word except
+ * compass points, PO/APO/FPO, USA/US/UK/DC, words holding a digit, and a
+ * region code where a region code stands.
+ */
 function smartTitleCase(value: string): string {
+  const shouting = isAllCaps(value);
+  const words = pySplitSpace(value);
+  return words
+    .map((word, index) => {
+      if (hasDeliberateCapital(word)) {
+        return word;
+      }
+      if (shouting ? keepUpperInCaps(words, index) : isAllCaps(word) || /[0-9]/.test(word)) {
+        return word;
+      }
+      if (word.includes("'")) {
+        const [first = "", ...rest] = word.split("'");
+        return [titleWord(first), ...rest.map((part) => (part.length > 1 ? titleWord(part) : part.toLowerCase()))].join("'");
+      }
+      return titleWord(word);
+    })
+    .join(" ");
+}
+
+function nameTitleCase(value: string): string {
   return pySplitSpace(value)
     .map((word) => {
       // A mixed-case word with a capital after the first letter is left
@@ -148,8 +228,8 @@ const NAME_SUFFIXES = new Map([
   ["jr", "Jr"],
   ["jr.", "Jr."],
   ["md", "M.D."],
-  ["m.d.", "M.d."],
-  ["cpa", "Cpa"],
+  ["m.d.", "M.D."],
+  ["cpa", "CPA"],
   ["sr", "Sr"],
   ["sr.", "Sr."],
   ["ii", "II"],
@@ -157,10 +237,33 @@ const NAME_SUFFIXES = new Map([
   ["iv", "IV"],
   ["v", "V"],
   ["phd", "Ph.D."],
-  ["ph.d.", "Ph.d."],
+  ["ph.d.", "Ph.D."],
 ]);
 
-function nameWord(word: string, index = 0): string {
+// Names that begin "Mac"/"Mc" but are not Mac-names, so an all-caps or
+// all-lower spelling is not re-cased to "MacHado". Same list as
+// _NOT_MAC_NAMES in src/rolodexter/_normalizers.py. Real Mac-names
+// ("Macaulay", "Macdonald") stay out so the rule still applies to them.
+const NOT_MAC_NAMES: ReadonlySet<string> = new Set([
+  "macaluso", "macario", "macarena", "macchia", "macchio", "mace",
+  "maceda", "macedo", "macedonio", "macek", "macey", "macha",
+  "machado", "machen", "machiavelli", "machin", "macho", "machowski",
+  "machuca", "macias", "maciej", "maciejewski", "maciel", "mack",
+  "mackenzie", "mackey", "mackie", "mackiewicz", "mackin", "macklin",
+  "mackowiak", "macon", "macri", "macy",
+]);
+
+// nameparser's Mac/Mc shape: "mac" or "mc" and at least two more letters.
+const MAC_NAME_RE = /^(ma?c)[\p{L}\p{N}_]{2,}/iu;
+
+function capitalizeLower(lower: string): string {
+  return `${lower.slice(0, 1).toUpperCase()}${lower.slice(1)}`;
+}
+
+// `followed` is true when another name word comes after this one: a particle
+// is lowercased only inside a name ("Jean le Pen"), never as its last word
+// ("Jennifer Le", "Michael Do").
+function nameWord(word: string, index = 0, followed = false): string {
   const lower = word.toLowerCase();
   if (index > 0 && lower === "and") {
     return "and";
@@ -171,30 +274,41 @@ function nameWord(word: string, index = 0): string {
   if (NAME_SUFFIXES.has(lower)) {
     return NAME_SUFFIXES.get(lower) ?? word;
   }
-  if (index > 0 && NAME_PARTICLES.has(lower)) {
+  if (index > 0 && followed && NAME_PARTICLES.has(lower)) {
     return lower;
   }
   if (word.includes("@")) {
-    return word.split("@").map((part) => nameWord(part, index)).join("@");
+    return word.split("@").map((part) => nameWord(part, index, followed)).join("@");
   }
   // Split on the hyphen BEFORE the Mac rule, so each half is cased on its
   // own. The rule used to run first and lowercased everything after "Mac",
   // hyphen included: "MacIntyre-Smith" came back "MacIntyre-smith" while
   // Python, whose nameparser cases each word run separately, kept "Smith".
   if (word.includes("-")) {
-    return word.split("-").map((part) => nameWord(part, index)).join("-");
+    return word.split("-").map((part) => nameWord(part, index, followed)).join("-");
   }
-  // A deliberately cased Mac-name ("MacARTHUR", and "MacArthur" itself) is
-  // the source's call, the same as any other deliberate inner capital; the
-  // rule only re-cases an all-upper or all-lower one.
-  if (lower.startsWith("mac") && lower.length > 3 && !hasDeliberateCapital(word)) {
-    return `Mac${lower[3]?.toUpperCase() ?? ""}${lower.slice(4)}`;
+  // The Mac/Mc rule ("mcdonald" -> "McDonald", "MACARTHUR" -> "MacArthur")
+  // re-cases only a word that arrived without casing of its own and is not a
+  // known non-Mac name. "Machado" and "Mcdonald" as written keep the plain
+  // spelling; a deliberately cased one ("MacArthur") is the source's call.
+  const mac = MAC_NAME_RE.exec(word);
+  if (mac) {
+    const uncased = word === word.toUpperCase() || word === word.toLowerCase();
+    if (uncased && !NOT_MAC_NAMES.has(lower)) {
+      const cut = mac[1]?.length ?? 0;
+      return `${capitalizeLower(lower.slice(0, cut))}${capitalizeLower(lower.slice(cut))}`;
+    }
+    return hasDeliberateCapital(word) ? word : capitalizeLower(lower);
   }
-  return smartTitleCase(word);
+  return nameTitleCase(word);
+}
+
+function nameWords(words: string[]): string {
+  return words.map((word, index) => nameWord(word, index, index < words.length - 1)).join(" ");
 }
 
 function smartNameCase(value: string): string {
-  return pySplitSpace(value).map((word, index) => nameWord(word, index)).join(" ");
+  return nameWords(pySplitSpace(value));
 }
 
 function splitNameNickname(value: string): { text: string; nickname: string } {
@@ -220,10 +334,10 @@ function normalizeName(value: string): string {
     normalized = normalized.replace(/^The\s+Honorable\s+/, "the Honorable ");
   } else if (text.includes(",")) {
     const parsed = parseNameParts(text, "");
-    const components = [parsed.title, parsed.first, parsed.middle, parsed.last, parsed.suffix]
+    const words = [parsed.title, parsed.first, parsed.middle, parsed.last, parsed.suffix]
       .filter(Boolean)
-      .map((part, index) => pySplitSpace(part).map((word, wordIndex) => nameWord(word, index + wordIndex)).join(" "));
-    normalized = components.join(" ");
+      .flatMap((part) => pySplitSpace(part));
+    normalized = nameWords(words);
   }
   if (!nickname) {
     return normalized || value;
@@ -343,4 +457,4 @@ function parseNameParts(text: string, nickname: string): Record<string, string> 
 // File-private in index.ts; exported here only because the split put
 // their callers in another module. Not part of the package's public API -
 // ./public.ts and ./core.ts still decide that.
-export { normalizeName, parseNameParts, smartTitleCase, splitNameNickname };
+export { REGION_CODES, normalizeName, parseNameParts, smartTitleCase, splitNameNickname };

@@ -136,7 +136,7 @@ running `map` for real. It accepts the same `--region`, `--languages`,
 Every field runs through the strategy chain in priority order:
 
 1. **Exact Match**: O(1) lookup against 600+ known aliases across 62 canonical fields
-2. **Normalized Match**: handles `CamelCase`, `dot.path`, `space → underscore`, vendor and address prefixes (`hs_email`, `Billing City`), a form question's leading "Your" (`Your company name`), and similar variations
+2. **Normalized Match**: handles `CamelCase`, `dot.path`, `space → underscore`, vendor, address and contact prefixes (`hs_email`, `Billing City`, `Contact Province`), a form question's leading "Your" (`Your company name`), and similar variations
 3. **Fuzzy Match**: `rapidfuzz` catches typos like `"phne_nmbr"` → `phone`
 4. **Heuristic Match**: regex detects emails, phones, URLs, postal codes by *data shape*
 
@@ -190,6 +190,11 @@ print(result.normalized["tags"])
 # ['vip', 'newsletter', 'beta']
 ```
 
+`tags` is always a list. Any other field becomes a list only when two columns
+of one record map to it with different values (`Email` and `Work Email`, say);
+otherwise it stays a single value, so check with `isinstance` when a source
+may repeat a field.
+
 ### 🌍 On-Demand i18n (40 Languages)
 
 English ships by default. Install `rolodexter[i18n-generate]` to generate any
@@ -219,6 +224,12 @@ python -m rolodexter.i18n --languages es,fr --timeout 10 --retries 1 --workers 4
 # List supported languages
 python -m rolodexter.i18n --list
 ```
+
+Packs are cached in the per-user cache folder, or in `ROLODEXTER_CACHE_DIR`
+when that is set (both packages read the same variable). If some fields fail
+to translate, the pack is still written with them listed under
+`failed_fields`, the CLI reports `N of M fields` and exits 2, and the next run
+translates only the failed fields again.
 
 Supported: Spanish, French, German, Portuguese, Italian, Dutch, Polish, Romanian, Turkish, Russian, Japanese, Chinese (Simplified), Korean, Arabic, Hindi, Swedish, Danish, Norwegian, Finnish, Czech, Ukrainian, Greek, Hungarian, Thai, Vietnamese, Indonesian, Malay, Hebrew, Bulgarian, Croatian, Slovak, Slovenian, Serbian, Lithuanian, Latvian, Estonian, Catalan, Filipino, Swahili, Afrikaans.
 
@@ -278,8 +289,14 @@ rolodexter map huge.jsonl --format jsonl --max-materialized-rows 100000
 rolodexter map export.jsonl --strict --on-error quarantine -o clean.jsonl
 
 # Carry unmapped columns through instead of dropping them, and drop rows
-# that share an identity key (email/phone/source id) with an earlier row
-rolodexter map contacts.csv --keep-unmapped --dedupe -o clean.csv
+# that share an identity key (a real email, a full personal phone number or a
+# source id) with an earlier row; write each dropped row to a file to review
+rolodexter map contacts.csv --keep-unmapped --dedupe --duplicates-output dupes.jsonl -o clean.csv
+
+# Spreadsheet exports: a cp1252 file with semicolons (the delimiter is also
+# sniffed from the header line, and .tsv means tab), and output that a
+# spreadsheet will not run as formulas
+rolodexter map export.csv --encoding cp1252 --delimiter ";" --csv-safe -o clean.csv
 
 # Force a vendor-specific column to a canonical field
 rolodexter map contacts.csv --override "MMERGE3=full_address" -o clean.csv
@@ -422,7 +439,7 @@ FieldMatch(
 | `get_match(header)` | `FieldMatch \| None`     | O(1) lookup of the match for an input header       |
 | `get_all_phones()`  | `list[str]`              | All phone values across all phone-adjacent fields |
 | `get_all_emails()`  | `list[str]`              | All email values, flattened and deduplicated      |
-| `get_identity_keys()` | `list[str]`            | Stable email/phone/source keys for deduplication  |
+| `get_identity_keys()` | `list[str]`            | Dedupe keys: email-shaped emails, E.164 `phone`/`home_phone`/`whatsapp` (never `work_phone` or `fax`, which people share), scoped source ids |
 | `explain()`         | `str`                    | Human-readable resolution + warnings summary      |
 | `to_dict()`         | `dict`                   | Full JSON-serializable report                     |
 

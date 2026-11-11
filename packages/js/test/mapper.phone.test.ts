@@ -42,7 +42,7 @@ test("public phone helpers mirror Python phone module basics", () => {
 
   const tel = parse("tel:+1-650-253-0000;ext=123");
   assert.equal(tel?.extension, "123");
-  assert.equal(format_e164("tel:+1-650-253-0000;ext=123"), "+16502530000");
+  assert.equal(format_e164("tel:+1-650-253-0000;ext=123"), "+16502530000;ext=123"); // C4: the extension is kept
   assert.equal(format_e164("011 44 20 7946 0958"), "+442079460958");
   assert.equal(format_e164("+1-800-FLOWERS"), "+18003569377");
   assert.equal(format_e164("not a phone", "GB"), null);
@@ -56,18 +56,14 @@ test("public phone helpers mirror Python phone module basics", () => {
 });
 
 test("phone helpers mirror Python extension and match semantics", () => {
-  const local = parse("555-1212", "US")!;
-  assert.equal(local.e164, "+15551212");
-  assert.equal(local.is_possible, true);
-  assert.equal(local.is_valid, false);
-  assert.equal(format_national(local), "555-1212");
+  assert.equal(parse("555-1212", "US"), null);
   assert.equal(parse("+1 555 123 4567 ext 890")?.extension, "890");
   assert.equal(parse("+1 555 123 4567 ext. 42")?.extension, "42");
   assert.equal(parse("+44 20 7946 0958 extn 100")?.extension, "100");
   assert.equal(parse("+1 555 123 4567 extension 999")?.extension, "999");
   assert.equal(parse("+1 555 123 4567 x 55")?.extension, "55");
   assert.equal(parse("202-555-1234x9", "US")?.extension, "9");
-  assert.equal(format_e164("202-555-1234 x9", "US"), "+12025551234");
+  assert.equal(format_e164("202-555-1234 x9", "US"), "+12025551234;ext=9");
   assert.equal(parse("+1 555 123 4567 # 77")?.extension, "77");
   assert.equal(parse("+1 555 123 4567;ext=200")?.extension, "200");
 

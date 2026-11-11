@@ -1,6 +1,6 @@
-# rolodexter.MappingSchema  api-hash cc653e65
+# rolodexter.MappingSchema  api-hash b6126707
 class MappingSchema
-  constructor(matches: Record<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null | undefined): MappingSchema
+  constructor(matches: Record<string, FieldMatch> | Map<string, FieldMatch>, mapper: ContactMapper, default_region?: string | null | undefined): MappingSchema
   apply(row: Record<string, unknown>, options?: MapPayloadOptions): MappingResult
   column_map(): Record<string, string>
   readonly default_region: string | null | undefined

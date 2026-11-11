@@ -48,12 +48,14 @@ dmypy.json
 *.log
 logs/
 *.tmp
+# Scratch folders: run notes, probe temp dirs, worker briefs.
+/tmp/
+/.tmp/
 .audit_tmp/
 .env
 logo/
 # SayDeploy Credentials
 /.saydeploy/
-/.saydeploy/credentials.toml
 
 # ── Internal AI coding-agent scratch/session notes ─────────────────────
 # (audit logs, restart lists, etc. — not user-facing docs; keep out of the repo)

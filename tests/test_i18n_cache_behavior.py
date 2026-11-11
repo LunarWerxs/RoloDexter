@@ -15,6 +15,8 @@ def _use_linux_cache_env(
 ) -> None:
     monkeypatch.setattr(i18n.sys, "platform", "linux")
     monkeypatch.setenv("XDG_CACHE_HOME", str(user_cache_base))
+    # ROLODEXTER_CACHE_DIR would replace the platform folder (contract C5).
+    monkeypatch.delenv("ROLODEXTER_CACHE_DIR", raising=False)
 
 
 def test_read_only_cache_lookup_does_not_create_dirs_or_probe(

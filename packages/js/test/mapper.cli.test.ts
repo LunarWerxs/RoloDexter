@@ -145,7 +145,7 @@ test("CLI CSV parsing follows Python DictReader edge behavior", () => {
 });
 
 test("CLI CSV parsing does not depend on where file read chunks split", () => {
-  // The CSV reader streams the file in fs.createReadStream's 64 KiB chunks.
+  // The CSV reader reads the file in 64 KiB chunks (READ_CHUNK_BYTES in cli.ts).
   // Put an escaped quote ("") and a CRLF across the first two chunk
   // boundaries, so each one-character lookahead must carry into the next chunk.
   const chunk = 64 * 1024;

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--duplicates-output PATH`** on `map`, in both CLIs. With `--dedupe`,
+  every row it drops is written to PATH as one JSON line,
+  `{"row", "error": "duplicate of row N", "raw", "key", "first_row"}`, so each
+  merge can be checked. The file is created only when the first duplicate
+  turns up, and the summary line names it.
+- **`--encoding` and `--delimiter`** on `map` and `profile`, in both CLIs.
+  Encodings: `utf-8` (the default), `utf-8-sig`, `utf-16`, `latin-1` /
+  `iso-8859-1`, `cp1252` / `windows-1252`. Without `--delimiter`, a `.tsv` file
+  is read as tab-separated and any other file's header line is sniffed for
+  `,` `;` tab or `|` outside quotes (a tie means comma), so semicolon exports
+  from European spreadsheets map without a flag. A file that does not decode
+  stops with `error: cannot decode PATH as ENC text; pass --encoding with the
+  file's real encoding (e.g. --encoding cp1252)` and exit 1; the npm CLI used to
+  put replacement characters where the accented letters were, without a word.
+  A byte-order mark is accepted in CSV, JSON and JSONL input.
+- **`--csv-safe`** on `map`: a header or text cell that starts with `=`, `+`,
+  `-`, `@`, a tab or a carriage return gets a leading `'`, so a spreadsheet
+  shows contact data rather than running it as a formula. Off by default.
+- **`ROLODEXTER_CACHE_DIR`.** When it is set, both packages read and write
+  generated language packs in that folder instead of the per-user cache
+  folder. The npm package no longer looks for packs through `PYTHONPATH`.
+- **npm: `generateLanguageAsync(lang, options)`** on `rolodexter/i18n`, the
+  promise form of `generate_language`.
+- **`MappingProfile.embedded_phone_count`** (also in `to_dict()`): phones found
+  inside free-text columns, counted apart from the columns. See Changed.
+- **Language packs record the fields that failed.** When some fields fail to
+  translate, `generate_language` still writes the pack but lists them under
+  `failed_fields`, and the next call translates only those again instead of
+  serving the incomplete pack from cache. Both CLIs then print
+  `[es] Spanish: N of M fields, A aliases; K failed (...)` and exit 2.
+
 ### Changed
 
 - **A header that starts with "Your" resolves without the fuzzy layer.**
@@ -32,6 +65,212 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holds no bare `NaN` or `Infinity` goes straight to `JSON.parse`; before,
   every file was first copied one character at a time and then rebuilt,
   which on a 24 MB file took over a second and hundreds of MB of memory.
+- **Fuzzy matching is stricter: `FUZZY_LENGTH_RATIO` is 0.75 (was 0.5)** in
+  both packages, and the npm package's containment score now applies the same
+  length rule. A short alias inside a longer header no longer scores 0.85:
+  `phone_type`, `email_type`, `phone_ext`, `field_1`, `Phoneish` and `Emailish`
+  now map to nothing, and some typos (`moblie`, `replyt`, `tel_nationa`) map at
+  0.70 instead of 0.85. The npm package's table of hand-written answers for
+  misspelled headers is shorter: two special cases are gone because both
+  packages now agree without them.
+- **A `Contact` prefix is read like `Billing`.** `Contact Province`,
+  `Contact Employer` and `contact_comments` map to `state`, `company` and
+  `notes` at 0.95. They reached those fields only through the fuzzy
+  containment score that the 0.75 ratio removed, and without this
+  `Contact Province` was guessed as `phone`. `contact_email_id` still maps to
+  nothing: it names the contact's email record, not an address.
+- **`profile` counts embedded phones apart.** With `extract_embedded_phones`
+  on, phones found inside free text no longer add to `fields_seen`,
+  `matched_count` or `canonical_counts`; they are counted in
+  `embedded_phone_count`. `strategy_counts["embedded_phone"]` is unchanged.
+- **npm: `MappingSchema.matches` is a `MappingMatches` map**, not a plain
+  object: `get(header)` (null when missing), `has`, `keys`, `values`,
+  `entries`, `items`, `size` and iteration. Its JSON form is unchanged. A
+  header named `get`, `set`, `entries` or `items` used to be overwritten by
+  the plan object's own method and vanish from a saved plan. Code that read
+  `schema.matches[header]` or `Object.keys(schema.matches)` should use
+  `schema.matches.get(header)` and `[...schema.matches.keys()]`.
+- **`MappingSchema.from_dict` refuses an unknown field name**, with
+  `column 'E' names 'emial', which is not a canonical field`, instead of
+  creating a new output field from the typo. Fields from the mapper's alias
+  table and `overrides` targets are accepted.
+- **Flattening warns when two payload keys flatten to one name**
+  (`{"a.b": 1, "a": {"b": 2}}`): `'a.b': two payload keys flatten to this
+  name; the later value replaced the earlier one`. In strict mode this raises,
+  as every warning does.
+- **npm CLI:** `profile` streams rows instead of loading the whole file first,
+  the JSON size limit is checked from the file's size on disk, and
+  `--schema-out` collects headers during the main pass instead of reading the
+  input again.
+- **Faster in both packages:** `map_dataframe` cleans each distinct cell value
+  once per call, Python caches name parsing, npm fuzzy matching keeps one
+  length-sorted alias list per registry instead of copying and scanning every
+  alias on each unmatched header, and npm warning events no longer capture a
+  stack trace.
+- **One release workflow, gated on tests.** `publish.yml` runs a `verify` job
+  (ruff, mypy, pytest, the npm type check and tests, the parity probes and the
+  parity sweep) and publishes to PyPI and npm only after it passes. Before,
+  PyPI uploaded with no tests and the two registries could split on a failed
+  npm check. A manual run is allowed only from a tag. `npm-publish.yml` is
+  gone.
+- **CI tests what users install.** New legs: `pip install .` with no extras
+  plus a smoke run of the `rolodexter` command; macOS for Python 3.12 and
+  Node 24; Windows for Node 24; the built wheel installed into a fresh venv;
+  the packed npm tarball installed into an empty folder with
+  `npx rolodexter fields` run by name. The parity sweep runs in CI
+  (`npm run check:sweep`, with its 40-language section left out by the new
+  `--no-languages` flag, since that section translates over the network
+  wherever the packs are not cached), the release scripts in `scripts/` are linted and
+  type-checked, and a frozen Bun install checks that `bun.lock` matches
+  `package.json`. The JS suite runs once per job instead of up to three times,
+  and `prepack` only builds.
+- **The version check covers every version site:** `package-lock.json`, the
+  `version` field of both `patterns.json` copies, the site page and the
+  pricing page, and it runs on Python 3.10.
+- **npm: the Google Translate client is an optional peer dependency** instead
+  of an optional dependency that installed by default. Install
+  `@vitalets/google-translate-api` and `unidecode` yourself to generate
+  language packs; mapping and cached packs need neither.
+- **npm: the tarball ships `dist/src` and `dist/cjs` by directory** with test
+  files left out, instead of a hand-kept list of every built file.
+- **npm build:** `sync-patterns.mjs` finds the repo root without a `.git`
+  folder, and the copy-budget check fails when its page is missing instead of
+  passing.
+- `SECURITY.md` now says what is true: PyPI uses trusted publishing with no
+  token; npm publishes with an automation token held only in the `npm`
+  GitHub environment until npm trusted publishing is set up.
+- Python `ContactMapper` drops a `__slots__` declaration that had no effect
+  (the base class has none, so instances always had a `__dict__`).
+
+### Deprecated
+
+- **`service` and `default_service`**, ignored since 2.0, now warn:
+  `the 'service' argument is ignored since rolodexter 2.0 and will be removed
+  in a future release` (`DeprecationWarning` in Python, a `DeprecationWarning`
+  process warning in npm, once per `map_batch` / `map_stream` call rather than
+  per row).
+
+### Fixed
+
+- **Consent columns kept their meaning.** Ten consent headers (`Email
+  Consent`, `Marketing Consent`, `GDPR Consent`, ...) were aliases of
+  `email_opt_out`, so a "yes, I consent" cell came out as "opted out = true".
+  `email_consent`, `marketing_consent` and `communication_consent` now map to
+  `subscribed`; the other seven map to nothing. The yes/no cleaner now reads
+  values by field: `email_opt_out` reads `unsubscribed` and `opted_out` as
+  true, and `verified` keeps status words as text.
+- **"Type", "Label", "Kind", "Display Name" and "Ext" columns of Google and
+  Outlook exports are no longer filed as the value itself.** `E-mail 1 - Type`
+  (`Home`, `Work`) used to land on `email` beside `E-mail 1 - Value`, and
+  `E-mail 1 - Label` on `tags`. A "Group N - Property" header now falls back to
+  the bare group only for `Value`, `Address`, `Number`, `URL` and `Formatted`,
+  and a header that ends in a qualifier gets no rewritten, fuzzy or heuristic
+  match. An alias that names the qualifier still matches (`Business Type` ->
+  `industry`, `Inquiry Type` -> `subject`), and `Address 1 - PO Box` /
+  `Address 1 - Extended Address` map to `address_line1` / `address_line2`.
+- **`--dedupe` and `get_identity_keys()` no longer merge different people.**
+  An `email:` key needs an email-shaped value, and a `phone:` key needs a full
+  E.164 number (extension dropped) from `phone`, `home_phone` or `whatsapp`.
+  `work_phone` and `fax` no longer make keys, so colleagues sharing an office
+  line or a company fax stay separate rows, and a filler value such as `N/A`
+  in the email column no longer makes every such row a duplicate.
+- **Address and state cleaning keeps correct text.** `IL`, `NW`, `PO`, `USA`,
+  `4B`, `NSW`, `QLD` and `D.C.` stay as written in mixed-case addresses, and in
+  all-caps text compass points, unit numbers and US/Canadian region codes after
+  a comma stay upper while the rest is title-cased (`1 OAK CT` -> `1 Oak Ct`,
+  `LA JOLLA, CA 92037` -> `La Jolla, CA 92037`). A 2-3 letter all-caps state
+  is left as written.
+- **npm: `npx rolodexter` and `rolodexter-i18n` run on macOS and Linux.** npm
+  installs them as symlinks, and the entry check compared the link's path with
+  the module's real path, so the commands exited without doing anything. Both
+  paths are now resolved first.
+- **npm: `generate_language()` generates again**, under ESM and from
+  `require()`. Its helper process imported a module that did not export the
+  generator (broken in 2.12.0 and 2.13.0).
+- **Name cleaning leaves ordinary names alone.** `Machado`, `Macias` and
+  `Mackenzie` are no longer re-cased to `MacHado` and so on: the Mac/Mc rule
+  applies only to a name that arrived all upper or all lower and is not on a
+  34-name list kept the same in both packages. npm: `Jennifer Le` keeps `Le`,
+  and `CPA`, `M.D.` and `Ph.D.` are cased as written.
+- **Phone numbers that start with `011` or `00` are read in the given region
+  first.** With a region set, both packages parse the number in that region
+  before treating a leading `011` / `00` as a dial-out prefix, so Johannesburg
+  `011 234 5678` (ZA) becomes `+27112345678`, Delhi `011 2345 6789` (IN)
+  `+911123456789`, and Australia's own dial-out `0011 61 2 9999 0000` (AU)
+  `+61299990000`. Before, all three were left unnormalized. Without a region
+  the dial-out rewrite is unchanged (`011 44 20 7946 0958` ->
+  `+442079460958`).
+- **A 7-digit local number is no longer turned into a fake E.164 number.**
+  `555-1234` with region US used to become `+15551234`, which is not dialable,
+  raised no warning and gave two people in different area codes one identity
+  key. Only numbers possible as a full national number are formatted now; a
+  local-only number is kept as written and gets the usual phone warning.
+- **Phone extensions are kept.** `+1 415 555 0100 x123` becomes
+  `+14155550100;ext=123` (RFC 3966 style) instead of silently dropping `123`,
+  in mapped values and in phones found inside free text.
+- **Phones and postcodes that arrive as numbers are cleaned as digits.**
+  `4155550100` (a JSON or spreadsheet number) with region US becomes
+  `+14155550100`, and a numeric postcode `94107` becomes `"94107"`, in both
+  packages. Other non-text phone values (a float with a fraction, a yes/no, a
+  dict) get the phone warning; empty cells (None, NaN, pandas NA) do not.
+- **npm CLI: CSV output writes `True` / `False`** for yes/no fields, as Python
+  does, instead of `1` and an empty cell.
+- **npm CLI: a saved plan (`--schema-out`) and `profile --json` write
+  `confidence` and `match_rate` as `1.0` / `0.0`**, as Python does, instead of
+  `1` / `0`.
+- **CSV written to a redirected stdout on Windows has `\r\n` line ends**, not
+  `\r\r\n`, in both CLIs, and a newline inside a cell is no longer rewritten.
+- **A `None` or other non-text payload key no longer crashes `map_payload`.**
+  `csv.DictReader` puts the extra cells of an over-long row under `None`; that
+  value now goes to `unmapped[None]`, and any other non-text key is matched on
+  its text.
+- **A saved mapping plan survives the header cache.** Verdicts loaded with
+  `from_dict` / `--schema-in` used to live in the LRU cache, so
+  `header_cache_max_size=0`, `clear_cache()` or eviction silently dropped them
+  and the mapper guessed again. They now have their own store.
+- **Very long headers no longer stall matching.** A header over 200
+  characters skips the rewrite and fuzzy layers (the exact lookup still runs);
+  a 50,000-character key resolves at once.
+- **npm: non-ASCII headers are read as Python reads them.** Letters and
+  digits of any script are kept when a header is normalized, so `Teléfono
+  Móvil` and `Straße` match the same aliases in both packages.
+- **Language pack generation:** Python's translation timeout is now enforced
+  (each call runs with a deadline instead of passing `timeout=` to a client
+  that ignored it), and npm's synchronous generation has an overall time
+  limit. `--retranslate-fields` rejects unknown field names with a usage
+  error, and Python's `--dry-run` works without `deep-translator`. The npm
+  package now warns about a missing, unknown or corrupt language pack, with
+  Python's wording.
+- **CLI:** `profile --max-json-input-bytes` is applied (both CLIs ignored it);
+  a blank CSV line is skipped in both CLIs (Python counted it as an empty
+  contact); extra cells in an over-long CSV row are counted in a warning;
+  `--keep-unmapped` keeps a column named `__proto__` in npm; an unexpected
+  error prints one `error: internal error: <Type>: <message>` line and exits 1,
+  and npm with `--on-error skip` no longer skips every row on an internal bug.
+- **Countries:** `U.K.` gives `GB`, as `UK` does, and a two-letter value is
+  taken as a country code only if it is one of the 249 ISO 3166-1 codes
+  (`ZZ` stays `ZZ`).
+- **Timestamps keep their time.** `created_at`, `updated_at` and
+  `last_contacted` keep time and zone (`2024-3-5 9:30+0530` ->
+  `2024-03-05T09:30+05:30`), and a day the month does not have (`2024-02-31`)
+  is left unchanged instead of accepted.
+- **`map_dataframe` reports every value warning**, ambiguous dates included,
+  not only phone and email warnings.
+- `patterns.json` says version `2.13.0` (it said `2.10.0`), and the version
+  check now covers it.
+- **A name value is never emptied.** On nameparser 2.x, Python turned a name
+  cell holding no name (a lone `\`, a quote, a zero-width space, a byte-order
+  mark) into `""`; it now keeps the value as written, as nameparser 1.x and
+  the npm package do.
+- **npm:** a warning that quotes an infinite or NaN number writes `inf`,
+  `-inf` or `nan`, as Python's `repr()` does (it wrote `Infinity`).
+
+### Security
+
+- **Log lines, warning events and `NormalizationError` messages no longer
+  contain contact values.** They name the header and the warning's category
+  (`'Mobile': invalid_phone`); the full text stays in `result.warnings`, which
+  the caller owns.
 
 ## [2.13.0] - 2026-09-27
 

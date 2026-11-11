@@ -2,7 +2,7 @@
 // Extracted verbatim from index.ts, which re-exports every public name here.
 
 import { pyCollapseSpace, pyStrip } from "./_pycompat.js";
-import { smartTitleCase } from "./_names.js";
+import { REGION_CODES, smartTitleCase } from "./_names.js";
 
 // The three tables below are prototype-free, and that is load-bearing rather
 // than stylistic.  They are indexed with contact data, and a plain object
@@ -163,18 +163,47 @@ const COUNTRY_NAMES: Record<string, string> = Object.assign(Object.create(null) 
   "wales": "GB",
 });
 
+// Every officially assigned ISO 3166-1 alpha-2 code (249). A two-letter value
+// is read as a country code only when it is one of these, so "UK" (a name in
+// COUNTRY_NAMES) and "ZZ" are not taken for codes. Same list as
+// CountryNormalizer._ALPHA2 in src/rolodexter/_geo.py.
+const COUNTRY_ALPHA2: ReadonlySet<string> = new Set([
+  "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT",
+  "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI",
+  "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY",
+  "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN",
+  "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM",
+  "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK",
+  "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL",
+  "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM",
+  "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR",
+  "IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN",
+  "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS",
+  "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK",
+  "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW",
+  "MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP",
+  "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM",
+  "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW",
+  "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM",
+  "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF",
+  "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW",
+  "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+  "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+]);
+
 function normalizeCountry(value: string): string {
   const text = pyCollapseSpace(pyStrip(value));
   if (!text) {
     return value;
   }
   const lowered = text.toLowerCase();
-  const named = COUNTRY_NAMES[lowered];
+  const stripped = lowered.replace(/\./g, "");
+  // "U.K." reads as "UK" does: the dotless form is looked up too.
+  const named = COUNTRY_NAMES[lowered] ?? COUNTRY_NAMES[stripped];
   if (named !== undefined) {
     return named;
   }
-  const stripped = lowered.replace(/\./g, "");
-  if (stripped.length === 2 && /^[a-z]+$/.test(stripped)) {
+  if (COUNTRY_ALPHA2.has(stripped.toUpperCase())) {
     return stripped.toUpperCase();
   }
   const alpha3 = COUNTRY_ALPHA3[stripped];
@@ -183,78 +212,6 @@ function normalizeCountry(value: string): string {
   }
   return text;
 }
-
-const STATE_CODES = new Set([
-  "AB",
-  "AK",
-  "AL",
-  "AR",
-  "AS",
-  "AZ",
-  "BC",
-  "CA",
-  "CO",
-  "CT",
-  "DC",
-  "DE",
-  "FL",
-  "GA",
-  "GU",
-  "HI",
-  "IA",
-  "ID",
-  "IL",
-  "IN",
-  "KS",
-  "KY",
-  "LA",
-  "MA",
-  "MB",
-  "MD",
-  "ME",
-  "MI",
-  "MN",
-  "MO",
-  "MP",
-  "MS",
-  "MT",
-  "NB",
-  "NC",
-  "ND",
-  "NE",
-  "NH",
-  "NJ",
-  "NL",
-  "NM",
-  "NS",
-  "NT",
-  "NU",
-  "NV",
-  "NY",
-  "OH",
-  "OK",
-  "ON",
-  "OR",
-  "PA",
-  "PE",
-  "PR",
-  "QC",
-  "RI",
-  "SC",
-  "SD",
-  "SK",
-  "TN",
-  "TX",
-  "UT",
-  "VA",
-  "VI",
-  "VT",
-  "WA",
-  "WI",
-  "WV",
-  "WY",
-  "YT",
-]);
 
 const STATE_NAMES: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   "alabama": "AL",
@@ -334,8 +291,13 @@ function normalizeState(value: string): string {
   if (named !== undefined) {
     return named;
   }
-  if (STATE_CODES.has(text.toUpperCase())) {
+  if (REGION_CODES.has(text.toUpperCase())) {
     return text.toUpperCase();
+  }
+  // A region code from elsewhere written in capitals ("NSW", "QLD", "NRW",
+  // "SP") is already right; title-casing it would damage it.
+  if (/^[A-Z]{2,3}$/.test(text)) {
+    return text;
   }
   return smartTitleCase(text);
 }
